@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------
+# Secrets — never commit real API keys.
+# Copy Secrets.example.plist to Secrets.plist and fill it in locally.
+# ---------------------------------------------------------------
+Secrets.plist
+HiddenJams/Secrets.plist
+*.xcconfig
+!Example.xcconfig
+.env
+.env.*
+
+# ---------------------------------------------------------------
+# Xcode
+# ---------------------------------------------------------------
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode per-user scheme / workspace state
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+*.perspectivev3
+*.mode1v3
+*.mode2v3
+*.pbxuser
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# CocoaPods / Carthage (unused today, ignored for safety)
+Pods/
+Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Provisioning / signing — these are per-developer and often sensitive
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.certSigningRequest
+
+# ---------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+__MACOSX/
