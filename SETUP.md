@@ -17,8 +17,9 @@ error rather than failing with an opaque HTTP 401.
 cp Secrets.example.plist HiddenJams/Secrets.plist
 ```
 
-Fill in your keys, then add the file to the app target in Xcode:
-select `Secrets.plist` → File Inspector → check **HiddenJams** under *Target Membership*.
+Fill in your keys. The Xcode project uses synchronized folders, so anything
+placed inside `HiddenJams/` is picked up automatically — no target-membership
+step needed. `Secrets.plist` is git-ignored.
 
 | Key            | Where to get it                                  | Required?                       |
 | -------------- | ------------------------------------------------ | ------------------------------- |

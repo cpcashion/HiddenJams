@@ -190,57 +190,19 @@ class AIProfileAnalyzer: ObservableObject {
     
     // MARK: - Audio Analysis
     
+    /// Audio features are no longer available from Spotify.
+    ///
+    /// The `/audio-features` endpoint (energy, danceability, valence, tempo…)
+    /// was withdrawn on 27 November 2024 for apps without prior extended
+    /// access, and there is no replacement in the Web API. It previously
+    /// failed inside a `do/catch` here, which meant profiles quietly came back
+    /// with every value at zero and nothing indicated why.
+    ///
+    /// Taste profiling now runs on genre and artist signals, which are still
+    /// fully available. `AudioFeatureProfile.isAvailable` lets the UI hide
+    /// these dimensions rather than render a row of zeroes.
     private func fetchAndCalculateAudioFeatures(for tracks: [SpotifyTrack], token: String) async -> AudioFeatureProfile {
-        // Take a sample of 100 tracks (50 recent + 50 random)
-        let recent = tracks.prefix(50)
-        let random = tracks.dropFirst(50).shuffled().prefix(50)
-        let sampleTracks = Array(recent) + Array(random)
-        
-        let ids = sampleTracks.map { $0.id }
-        guard !ids.isEmpty else { return AudioFeatureProfile() }
-        
-        print("📊 Fetching audio features for \(ids.count) tracks...")
-        
-        do {
-            let featuresList = try await apiService.getAudioFeatures(trackIds: ids, token: token)
-            
-            // Average them out
-            var energy = 0.0
-            var danceability = 0.0
-            var valence = 0.0
-            var acousticness = 0.0
-            var instrumentalness = 0.0
-            var tempo = 0.0
-            var loudness = 0.0
-            
-            let count = Double(featuresList.count)
-            guard count > 0 else { return AudioFeatureProfile() }
-            
-            for feature in featuresList {
-                energy += feature.energy
-                danceability += feature.danceability
-                valence += feature.valence
-                acousticness += feature.acousticness
-                instrumentalness += feature.instrumentalness
-                tempo += feature.tempo
-                loudness += feature.loudness
-            }
-            
-            print("✅ Calculated Audio Profile: Energy \(energy/count)")
-            
-            return AudioFeatureProfile(
-                energy: energy / count,
-                danceability: danceability / count,
-                valence: valence / count,
-                acousticness: acousticness / count,
-                instrumentalness: instrumentalness / count,
-                loudness: loudness / count,
-                tempo: tempo / count
-            )
-        } catch {
-            print("❌ Failed to fetch audio features: \(error)")
-            return AudioFeatureProfile()
-        }
+        return AudioFeatureProfile()
     }
     
 

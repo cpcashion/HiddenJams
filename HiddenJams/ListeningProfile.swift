@@ -85,6 +85,19 @@ struct AudioFeatureProfile: Codable {
     var tempo: Double
     var loudness: Double
     
+    /// Whether these numbers came from real data.
+    ///
+    /// Spotify withdrew `/audio-features` in November 2024, so on current
+    /// builds nothing populates these fields and they hold placeholder
+    /// midpoints. Optional (rather than a plain `Bool`) so profiles persisted
+    /// by older versions still decode — a missing key reads as nil.
+    var featuresAvailable: Bool?
+
+    /// True only when the values reflect real measurements. The UI should hide
+    /// audio-feature dimensions when this is false rather than present 0.5s as
+    /// though they meant something.
+    var isAvailable: Bool { featuresAvailable ?? false }
+
     // Ranges for variability
     var acousticnessRange: ClosedRange<Double>?
     var danceabilityRange: ClosedRange<Double>?
@@ -101,6 +114,7 @@ struct AudioFeatureProfile: Codable {
         self.valence = 0.5
         self.tempo = 120.0
         self.loudness = -5.0
+        self.featuresAvailable = false
     }
     
     init(energy: Double, danceability: Double, valence: Double, acousticness: Double, instrumentalness: Double, loudness: Double, tempo: Double) {
@@ -114,6 +128,7 @@ struct AudioFeatureProfile: Codable {
         
         self.liveness = 0.5
         self.speechiness = 0.5
+        self.featuresAvailable = true
         self.acousticnessRange = nil
         self.danceabilityRange = nil
         self.energyRange = nil
@@ -123,6 +138,7 @@ struct AudioFeatureProfile: Codable {
     enum CodingKeys: String, CodingKey {
         case acousticness, danceability, energy, instrumentalness
         case liveness, speechiness, valence, tempo, loudness
+        case featuresAvailable
     }
 }
 

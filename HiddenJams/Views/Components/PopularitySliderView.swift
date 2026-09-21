@@ -21,14 +21,22 @@ struct PopularitySliderView: View {
     var body: some View {
         VStack(spacing: 12) {
             // Level indicator
-            HStack {
-                Text(settings.levelDescription)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Theme.Colors.gemGold)
-                
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settings.levelDescription)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.Colors.gemGold)
+
+                    Text(settings.levelSubtitle)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundColor(.gray)
+                }
+
                 Spacer()
-                
-                Text("Popularity ≤ \(settings.popularityThreshold)")
+
+                // Followers, not "plays" — Spotify exposes no play counts, so
+                // this is the real quantity being filtered on.
+                Text("under \(settings.thresholdDescription)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.gray)
             }

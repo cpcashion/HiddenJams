@@ -111,46 +111,10 @@ class ProfileDataService: ObservableObject {
         }
     }
     
+    /// Returns nil — Spotify withdrew `/audio-features` in November 2024.
+    /// See `AIProfileAnalyzer.fetchAndCalculateAudioFeatures` for the details.
     private func fetchAudioFeatures(for tracks: [SpotifyTrack], token: String) async -> AudioFeatureProfile? {
-        // Sample up to 50 tracks for audio features
-        let sampleTracks = Array(tracks.prefix(50))
-        let trackIds = sampleTracks.map { $0.id }
-        
-        guard !trackIds.isEmpty else { return nil }
-        
-        do {
-            let features = try await apiService.getAudioFeatures(trackIds: trackIds, token: token)
-            guard !features.isEmpty else { return nil }
-            
-            // Average all features
-            var energy = 0.0, danceability = 0.0, valence = 0.0
-            var acousticness = 0.0, instrumentalness = 0.0
-            var tempo = 0.0, loudness = 0.0
-            
-            for feature in features {
-                energy += feature.energy
-                danceability += feature.danceability
-                valence += feature.valence
-                acousticness += feature.acousticness
-                instrumentalness += feature.instrumentalness
-                tempo += feature.tempo
-                loudness += feature.loudness
-            }
-            
-            let count = Double(features.count)
-            return AudioFeatureProfile(
-                energy: energy / count,
-                danceability: danceability / count,
-                valence: valence / count,
-                acousticness: acousticness / count,
-                instrumentalness: instrumentalness / count,
-                loudness: loudness / count,
-                tempo: tempo / count
-            )
-        } catch {
-            print("⚠️ Failed to fetch audio features: \(error)")
-            return nil
-        }
+        return nil
     }
     
     private func calculateTopGenres(from artists: [SpotifyArtist]) -> [(name: String, count: Int)] {

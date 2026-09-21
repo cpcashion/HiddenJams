@@ -111,68 +111,6 @@ class SpotifyAPIService: ObservableObject {
         return uniqueTracks
     }
     
-    // MARK: - Audio Features
-    
-    // Cache for audio features to avoid redundant API calls
-    private var audioFeaturesCache: [String: AudioFeatures] = [:]
-    
-    func getAudioFeatures(trackIds: [String], token: String) async throws -> [AudioFeatures] {
-        // IMPORTANT: Audio features are OPTIONAL - if API fails, return empty to not block discovery
-        do {
-            var features: [AudioFeatures] = []
-            var uncachedIds: [String] = []
-            
-            // Check cache first
-            for id in trackIds {
-                if let cached = audioFeaturesCache[id] {
-                    features.append(cached)
-                } else {
-                    uncachedIds.append(id)
-                }
-            }
-            
-            if uncachedIds.isEmpty {
-                print("✅ All \(trackIds.count) audio features loaded from cache")
-                return features
-            }
-            
-            print("📊 Fetching audio features for \(uncachedIds.count) tracks (\(audioFeaturesCache.count) cached)...")
-            
-            // Spotify allows up to 100 IDs per request
-            // We'll use 50 to be safe and consistent with other batch operations
-            let batchSize = 50
-            for batch in uncachedIds.chunked(into: batchSize) {
-                let idsString = batch.joined(separator: ",")
-                let url = URL(string: "\(baseURL)/audio-features?ids=\(idsString)")!
-                
-                // Use the batch response struct
-                let response: AudioFeaturesResponse = try await makeRequest(url: url, token: token)
-                
-                for (index, feature) in response.audioFeatures.enumerated() {
-                    if let feature = feature {
-                        features.append(feature)
-                        // Cache it
-                        audioFeaturesCache[feature.id] = feature
-                    } else {
-                        print("⚠️ Audio features missing for track ID: \(batch[index])")
-                    }
-                }
-                
-                // Small delay between batches
-                if batch != uncachedIds.chunked(into: batchSize).last {
-                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-                }
-            }
-            
-            print("✅ Retrieved \(features.count) audio features")
-            return features
-        } catch {
-            print("⚠️ Failed to fetch audio features: \(error) - continuing without them")
-            return []
-        }
-    }
-
-    
     // MARK: - Search API (Discovery)
     
     func searchTracks(
@@ -207,39 +145,6 @@ class SpotifyAPIService: ObservableObject {
         return response.tracks.items
     }
     
-    // MARK: - Recommendations API
-    
-    /// Get track recommendations based on seed genres
-    /// This API supports genres like "drum-and-bass" that don't work in search
-    func getRecommendations(
-        seedGenres: [String],
-        limit: Int = 50,
-        market: String? = nil,
-        token: String
-    ) async throws -> [SpotifyTrack] {
-        var components = URLComponents(string: "\(baseURL)/recommendations")!
-        
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "seed_genres", value: seedGenres.joined(separator: ",")),
-            URLQueryItem(name: "limit", value: "\(min(limit, 100))")  // Max 100
-        ]
-        
-        if let market = market {
-            queryItems.append(URLQueryItem(name: "market", value: market))
-        }
-        
-        components.queryItems = queryItems
-        
-        guard let url = components.url else {
-            throw APIError.invalidResponse
-        }
-        
-        print("🎵 Fetching recommendations for genres: \(seedGenres.joined(separator: ", "))")
-        let response: RecommendationsResponse = try await makeRequest(url: url, token: token)
-        print("✅ Got \(response.tracks.count) recommendations")
-        return response.tracks
-    }
-    
     // MARK: - Cross-Reference Search Methods
     
     /// Search for an artist by name (for cross-referencing with external APIs)
@@ -259,6 +164,74 @@ class SpotifyAPIService: ObservableObject {
         return response.artists.items
     }
     
+    /// Search artists with full control over query, paging and market.
+    ///
+    /// This is the backbone of artist-first discovery. Unlike track search, the
+    /// artist objects returned here carry `followers.total` and `popularity`
+    /// directly, which is what the obscurity slider filters on — no extra
+    /// round-trip needed.
+    ///
+    /// Useful query modifiers:
+    ///   - `genre:"drum and bass"` — restrict to a genre
+    ///   - `tag:hipster`           — Spotify's own "lowest 10% popularity" filter
+    ///   - `tag:new`               — released in the last two weeks
+    func searchArtists(
+        query: String,
+        limit: Int = 50,
+        offset: Int = 0,
+        market: String? = nil,
+        token: String
+    ) async throws -> [SpotifyArtist] {
+        var components = URLComponents(string: "\(baseURL)/search")!
+
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "type", value: "artist"),
+            URLQueryItem(name: "limit", value: "\(min(limit, 50))"),
+            // Spotify rejects offsets beyond 1000 on search.
+            URLQueryItem(name: "offset", value: "\(min(offset, 950))")
+        ]
+
+        if let market = market {
+            queryItems.append(URLQueryItem(name: "market", value: market))
+        }
+
+        components.queryItems = queryItems
+
+        guard let url = components.url else {
+            throw APIError.invalidResponse
+        }
+
+        let response: ArtistSearchResponse = try await makeRequest(url: url, token: token)
+        return response.artists.items
+    }
+
+    /// Fetch full track objects in batches of 50.
+    ///
+    /// Replaces per-track `/tracks/{id}` calls: 100 tracks costs 2 requests
+    /// instead of 100.
+    func getTracks(ids: [String], market: String? = nil, token: String) async throws -> [SpotifyTrack] {
+        guard !ids.isEmpty else { return [] }
+
+        var allTracks: [SpotifyTrack] = []
+
+        for chunk in ids.chunked(into: 50) {
+            var components = URLComponents(string: "\(baseURL)/tracks")!
+            var queryItems = [URLQueryItem(name: "ids", value: chunk.joined(separator: ","))]
+            if let market = market {
+                queryItems.append(URLQueryItem(name: "market", value: market))
+            }
+            components.queryItems = queryItems
+
+            guard let url = components.url else { continue }
+
+            let response: MultipleTracksResponse = try await makeRequest(url: url, token: token)
+            allTracks.append(contentsOf: response.tracks.compactMap { $0 })
+        }
+
+        return allTracks
+    }
+
     /// Search for a track by name and artist (for cross-referencing with external APIs)
     func searchTrack(name: String, artist: String, token: String) async throws -> [SpotifyTrack] {
         let query = "track:\(name) artist:\(artist)"
@@ -309,6 +282,18 @@ class SpotifyAPIService: ObservableObject {
         }
     }
     
+    // MARK: - Removed Spotify Endpoints
+    //
+    // Spotify retired these on 27 November 2024 for every app that did not
+    // already hold extended API access. They returned 403/404 for this app, so
+    // the wrappers have been removed rather than left to fail silently:
+    //
+    //   /audio-features            → no replacement; see TasteProfileGenerator
+    //   /recommendations           → replaced by artist search + Last.fm
+    //   /artists/{id}/related-artists → replaced by Last.fm artist.getsimilar
+    //
+    // See ArtistFirstDiscovery for what took their place.
+
     // MARK: - Artist Top Tracks
     
     func getArtistTopTracks(
@@ -386,11 +371,7 @@ class SpotifyAPIService: ObservableObject {
     
     // MARK: - Related Artists
     
-    func getRelatedArtists(artistId: String, token: String) async throws -> [SpotifyArtist] {
-        let url = URL(string: "\(baseURL)/artists/\(artistId)/related-artists")!
-        let response: RelatedArtistsResponse = try await makeRequest(url: url, token: token)
-        return response.artists
-    }
+
     
     // MARK: - Artist Details (with follower count)
     
@@ -571,6 +552,11 @@ class SpotifyAPIService: ObservableObject {
 }
 
 // MARK: - Supporting Types
+
+/// `/v1/tracks?ids=` — entries are nullable when an id is unplayable in the market.
+struct MultipleTracksResponse: Codable {
+    let tracks: [SpotifyTrack?]
+}
 
 private struct AudioFeaturesResponse: Codable {
     let audioFeatures: [AudioFeatures?]

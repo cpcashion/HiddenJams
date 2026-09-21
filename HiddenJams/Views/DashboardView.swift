@@ -308,7 +308,8 @@ struct DashboardView: View {
                     token: token,
                     count: 50,
                     popularityOverride: popularitySettings.popularityThreshold,
-                    followerOverride: popularitySettings.followerThreshold
+                    followerOverride: popularitySettings.followerThreshold,
+                    obscurityLevel: popularitySettings.popularityLevel
                 )
                 
                 if !discoveryEngine.discoveredGems.isEmpty {
