@@ -1,0 +1,126 @@
+name: Release to TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Archive and upload
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+
+      - name: Write Secrets.plist from repo secrets
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LASTFM_API_KEY:-}" ]; then echo "LASTFM_API_KEY secret is not set"; exit 1; fi
+          python3 - <<'EOF'
+          import os, plistlib
+          secrets = {
+              "LastFmAPIKey": os.environ["LASTFM_API_KEY"],
+              "OpenAIAPIKey": os.environ.get("OPENAI_API_KEY", ""),
+          }
+          with open("HiddenJams/Secrets.plist", "wb") as f:
+              plistlib.dump(secrets, f)
+          print("Wrote HiddenJams/Secrets.plist")
+          EOF
+
+      - name: Install signing certificate
+        env:
+          CERT_B64: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/dist.p12"
+          echo "$CERT_B64" | base64 --decode > "$CERT_PATH"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" "$(security list-keychains -d user | tr -d '"')"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+      - name: Install provisioning profile
+        env:
+          PROFILE_B64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROFILE_B64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/release.mobileprovision
+
+      - name: Archive
+        run: |
+          set -euo pipefail
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin \
+            <<< "$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/release.mobileprovision)")
+          xcodebuild archive \
+            -project HiddenJams.xcodeproj \
+            -scheme HiddenJams \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/HiddenJams.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            DEVELOPMENT_TEAM=3CQEKUP494
+
+      - name: Export IPA
+        run: |
+          cat > "$RUNNER_TEMP/exportOptions.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>3CQEKUP494</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/HiddenJams.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/exportOptions.plist"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane -N
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json, os
+          key = {
+              "key_id": os.environ["ASC_KEY_ID"],
+              "issuer_id": os.environ["ASC_ISSUER_ID"],
+              "key": os.environ["ASC_PRIVATE_KEY"],
+              "in_house": False,
+          }
+          path = os.path.expandvars("$RUNNER_TEMP/asc_key.json")
+          with open(path, "w") as f:
+              json.dump(key, f)
+          print("Wrote API key JSON")
+          EOF
+          IPA=$(ls "$RUNNER_TEMP/export"/*.ipa | head -1)
+          echo "Uploading $IPA"
+          fastlane pilot upload \
+            --api_key_path "$RUNNER_TEMP/asc_key.json" \
+            --ipa "$IPA" \
+            --skip_waiting_for_build_processing true
