@@ -551,7 +551,7 @@ struct ProfileView: View {
                     .foregroundColor(.white.opacity(0.4))
             }
             ForEach(savedGems.savedTracks.prefix(10)) { track in
-                trackRow(rank: 0, track)
+                trackRow(rank: 0, track: track)
             }
         }
     }
