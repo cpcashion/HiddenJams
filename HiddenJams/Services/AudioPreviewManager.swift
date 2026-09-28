@@ -2,7 +2,9 @@
 //  AudioPreviewManager.swift
 //  HiddenJams
 //
-//  Manages 30-second audio preview playback
+//  Manages 30-second audio preview playback.
+//  Resilient queue playback: tracks with missing/unplayable preview URLs
+//  are automatically skipped so playback never dead-stops mid-queue.
 //
 
 import Foundation
@@ -18,20 +20,29 @@ class AudioPreviewManager: ObservableObject {
     @Published var hasPreview: Bool = false
     @Published var currentTime: Double = 0.0
     @Published var duration: Double = 30.0
-    
+
     // Legacy support alias
     var playlist: [RecommendedTrack] { queue }
-    
+
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
-    
+    private var failObserver: NSObjectProtocol?
+    private var statusObservation: NSKeyValueObservation?
+    private var interruptionObserver: NSObjectProtocol?
+    private var wasPlayingBeforeInterruption = false
+
+    /// Counts consecutive unplayable tracks; reset once a track actually
+    /// becomes ready. Prevents infinite skip loops when every URL is dead.
+    private var consecutiveFailures = 0
+
     init() {
         configureAudioSession()
+        setupInterruptionHandling()
     }
-    
+
     // MARK: - Audio Session Configuration
-    
+
     private func configureAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
@@ -42,46 +53,192 @@ class AudioPreviewManager: ObservableObject {
             print("❌ Failed to configure audio session: \(error.localizedDescription)")
         }
     }
-    
+
+    private func setupInterruptionHandling() {
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            self?.handleInterruption(note)
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let typeRaw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
+        switch type {
+        case .began:
+            wasPlayingBeforeInterruption = isPlaying
+            pause()
+            print("⏸️ Audio interrupted (call/notification)")
+        case .ended:
+            if let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let opts = AVAudioSession.InterruptionOptions(rawValue: optRaw)
+                if opts.contains(.shouldResume) && wasPlayingBeforeInterruption {
+                    print("▶️ Resuming after interruption")
+                    resume()
+                }
+            }
+            wasPlayingBeforeInterruption = false
+        @unknown default:
+            break
+        }
+    }
+
+    // MARK: - Queue Management
+
     func loadQueue(_ tracks: [RecommendedTrack], autoPlay: Bool = true) {
         queue = tracks
         currentIndex = 0
+        consecutiveFailures = 0
         if autoPlay && !queue.isEmpty {
             playTrackAtIndex(0)
         }
     }
-    
-    func playTrackAtIndex(_ index: Int) {
-        guard index >= 0 && index < queue.count else { return }
-        
-        let track = queue[index]
-        currentIndex = index
-        currentTrack = track
-        
-        stop() // Stops current player and observers
-        
-        if let previewUrl = track.track.previewUrl, !previewUrl.isEmpty {
-             hasPreview = true
-             playPreview(url: previewUrl, trackId: track.id)
-        } else {
-             hasPreview = false
-             print("⚠️ No preview URL for \(track.track.name)")
-             // Do not autoplay next immediately? Or show card?
-             // EnhancedAudioPlayer showed card but didn't play.
-             // We'll set isPlaying = false
-             isPlaying = false
+
+    /// Nearest index >= `index` whose track has a usable preview URL.
+    /// Returns nil when nothing from `index` to the end of the queue is playable.
+    private func nextPlayableIndex(from index: Int) -> Int? {
+        var i = index
+        while i < queue.count {
+            let track = queue[i]
+            if let urlString = track.track.previewUrl,
+               !urlString.isEmpty,
+               URL(string: urlString) != nil {
+                return i
+            }
+            i += 1
         }
+        return nil
     }
-    
+
+    func playTrackAtIndex(_ index: Int) {
+        guard !queue.isEmpty else { return }
+        guard index < queue.count else {
+            print("📭 No more tracks in playlist")
+            stop()
+            return
+        }
+
+        // Skip tracks with missing/unusable preview URLs instead of dead-stopping.
+        guard let playableIndex = nextPlayableIndex(from: max(index, 0)) else {
+            print("📭 No playable tracks remaining in queue")
+            stop()
+            return
+        }
+        if playableIndex != index {
+            print("⏭️ Skipping track(s) with no preview URL")
+        }
+
+        let track = queue[playableIndex]
+        currentIndex = playableIndex
+        currentTrack = track
+        hasPreview = true
+
+        startPlayback(urlString: track.track.previewUrl!, trackId: track.id)
+    }
+
+    /// Starts playback of a preview URL, or skips forward on failure.
+    private func startPlayback(urlString: String, trackId: String) {
+        // Tapping the currently-loaded track just resumes (don't restart it).
+        if currentTrackId == trackId, player?.currentItem != nil {
+            player?.play()
+            isPlaying = true
+            return
+        }
+
+        teardownPlayer()
+
+        guard let previewURL = URL(string: urlString) else {
+            print("⚠️ Malformed preview URL, skipping")
+            skipAfterFailure()
+            return
+        }
+
+        let playerItem = AVPlayerItem(url: previewURL)
+        player = AVPlayer(playerItem: playerItem)
+        currentTrackId = trackId
+
+        // Time observer for progress UI
+        let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            self?.currentTime = time.seconds
+        }
+
+        // Natural end of the 30s preview -> advance
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleTrackEnded()
+        }
+
+        // Playback error mid-stream (e.g. 403 on an expired Deezer URL) -> skip
+        failObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            if let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                print("⚠️ Preview failed mid-stream: \(err.localizedDescription)")
+            }
+            self?.skipAfterFailure()
+        }
+
+        // Item failed to load at all (404/expired signed URL) -> skip.
+        // A loaded item resets the failure counter.
+        statusObservation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+            switch item.status {
+            case .readyToPlay:
+                self?.consecutiveFailures = 0
+            case .failed:
+                print("⚠️ Preview URL failed to load: \(item.error?.localizedDescription ?? "unknown error")")
+                self?.skipAfterFailure()
+            case .unknown:
+                break
+            @unknown default:
+                break
+            }
+        }
+
+        player?.play()
+        isPlaying = true
+        print("▶️ Playing: \(currentTrack?.track.name ?? "?") (\(currentIndex + 1)/\(queue.count))")
+    }
+
+    /// Advances past an unplayable track. Gives up gracefully if the whole
+    /// queue is dead instead of looping forever.
+    private func skipAfterFailure() {
+        consecutiveFailures += 1
+        if consecutiveFailures > queue.count {
+            print("📭 Too many consecutive playback failures, stopping")
+            consecutiveFailures = 0
+            stop()
+            return
+        }
+        // Hop to the next playable track after the one that just failed.
+        playTrackAtIndex(currentIndex + 1)
+    }
+
+    private func handleTrackEnded() {
+        print("✅ Track ended, auto-advancing...")
+        consecutiveFailures = 0
+        playNext()
+    }
+
     func playNext() {
         let nextIndex = currentIndex + 1
         if nextIndex < queue.count {
             playTrackAtIndex(nextIndex)
         } else {
+            print("🎉 Playlist complete!")
             stop()
         }
     }
-    
+
     func playPrevious() {
         if currentTime > 3.0 {
             player?.seek(to: .zero)
@@ -93,94 +250,96 @@ class AudioPreviewManager: ObservableObject {
             }
         }
     }
-    
+
     func seek(to time: Double) {
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         player?.seek(to: cmTime)
         currentTime = time
     }
-    
+
     func playTrack(_ track: RecommendedTrack) {
         if let index = queue.firstIndex(where: { $0.id == track.id }) {
             playTrackAtIndex(index)
         } else {
-            // If not in queue, just play it standalone?
-            // Or add to queue? Let's treat it as standalone for now or replace queue.
-            // For safety, replace queue with single track
+            // Not in queue: replace queue with this single track
             loadQueue([track])
         }
     }
-    
+
+    /// Direct single-preview playback (used by track cards). Routes through
+    /// the queue machinery so end-of-track advance and state stay consistent.
     func playPreview(url: String, trackId: String) {
-        if currentTrackId != trackId {
-             stop()
+        guard !url.isEmpty, URL(string: url) != nil else {
+            print("⚠️ No playable preview URL for track \(trackId)")
+            return
         }
-        
-        guard let previewURL = URL(string: url) else { return }
-        
-        // Create player
-        let playerItem = AVPlayerItem(url: previewURL)
-        player = AVPlayer(playerItem: playerItem)
-        currentTrackId = trackId
-        
-        // Add time observer
-        let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-             self?.currentTime = time.seconds
+        if let index = queue.firstIndex(where: { $0.id == trackId }) {
+            playTrackAtIndex(index)
+        } else {
+            // Not part of the current queue: just resume if it's the
+            // current track, otherwise start it standalone.
+            startPlayback(urlString: url, trackId: trackId)
         }
-        
-        // End observer
-        endObserver = NotificationCenter.default.addObserver(
-             forName: .AVPlayerItemDidPlayToEndTime,
-             object: playerItem,
-             queue: .main
-        ) { [weak self] _ in
-             self?.playNext()
-        }
-        
-        player?.play()
-        isPlaying = true
     }
-    
+
     func pause() {
         player?.pause()
         isPlaying = false
     }
-    
+
     func resume() {
+        if player == nil, currentTrack != nil {
+            // Player was torn down (e.g. after queue end) - restart the track.
+            playTrackAtIndex(currentIndex)
+            return
+        }
         player?.play()
         isPlaying = true
     }
-    
+
     func togglePlayPause() {
         if isPlaying { pause() } else { resume() }
     }
-    
-    func stop() {
-        player?.pause()
-        player = nil
-        isPlaying = false
-        // Do not clear currentTrack/currentIndex here, just stop playback?
-        // If we clear currentTrack, the miniplayer disappears.
-        // So just stop audio.
-        currentTime = 0.0
-        
+
+    /// Tears down the AVPlayer and all of its observers. Observers are
+    /// removed BEFORE the player is released (removing after nil-ing the
+    /// player silently leaks the time observer).
+    private func teardownPlayer() {
         if let observer = timeObserver {
             player?.removeTimeObserver(observer)
             timeObserver = nil
         }
-        
+
         if let observer = endObserver {
             NotificationCenter.default.removeObserver(observer)
             endObserver = nil
         }
+
+        if let observer = failObserver {
+            NotificationCenter.default.removeObserver(observer)
+            failObserver = nil
+        }
+
+        statusObservation?.invalidate()
+        statusObservation = nil
+
+        player?.pause()
+        player = nil
+        currentTime = 0.0
     }
-    
-    @objc private func playerDidFinish() {
-        playNext()
+
+    func stop() {
+        teardownPlayer()
+        isPlaying = false
+        currentTrackId = nil
+        // NOTE: currentTrack/currentIndex are intentionally kept so the
+        // player UI still shows the last card instead of vanishing.
     }
-    
+
     deinit {
-        stop()
+        teardownPlayer()
+        if let observer = interruptionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 }

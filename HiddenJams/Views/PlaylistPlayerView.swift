@@ -94,9 +94,12 @@ struct PlaylistPlayerView: View {
                 audioPlayer.loadQueue(recommendations)
             }
         }
-        .onChange(of: recommendations.count) { newCount in
-            print("🔄 Recommendations count changed to \(newCount), reloading queue...")
-            audioPlayer.loadQueue(recommendations)
+        .onChange(of: recommendations.map(\.id)) { newIDs in
+            let currentIDs = audioPlayer.queue.map { $0.id }
+            if currentIDs != newIDs {
+                print("🔄 Recommendations changed, reloading queue...")
+                audioPlayer.loadQueue(recommendations)
+            }
         }
     }
     
