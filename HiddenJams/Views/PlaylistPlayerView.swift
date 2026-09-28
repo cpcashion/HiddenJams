@@ -207,23 +207,24 @@ struct PlaylistPlayerView: View {
             // Track Info - ONLY show for current card to prevent overlap
             if isCurrentCard {
                 VStack(spacing: 6) {
-                    // Tappable song title - opens track in Spotify
+                    // Tappable song title - opens track in Spotify (or Apple Music page for Apple tracks)
                     Text(track.track.name)
                         .font(Theme.Typography.title)
                         .foregroundColor(Theme.Colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
                         .onTapGesture {
-                            openSpotifyTrack(id: track.id)
+                            openTrackLink(track.track)
                         }
-                    
+
                     // Tappable artist name - opens first artist in Spotify
                     Text(track.track.artistNames)
                         .font(Theme.Typography.body)
                         .foregroundColor(Theme.Colors.textSecondary)
                         .lineLimit(1)
                         .onTapGesture {
-                            if let firstArtist = track.track.artists.first {
+                            if track.track.isSpotifyOrigin,
+                               let firstArtist = track.track.artists.first {
                                 openSpotifyArtist(id: firstArtist.id)
                             }
                         }
@@ -600,7 +601,17 @@ struct PlaylistPlayerView: View {
     }
     
     // MARK: - Spotify Deep Links
-    
+
+    private func openTrackLink(_ track: SpotifyTrack) {
+        if track.isSpotifyOrigin {
+            openSpotifyTrack(id: track.id)
+        } else if let url = URL(string: track.uri),
+                  url.scheme?.hasPrefix("http") == true {
+            // Apple Music / iTunes candidates link out to their store page
+            UIApplication.shared.open(url)
+        }
+    }
+
     private func openSpotifyTrack(id: String) {
         // Try Spotify app deep link first, falls back to web
         let spotifyAppURL = URL(string: "spotify:track:\(id)")

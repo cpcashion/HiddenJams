@@ -9,11 +9,16 @@ import SwiftUI
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
+    @EnvironmentObject var appleMusicService: AppleMusicService
+    @EnvironmentObject var sourceManager: MusicSourceManager
+    @EnvironmentObject var profileAnalyzer: AIProfileAnalyzer
     @StateObject private var profileDataService = ProfileDataService()
+    @StateObject private var savedGems = SavedGemsStore.shared
     @EnvironmentObject var audioManager: AudioPreviewManager
-    
+
     @State private var selectedTimeRange: TimeRange = .longTerm
     @State private var hasLoadedData = false
+    @State private var isConnectingAppleMusic = false
     
     var body: some View {
         ZStack {
@@ -25,14 +30,22 @@ struct ProfileView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
                         headerSection
-                        statsSection
-                        recentlyPlayedSection
-                        topTracksSection
-                        topArtistsSection
-                        if profileDataService.stats.hasRealAudioFeatures {
-                            audioProfileSection
+                        musicSourcesSection
+                        if !savedGems.savedTracks.isEmpty {
+                            savedGemsSection
                         }
-                        genresSection
+                        if authManager.isAuthenticated {
+                            statsSection
+                            recentlyPlayedSection
+                            topTracksSection
+                            topArtistsSection
+                            if profileDataService.stats.hasRealAudioFeatures {
+                                audioProfileSection
+                            }
+                            genresSection
+                        } else if sourceManager.appleMusicConnected {
+                            appleMusicSummarySection
+                        }
                         logoutSection
                         Spacer(minLength: 100)
                     }
@@ -426,11 +439,13 @@ struct ProfileView: View {
                 .padding(.vertical, 8)
             
             Button(action: {
-                authManager.logout()
+                for source in sourceManager.connectedSources {
+                    sourceManager.disconnect(source)
+                }
             }) {
                 HStack {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
-                    Text("Log Out")
+                    Text("Disconnect All")
                 }
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.red.opacity(0.9))
@@ -443,8 +458,141 @@ struct ProfileView: View {
         .padding(.top, 16)
     }
     
+    // MARK: - Music Sources
+
+    private var musicSourcesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Music Sources")
+
+            sourceRow(
+                icon: "music.note.list",
+                name: "Spotify",
+                connected: sourceManager.spotifyConnected,
+                connect: { authManager.startAuth() },
+                disconnect: { sourceManager.disconnect(.spotify) }
+            )
+
+            sourceRow(
+                icon: "apple.logo",
+                name: "Apple Music",
+                connected: sourceManager.appleMusicConnected,
+                connect: { connectAppleMusic() },
+                disconnect: { sourceManager.disconnect(.appleMusic) }
+            )
+
+            if sourceManager.connectedSources.count == 2 {
+                Text("Blending both libraries for analysis")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+        }
+    }
+
+    private func sourceRow(icon: String, name: String, connected: Bool, connect: @escaping () -> Void, disconnect: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(connected ? .green : .white.opacity(0.4))
+                .frame(width: 28)
+            Text(name)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.white)
+            Spacer()
+            if connected {
+                Text("Connected")
+                    .font(.system(size: 12))
+                    .foregroundColor(.green)
+                Button("Disconnect") { disconnect() }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.red.opacity(0.9))
+                    .padding(.leading, 8)
+            } else {
+                Button("Connect") { connect() }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .disabled(isConnectingAppleMusic)
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(12)
+    }
+
+    private func connectAppleMusic() {
+        isConnectingAppleMusic = true
+        Task {
+            let authorized = await appleMusicService.requestAuthorization()
+            await MainActor.run {
+                isConnectingAppleMusic = false
+                if authorized {
+                    sourceManager.refresh()
+                }
+            }
+            if authorized {
+                // Analyze the newly connected library
+                await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: authManager.accessToken)
+            }
+        }
+    }
+
+    // MARK: - Saved Gems (in-app collection)
+
+    private var savedGemsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                sectionHeader("My Saved Gems")
+                Spacer()
+                Text("\(savedGems.savedTracks.count)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            ForEach(savedGems.savedTracks.prefix(10)) { track in
+                trackRow(rank: 0, track)
+            }
+        }
+    }
+
+    // MARK: - Apple Music Summary (from analyzed profile)
+
+    private var appleMusicSummarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Your Taste")
+            if profileAnalyzer.profile.topArtists.isEmpty {
+                Text("Analyze your Apple Music library from the Home tab to see your taste profile.")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.5))
+            } else {
+                ForEach(Array(profileAnalyzer.profile.topArtists.prefix(5).enumerated()), id: \.element.id) { index, artist in
+                    HStack {
+                        Text("\(index + 1)")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .frame(width: 24)
+                        Text(artist.name)
+                            .font(.system(size: 15))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Text("\(artist.frequency) plays")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+                if !profileAnalyzer.profile.genreWeights.isEmpty {
+                    Text("Top genres: " + profileAnalyzer.profile.genreWeights.sorted { $0.value > $1.value }.prefix(5).map { $0.key }.joined(separator: ", "))
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.5))
+                        .padding(.top, 4)
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
-    
+
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .semibold))

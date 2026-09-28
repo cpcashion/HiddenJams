@@ -182,8 +182,8 @@ struct DashboardView: View {
             
             Button(action: {
                 Task {
-                    guard let token = authManager.accessToken else { return }
-                    await profileAnalyzer.analyzeCompleteLibrary(token: token)
+                    // Analyzes Spotify, Apple Music, or both — whichever is connected
+                    await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: authManager.accessToken)
                 }
             }) {
                 Text("Start Analysis")
@@ -298,14 +298,17 @@ struct DashboardView: View {
     private var discoverButton: some View {
         Button(action: {
             Task {
-                guard let token = authManager.accessToken else { return }
-                
+                let token = authManager.accessToken
+                // Apple Music-only users seed discovery from their library tracks
+                let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+
                 await discoveryEngine.discoverHiddenGems(
                     profile: profileAnalyzer.profile,
                     userTracks: profileAnalyzer.userLibraryTracks.map { $0.id },
                     userLibrary: profileAnalyzer.userLibraryTracks,
                     selectedGenres: selectedGenres.isEmpty ? nil : selectedGenres,
                     token: token,
+                    appleMusicSeeds: appleSeeds,
                     count: 50,
                     popularityOverride: popularitySettings.popularityThreshold,
                     followerOverride: popularitySettings.followerThreshold

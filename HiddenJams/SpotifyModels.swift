@@ -35,6 +35,14 @@ struct SpotifyTrack: Codable, Identifiable {
     
     var id: String { spotifyId ?? UUID().uuidString }
     
+    /// True when this track carries a real Spotify ID (not a namespaced
+    /// internal ID like "itunes:..." or "applemusic:..."). Only Spotify-origin
+    /// tracks can be looked up in / opened via the Spotify API.
+    var isSpotifyOrigin: Bool {
+        guard let spotifyId else { return false }
+        return !spotifyId.contains(":")
+    }
+    
     enum CodingKeys: String, CodingKey {
         case spotifyId = "id"
         case name, artists, album, popularity, uri

@@ -177,7 +177,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         userTracks: [String],
         userLibrary: [SpotifyTrack],
         selectedGenres: Set<String>? = nil, // NEW: Strict Genre Filter
-        token: String,
+        token: String? = nil, // nil when the user connected Apple Music only
+        appleMusicSeeds: [LibraryTrack] = [], // user's Apple Music library (seed for Last.fm branch)
         count: Int = 25,
         appendResults: Bool = false,  // NEW: Append to existing gems instead of replacing
         popularityOverride: Int? = nil,  // User-controlled popularity threshold from slider
@@ -246,65 +247,78 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🧠 AI Explanations: Comparing to \(userLibrary.count) tracks in your library")
             
             var allCandidates: [SpotifyTrack] = []
-            
-            // BRANCH A: Recommendations API (NEW - works for drum-and-bass!)
-            await updateProgress("Fetching recommendations...")
-            let recommendationCandidates = try await discoverViaRecommendations(
-                activeGenres: activeGenres,
-                token: token
-            )
-            print("✅ Recommendations API: Found \(recommendationCandidates.count) candidates")
-            allCandidates.append(contentsOf: recommendationCandidates)
-            
-            // BRANCH B: Search API (existing, with electronic fallback)
-            await updateProgress("Searching Spotify (Main Genres)...")
-            let genreCandidates = try await discoverViaSpotifyHipster(
-                profile: profile,
-                activeGenres: activeGenres,
-                token: token
-            )
-            print("✅ Genre searches: Found \(genreCandidates.count) candidates")
-            allCandidates.append(contentsOf: genreCandidates)
-            
-            // FALLBACK: If drum and bass or related genres return 0 results, search electronic instead
-            // Spotify's /search endpoint doesn't support all genre seeds!
-            if genreCandidates.isEmpty {
-                let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
-                let activeGenresSet = Set(activeGenres)
-                if !activeGenresSet.isDisjoint(with: dnbGenres) {
-                    print("⚠️ No results for DnB genres, falling back to 'electronic' search")
-                    let fallbackCandidates = try await discoverViaSpotifyHipster(
-                        profile: profile,
-                        activeGenres: ["electronic"],
-                        token: token
-                    )
-                    print("✅ Fallback electronic search: Found \(fallbackCandidates.count) candidates")
-                    allCandidates.append(contentsOf: fallbackCandidates)
-                }
-            }
-            
-            // BRANCH C: Artist-Based Discovery (NEW - for drum and bass!)
-            if let firstGenre = activeGenres.first {
-                await updateProgress("Discovering via related artists...")
-                let artistCandidates = try await discoverViaKnownArtists(
-                    genre: firstGenre,
-                    token: token
+
+            if let spotifyToken = token {
+                // BRANCH A: Recommendations API (NEW - works for drum-and-bass!)
+                await updateProgress("Fetching recommendations...")
+                let recommendationCandidates = try await discoverViaRecommendations(
+                    activeGenres: activeGenres,
+                    token: spotifyToken
                 )
-                print("✅ Artist-based discovery: Found \(artistCandidates.count) candidates")
-                allCandidates.append(contentsOf: artistCandidates)
+                print("✅ Recommendations API: Found \(recommendationCandidates.count) candidates")
+                allCandidates.append(contentsOf: recommendationCandidates)
+
+                // BRANCH B: Search API (existing, with electronic fallback)
+                await updateProgress("Searching Spotify (Main Genres)...")
+                let genreCandidates = try await discoverViaSpotifyHipster(
+                    profile: profile,
+                    activeGenres: activeGenres,
+                    token: spotifyToken
+                )
+                print("✅ Genre searches: Found \(genreCandidates.count) candidates")
+                allCandidates.append(contentsOf: genreCandidates)
+
+                // FALLBACK: If drum and bass or related genres return 0 results, search electronic instead
+                // Spotify's /search endpoint doesn't support all genre seeds!
+                if genreCandidates.isEmpty {
+                    let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
+                    let activeGenresSet = Set(activeGenres)
+                    if !activeGenresSet.isDisjoint(with: dnbGenres) {
+                        print("⚠️ No results for DnB genres, falling back to 'electronic' search")
+                        let fallbackCandidates = try await discoverViaSpotifyHipster(
+                            profile: profile,
+                            activeGenres: ["electronic"],
+                            token: spotifyToken
+                        )
+                        print("✅ Fallback electronic search: Found \(fallbackCandidates.count) candidates")
+                        allCandidates.append(contentsOf: fallbackCandidates)
+                    }
+                }
+
+                // BRANCH C: Artist-Based Discovery (NEW - for drum and bass!)
+                if let firstGenre = activeGenres.first {
+                    await updateProgress("Discovering via related artists...")
+                    let artistCandidates = try await discoverViaKnownArtists(
+                        genre: firstGenre,
+                        token: spotifyToken
+                    )
+                    print("✅ Artist-based discovery: Found \(artistCandidates.count) candidates")
+                    allCandidates.append(contentsOf: artistCandidates)
+                }
+
+                // BRANCH D: Micro-Genre Discovery
+                await updateProgress("Searching Micro-Genres (Deep Dive)...")
+                let microCandidates = try await discoverViaMicroGenres(
+                    profile: profile,
+                    activeGenres: activeGenres,
+                    token: spotifyToken,
+                    limit: 100 // Increased from default to ensure volume
+                )
+                print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
+                allCandidates.append(contentsOf: microCandidates)
+            } else {
+                // BRANCH E: Apple Music discovery (no Spotify token).
+                // Last.fm finds similar tracks, Last.fm listener counts filter for
+                // obscurity, and iTunes provides playable previews + artwork.
+                await updateProgress("Finding similar artists...")
+                let appleCandidates = try await discoverViaLastFmAppleMusic(
+                    profile: profile,
+                    seedTracks: appleMusicSeeds
+                )
+                print("✅ Apple Music discovery: Found \(appleCandidates.count) candidates")
+                allCandidates.append(contentsOf: appleCandidates)
             }
-            
-            // BRANCH D: Micro-Genre Discovery
-            await updateProgress("Searching Micro-Genres (Deep Dive)...")
-            let microCandidates = try await discoverViaMicroGenres(
-                profile: profile, 
-                activeGenres: activeGenres, 
-                token: token,
-                limit: 100 // Increased from default to ensure volume
-            )
-            print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
-            allCandidates.append(contentsOf: microCandidates)
-            
+
             // Remove duplicates
             allCandidates = deduplicateTracks(allCandidates)
             print("📦 Total unique candidates: \(allCandidates.count)")
@@ -525,6 +539,112 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
         
         return candidates
+    }
+    
+    // MARK: - Branch E: Apple Music Discovery (no Spotify token)
+
+    /// Candidate discovery for Apple Music-only users.
+    /// Last.fm finds tracks similar to the user's library, Last.fm listener
+    /// counts provide the obscurity signal (replacing Spotify popularity /
+    /// followers), and the iTunes Search API resolves playable 30s previews
+    /// plus artwork. Candidates are synthesized into the SpotifyTrack shape so
+    /// the rest of the pipeline (filters, scoring, playback) works unchanged.
+    private func discoverViaLastFmAppleMusic(
+        profile: ListeningProfile,
+        seedTracks: [LibraryTrack],
+        maxCandidates: Int = 120
+    ) async throws -> [SpotifyTrack] {
+        let itunesService = ItunesPreviewService()
+
+        // Don't recommend songs the user already has (cross-source, by name)
+        let knownKeys = Set(seedTracks.map { $0.dedupeKey })
+
+        // Seed with one representative track per distinct artist (most recent first)
+        var seenSeedArtists = Set<String>()
+        var seedPairs: [(track: String, artist: String)] = []
+        for seed in seedTracks {
+            let key = seed.artistName.lowercased()
+            if seenSeedArtists.insert(key).inserted {
+                seedPairs.append((seed.title, seed.artistName))
+            }
+            if seedPairs.count >= 8 { break }
+        }
+        guard !seedPairs.isEmpty else {
+            print("⚠️ No Apple Music seed tracks for discovery")
+            return []
+        }
+
+        // 1. Gather similar tracks from Last.fm
+        struct SimilarCandidate {
+            let name: String
+            let artist: String
+            let match: Double
+        }
+        var similar: [SimilarCandidate] = []
+        for (index, seed) in seedPairs.enumerated() {
+            await updateProgress("Finding sounds like \(seed.artist) (\(index + 1))/\(seedPairs.count))...")
+            do {
+                let results = try await lastFmService.getSimilarTracks(
+                    trackName: seed.track,
+                    artistName: seed.artist,
+                    limit: 10
+                )
+                for result in results {
+                    similar.append(SimilarCandidate(
+                        name: result.name,
+                        artist: result.artist.name,
+                        match: result.matchScore
+                    ))
+                }
+            } catch {
+                print("⚠️ Last.fm similar-tracks failed for \(seed.artist): \(error)")
+            }
+        }
+
+        // 2. Best matches first; one candidate per artist
+        var seenArtists = Set<String>()
+        var candidates: [SpotifyTrack] = []
+        for candidate in similar.sorted(by: { $0.match > $1.match }) {
+            guard candidates.count < maxCandidates else { break }
+            let artistKey = candidate.artist.lowercased()
+            guard seenArtists.insert(artistKey).inserted else { continue }
+
+            // Skip anything already in the user's library
+            let key = LibraryTrack.normalize(candidate.name) + " " + LibraryTrack.normalize(candidate.artist)
+            guard !knownKeys.contains(key) else { continue }
+
+            do {
+                // 3. Obscurity check via Last.fm listeners (replaces Spotify followers)
+                let info = try await lastFmService.getArtistInfo(name: candidate.artist)
+                guard info.listeners < 100_000 else {
+                    print("   ⏭️ Skipping \(candidate.artist) (\(info.listeners) listeners — too popular)")
+                    continue
+                }
+
+                // 4. Resolve playable preview + artwork via iTunes
+                guard let itunes = await itunesService.searchTrack(name: candidate.name, artist: candidate.artist),
+                      let preview = itunes.previewUrl else {
+                    continue
+                }
+
+                let popularity = Self.pseudoPopularity(listeners: info.listeners)
+                candidates.append(itunes.toSpotifyTrack(previewURL: preview, popularity: popularity))
+                await updateProgress("Found gem: \(candidate.name) (\(candidates.count))")
+            } catch {
+                print("⚠️ Candidate check failed for \(candidate.artist) - \(candidate.name): \(error)")
+            }
+        }
+
+        print("🍏 Apple Music discovery produced \(candidates.count) candidates")
+        return candidates
+    }
+
+    /// Map Last.fm listener counts onto Spotify's 0-100 popularity scale so
+    /// downstream filters and scoring keep working. ~1k listeners ≈ 25
+    /// (passes the default <30 "hidden gem" threshold); 100k ≈ 42.
+    private static func pseudoPopularity(listeners: Int) -> Int {
+        let value = (25.0 / 3.0) * log10(Double(max(listeners, 1)) + 1.0)
+        return min(100, max(0, Int(value)))
     }
     
     // MARK: - Simple Genre-Based Discovery (WORKS!)
@@ -784,7 +904,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     
     // MARK: - Check Preview URLs (Fast)
     
-    private func enrichTracksWithDetails(tracks: [SpotifyTrack], token: String) async throws -> [SpotifyTrack] {
+    private func enrichTracksWithDetails(tracks: [SpotifyTrack], token: String? = nil) async throws -> [SpotifyTrack] {
         var enrichedTracks: [SpotifyTrack] = []
         let totalTracks = tracks.count
         var checkedCount = 0
@@ -803,6 +923,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             await withTaskGroup(of: SpotifyTrack?.self) { group in
                 for track in batch {
                     group.addTask {
+                        // Apple Music candidates already carry iTunes previews —
+                        // no Spotify lookup possible (or needed) for them.
+                        // isSpotifyOrigin is false for namespaced internal IDs.
+                        guard track.isSpotifyOrigin, let token = token else {
+                            return track
+                        }
                         do {
                             // 1. Try Spotify first (with market param)
                             let url = URL(string: "https://api.spotify.com/v1/tracks/\(track.id)?market=from_token")!
@@ -887,7 +1013,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // MARK: - Filtering
     
     // Fast filtering - NOW INCLUDES BATCH ARTIST CHECK & DEEP SCAN
-    private func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String) async throws -> [SpotifyTrack] {
+    private func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil) async throws -> [SpotifyTrack] {
         // Strict Mode Flag - DISABLED for DnB mode!
         // In DnB mode, we want to allow tracks from neurofunk, liquid funk, etc without strict validation
         let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty) && !self.isDnBMode
@@ -1017,27 +1143,38 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let artistIdList = Array(artistIds)
         
         // Batch fetch artists (50 at a time) and store FULL objects
+        // (Spotify only — Apple Music candidates carry their artist info inline)
         var artistMap: [String: SpotifyArtist] = [:]
-        
-        for chunk in artistIdList.chunked(into: 50) {
-            do {
-                let artists = try await spotifyAPI.getArtists(ids: chunk, token: token)
-                for artist in artists {
-                    artistMap[artist.id] = artist
+
+        if let token = token {
+            for chunk in artistIdList.chunked(into: 50) {
+                do {
+                    let artists = try await spotifyAPI.getArtists(ids: chunk, token: token)
+                    for artist in artists {
+                        artistMap[artist.id] = artist
+                    }
+                    // Small delay to be nice to API
+                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                } catch {
+                    print("⚠️ Failed to fetch artist batch: \(error)")
                 }
-                // Small delay to be nice to API
-                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-            } catch {
-                print("⚠️ Failed to fetch artist batch: \(error)")
             }
         }
         
         // 3. Final filter: Followers, Own Genres, and DEEP SCAN
         for track in preFiltered {
             guard let artistId = track.artists.first?.id else { continue }
-            
-            // Use cached artist details
-            guard let artist = artistMap[artistId] else { continue }
+
+            // Use cached artist details (Spotify), or the artist info embedded
+            // in the track itself (Apple Music candidates)
+            let artist: SpotifyArtist
+            if let cached = artistMap[artistId] {
+                artist = cached
+            } else if token == nil, let embedded = track.artists.first {
+                artist = embedded
+            } else {
+                continue
+            }
             
             // Filter 6: Remix/Edit Hygiene (Avoid "techno remixes" of rock songs)
             // Filter 6: Remix/Edit Hygiene

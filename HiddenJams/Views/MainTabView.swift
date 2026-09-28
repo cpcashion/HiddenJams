@@ -59,8 +59,9 @@ struct MainTabView: View {
                             },
                             onDiscoverMore: {
                                 Task {
-                                    guard let token = authManager.accessToken else { return }
-                                    
+                                    let token = authManager.accessToken
+                                    let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+
                                     var selectedGenres: Set<String>? = nil
                                     if let selectedGenresData = UserDefaults.standard.data(forKey: "selectedGenres"),
                                        let decoded = try? JSONDecoder().decode(Set<String>.self, from: selectedGenresData) {
@@ -73,6 +74,7 @@ struct MainTabView: View {
                                         userLibrary: profileAnalyzer.userLibraryTracks,
                                         selectedGenres: selectedGenres,
                                         token: token,
+                                        appleMusicSeeds: appleSeeds,
                                         count: 30,
                                         appendResults: false
                                     )
@@ -105,6 +107,14 @@ struct MainTabView: View {
     // MARK: - Save to Hidden Jams Playlist
     
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {
+        // Without Spotify there's no Spotify playlist — save to the in-app collection
+        guard authManager.isAuthenticated else {
+            await MainActor.run {
+                SavedGemsStore.shared.save(track)
+            }
+            return
+        }
+
         // Check for token expiration first
         if authManager.isTokenExpired {
             print("🔄 Token expired, refreshing before saving...")

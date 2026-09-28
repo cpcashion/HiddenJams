@@ -118,6 +118,46 @@ class LastFmService {
             throw LastFmError.decodingError(error)
         }
     }
+
+    // MARK: - Artist Info (listener counts for obscurity filtering)
+
+    /// Get artist stats from Last.fm, including listener count.
+    /// Used as the source-agnostic obscurity signal for Apple Music discovery
+    /// (where no Spotify popularity/follower data exists).
+    func getArtistInfo(name: String) async throws -> LastFmArtistInfo {
+        try requireAPIKey()
+        await throttle()
+
+        var components = URLComponents(string: baseURL)!
+        components.queryItems = [
+            URLQueryItem(name: "method", value: "artist.getinfo"),
+            URLQueryItem(name: "artist", value: name),
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "format", value: "json")
+        ]
+
+        guard let url = components.url else {
+            throw LastFmError.invalidURL
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw LastFmError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            throw LastFmError.httpError(httpResponse.statusCode)
+        }
+
+        do {
+            let result = try JSONDecoder().decode(LastFmArtistInfoResponse.self, from: data)
+            return result.artist
+        } catch {
+            print("❌ Last.fm artist info decoding error: \(error)")
+            throw LastFmError.decodingError(error)
+        }
+    }
 }
 
 // MARK: - Errors

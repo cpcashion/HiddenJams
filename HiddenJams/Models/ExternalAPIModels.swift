@@ -61,6 +61,27 @@ struct LastFmImage: Codable {
     }
 }
 
+// MARK: - Last.fm Artist Info (stats for obscurity filtering)
+
+struct LastFmArtistInfoResponse: Codable {
+    let artist: LastFmArtistInfo
+}
+
+struct LastFmArtistInfo: Codable {
+    let name: String
+    let stats: LastFmArtistStats?
+
+    /// Total Last.fm listeners; 0 when unknown
+    var listeners: Int {
+        Int(stats?.listeners ?? "") ?? 0
+    }
+
+    struct LastFmArtistStats: Codable {
+        let listeners: String?
+        let playcount: String?
+    }
+}
+
 // MARK: - MusicBrainz Models
 
 struct MBReleaseSearchResponse: Codable {
