@@ -18,6 +18,7 @@ class ItunesPreviewService {
     }
 
     struct ItunesTrack: Codable {
+        let trackId: Int
         let trackName: String
         let artistName: String
         let previewUrl: String?
