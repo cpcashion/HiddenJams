@@ -445,6 +445,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             await MainActor.run {
                 let finalResults = appendResults ? discoveredGems + topRecommendations : topRecommendations
                 discoveredGems = finalResults
+
+                // Never finish "successfully" with zero tracks and zero
+                // explanation — that silent return to the dashboard is what
+                // users reported as discovery "glitching".
+                if finalResults.isEmpty {
+                    self.errorMessage = appendResults
+                        ? "No more new tracks found. Try widening the popularity slider."
+                        : "We couldn't find any new tracks this time. Try moving the popularity slider up or picking different genres."
+                }
                 
                 // Mark discovered tracks/artists as session-seen (prevents duplication in "Discover More")
                 for gem in topRecommendations {
@@ -613,6 +622,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         // Last.fm listeners), but fall back to <500k rather than returning
         // nothing for mainstream libraries — an empty result used to look
         // like the app "glitched".
+        //
+        // Every empty stage below throws a *diagnostic* error instead of
+        // returning []. A silent empty pipeline is exactly what made
+        // discovery look like it "glitched back to the slider".
+        guard !similar.isEmpty else {
+            throw AppleMusicError.fetchFailed(
+                "Last.fm returned no similar tracks for your \(seedPairs.count) seed artists. Check your connection and try again."
+            )
+        }
         struct GatedCandidate {
             let name: String
             let artist: String
@@ -654,6 +672,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         if obscure.isEmpty, !fallback.isEmpty {
             print("🍏 No <100k-listener candidates — falling back to <500k listeners")
         }
+        guard !gated.isEmpty else {
+            throw AppleMusicError.fetchFailed(
+                "Every similar artist was too well-known (or their stats couldn't be checked). Try moving the popularity slider up."
+            )
+        }
 
         // 4. Resolve playable previews + artwork via iTunes
         var candidates: [SpotifyTrack] = []
@@ -670,6 +693,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
 
         print("🍏 Apple Music discovery produced \(candidates.count) candidates")
+        guard !candidates.isEmpty else {
+            throw AppleMusicError.fetchFailed(
+                "Found \(gated.count) candidate artists but no playable previews. Try again later."
+            )
+        }
         return candidates
     }
 
