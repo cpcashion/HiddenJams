@@ -58,20 +58,19 @@ struct AppleMusicDiscoveryTests {
         #expect(at100k >= 40 && at100k <= 44)
     }
 
-    @Test func emptyAppleSeedsSurfaceAnError() async {
-        // Regression: empty Apple Music seeds used to return [] silently,
-        // which looked like discovery "glitched" back to the dashboard.
-        // Now the failure must be visible via errorMessage.
-        let engine = EnhancedHiddenGemsDiscovery()
-        await engine.discoverHiddenGems(
-            profile: ListeningProfile(),
-            userTracks: [],
-            userLibrary: [],
-            token: nil,
-            appleMusicSeeds: []
-        )
-        #expect(engine.errorMessage != nil)
-        #expect(engine.discoveredGems.isEmpty)
+    @Test func tagTopTracksDecoding() throws {
+        // The genre fallback (empty Apple library → Last.fm tag tops) must
+        // parse tag.gettoptracks responses. Tag tracks carry no "match" score.
+        let json = """
+        {"tracks":{"track":[
+            {"name":"Obscure Gem","artist":{"name":"Unknown Band"},"url":"https://example.com"},
+            {"name":"","artist":{"name":"No Title"},"url":"https://example.com"}
+        ]}}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LastFmTagTopTracksResponse.self, from: json)
+        #expect(decoded.tracks.track.count == 2)
+        #expect(decoded.tracks.track[0].name == "Obscure Gem")
+        #expect(decoded.tracks.track[0].artist.name == "Unknown Band")
     }
 
     @Test func appleAnalysisWithoutAuthorizationFailsGracefully() async {

@@ -217,3 +217,21 @@ struct RecommendedTrack: Identifiable, Equatable {
         )
     }
 }
+
+// MARK: - Last.fm Tag Top Tracks (fallback discovery seeds)
+
+/// Response for tag.gettoptracks — used to synthesize discovery seeds when
+/// the user has no analyzable library. Tag tracks carry no "match" score,
+/// so they get their own lightweight model.
+struct LastFmTagTopTracksResponse: Codable {
+    let tracks: TagTracks
+
+    struct TagTracks: Codable {
+        let track: [TagTrack]
+    }
+
+    struct TagTrack: Codable {
+        let name: String
+        let artist: LastFmTrack.LastFmTrackArtist
+    }
+}

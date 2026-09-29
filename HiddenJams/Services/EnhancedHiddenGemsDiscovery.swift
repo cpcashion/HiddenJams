@@ -574,63 +574,107 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         // Don't recommend songs the user already has (cross-source, by name)
         let knownKeys = Set(seedTracks.map { $0.dedupeKey })
 
-        // Seed with one representative track per distinct artist (most recent first)
-        var seenSeedArtists = Set<String>()
-        var seedPairs: [(track: String, artist: String)] = []
-        for seed in seedTracks {
-            let key = seed.artistName.lowercased()
-            if seenSeedArtists.insert(key).inserted {
-                seedPairs.append((seed.title, seed.artistName))
-            }
-            if seedPairs.count >= 8 { break }
-        }
-        guard !seedPairs.isEmpty else {
-            // Throw instead of silently returning [] — an empty result used
-            // to look like discovery "glitched" back to the dashboard.
-            throw AppleMusicError.fetchFailed("No Apple Music tracks to learn from yet. Analyze your library first, then try discovery.")
-        }
-
-        // 1. Gather similar tracks from Last.fm
+        // Seeds cascade so the app ALWAYS has something to discover from —
+        // even a one-track (or empty) Apple library still yields hidden jams:
+        //   1. The user's Apple Music library tracks (most personal)
+        //   2. Top tracks of their strongest profile genres via Last.fm tags
+        //   3. Global genre tag tops (brand-new users with no profile at all)
+        //
+        // The cascade also applies when library seeds exist but Last.fm knows
+        // none of them — genre seeds are tried before giving up.
         struct SimilarCandidate {
             let name: String
             let artist: String
             let match: Double
         }
-        var similar: [SimilarCandidate] = []
-        for (index, seed) in seedPairs.enumerated() {
-            await updateProgress("Finding sounds like \(seed.artist) (\(index + 1)/\(seedPairs.count))...")
-            do {
-                let results = try await lastFmService.getSimilarTracks(
-                    trackName: seed.track,
-                    artistName: seed.artist,
-                    limit: 10
-                )
-                for result in results {
-                    similar.append(SimilarCandidate(
-                        name: result.name,
-                        artist: result.artist.name,
-                        match: result.matchScore
-                    ))
+
+        func librarySeedPairs() -> [(track: String, artist: String)] {
+            var seen = Set<String>()
+            var pairs: [(track: String, artist: String)] = []
+            for seed in seedTracks {
+                let key = seed.artistName.lowercased()
+                if seen.insert(key).inserted {
+                    pairs.append((seed.title, seed.artistName))
                 }
-            } catch {
-                print("⚠️ Last.fm similar-tracks failed for \(seed.artist): \(error)")
+                if pairs.count >= 8 { break }
             }
+            return pairs
+        }
+
+        func genreSeedPairs() async -> [(track: String, artist: String)] {
+            var seen = Set<String>()
+            var pairs: [(track: String, artist: String)] = []
+            let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
+            let genres = ranked.isEmpty ? ["alternative", "indie", "electronic", "hip-hop"] : Array(ranked.prefix(4))
+            for genre in genres {
+                do {
+                    let tops = try await lastFmService.getTagTopTracks(tag: genre.lowercased(), limit: 6)
+                    for (name, artist) in tops {
+                        let key = artist.lowercased()
+                        if seen.insert(key).inserted {
+                            pairs.append((name, artist))
+                        }
+                        if pairs.count >= 8 { break }
+                    }
+                } catch {
+                    print("⚠️ Last.fm tag tops failed for '\(genre)': \(error)")
+                }
+                if pairs.count >= 8 { break }
+            }
+            return pairs
+        }
+
+        func gatherSimilar(from pairs: [(track: String, artist: String)]) async -> [SimilarCandidate] {
+            var similar: [SimilarCandidate] = []
+            for (index, seed) in pairs.enumerated() {
+                await updateProgress("Finding sounds like \(seed.artist) (\(index + 1)/\(pairs.count))...")
+                do {
+                    let results = try await lastFmService.getSimilarTracks(
+                        trackName: seed.track,
+                        artistName: seed.artist,
+                        limit: 10
+                    )
+                    for result in results {
+                        similar.append(SimilarCandidate(
+                            name: result.name,
+                            artist: result.artist.name,
+                            match: result.matchScore
+                        ))
+                    }
+                } catch {
+                    print("⚠️ Last.fm similar-tracks failed for \(seed.artist): \(error)")
+                }
+            }
+            return similar
+        }
+
+        // 1. Gather similar tracks from Last.fm, cascading seed sets as needed.
+        var seedPairs = librarySeedPairs()
+        var usingGenreFallback = false
+        if seedPairs.isEmpty {
+            await updateProgress("Exploring your taste...")
+            seedPairs = await genreSeedPairs()
+            usingGenreFallback = true
+        }
+        var similar = await gatherSimilar(from: seedPairs)
+        if similar.isEmpty && !usingGenreFallback {
+            // Last.fm knew none of the library seeds — try genre seeds.
+            print("🍏 Library seeds yielded no similar tracks — falling back to genre seeds")
+            await updateProgress("Exploring your taste...")
+            seedPairs = await genreSeedPairs()
+            similar = await gatherSimilar(from: seedPairs)
+        }
+
+        guard !similar.isEmpty else {
+            // Only reachable with no network access or a total Last.fm outage —
+            // every empty-library case now falls back to genre seeds first.
+            throw AppleMusicError.fetchFailed("Couldn't reach the music catalog. Check your connection and try again.")
         }
 
         // 2. Best matches first; one candidate per artist.
         // Two-pass obscurity gate: prefer genuinely obscure artists (<100k
         // Last.fm listeners), but fall back to <500k rather than returning
-        // nothing for mainstream libraries — an empty result used to look
-        // like the app "glitched".
-        //
-        // Every empty stage below throws a *diagnostic* error instead of
-        // returning []. A silent empty pipeline is exactly what made
-        // discovery look like it "glitched back to the slider".
-        guard !similar.isEmpty else {
-            throw AppleMusicError.fetchFailed(
-                "Last.fm returned no similar tracks for your \(seedPairs.count) seed artists. Check your connection and try again."
-            )
-        }
+        // nothing — an empty result used to look like the app "glitched".
         struct GatedCandidate {
             let name: String
             let artist: String
@@ -1586,7 +1630,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     
     // MARK: - Helpers
     
-    private func updateProgress(_ message: String) async {
+    /// Progress messages shown on the discovery loading overlay. Internal so
+    /// the dashboard can narrate pre-discovery work (e.g. the self-heal
+    /// library analysis) instead of leaving the user staring at a spinner.
+    func updateProgress(_ message: String) async {
         await MainActor.run {
             self.discoveryProgress = message
         }

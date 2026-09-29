@@ -330,8 +330,11 @@ struct DashboardView: View {
                 // Self-heal: Apple Music connected but no Apple tracks analyzed
                 // yet (e.g. connected after the last analysis). Analyze first
                 // so one tap goes from connect → hidden jams, even with a
-                // tiny library.
+                // tiny library. The overlay narrates it — the user always
+                // sees the app working on their tunes.
                 if token == nil && appleSeeds.isEmpty && appleMusicService.isConnected {
+                    await MainActor.run { discoveryEngine.isDiscovering = true }
+                    await discoveryEngine.updateProgress("Analyzing your Apple Music library...")
                     await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: nil)
                     appleSeeds = profileAnalyzer.libraryTracks
                 }

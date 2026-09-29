@@ -158,6 +158,46 @@ class LastFmService {
             throw LastFmError.decodingError(error)
         }
     }
+
+    // MARK: - Tag Top Tracks (fallback seeds)
+
+    /// Top tracks for a genre tag (e.g. "alternative"). Used to synthesize
+    /// discovery seeds when the user has no analyzable library — the app must
+    /// surface hidden jams no matter how small (or missing) the library is.
+    func getTagTopTracks(tag: String, limit: Int = 10) async throws -> [(name: String, artist: String)] {
+        try requireAPIKey()
+        await throttle()
+
+        var components = URLComponents(string: baseURL)!
+        components.queryItems = [
+            URLQueryItem(name: "method", value: "tag.gettoptracks"),
+            URLQueryItem(name: "tag", value: tag),
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+
+        guard let url = components.url else {
+            throw LastFmError.invalidURL
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw LastFmError.invalidResponse
+        }
+
+        do {
+            let result = try JSONDecoder().decode(LastFmTagTopTracksResponse.self, from: data)
+            return result.tracks.track
+                .filter { !$0.name.isEmpty && !$0.artist.name.isEmpty }
+                .map { ($0.name, $0.artist.name) }
+        } catch {
+            print("❌ Last.fm tag tracks decoding error for '\(tag)': \(error)")
+            throw LastFmError.decodingError(error)
+        }
+    }
 }
 
 // MARK: - Errors
