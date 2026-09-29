@@ -676,7 +676,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Map Last.fm listener counts onto Spotify's 0-100 popularity scale so
     /// downstream filters and scoring keep working. ~1k listeners ≈ 25
     /// (passes the default <30 "hidden gem" threshold); 100k ≈ 42.
-    /// Pseudo-popularity derived from Last.fm listener counts for Apple Music candidates.
+    /// (Made internal for unit tests.)
     static func pseudoPopularity(listeners: Int) -> Int {
         let value = (25.0 / 3.0) * log10(Double(max(listeners, 1)) + 1.0)
         return min(100, max(0, Int(value)))
