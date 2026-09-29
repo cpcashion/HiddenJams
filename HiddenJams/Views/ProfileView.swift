@@ -88,6 +88,13 @@ struct ProfileView: View {
                 }
                 .frame(width: 64, height: 64)
                 .clipShape(Circle())
+            } else if appleMusicService.isConnected {
+                // Apple Music provides no profile photo: show the user's monster.
+                Image(MonsterAvatar.assignedName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 64, height: 64)
+                    .clipShape(Circle())
             } else {
                 Circle()
                     .fill(Color.white.opacity(0.1))

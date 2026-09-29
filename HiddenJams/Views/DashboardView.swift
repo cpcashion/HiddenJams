@@ -154,6 +154,13 @@ struct DashboardView: View {
                     }
                     .frame(width: 40, height: 40)
                     .clipShape(Circle())
+                } else if appleMusicService.isConnected {
+                    // Apple Music provides no profile photo: show the user's monster.
+                    Image(MonsterAvatar.assignedName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
                 } else {
                     Image(systemName: "person.circle.fill")
                         .font(.system(size: 32))
