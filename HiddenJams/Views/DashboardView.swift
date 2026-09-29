@@ -13,6 +13,7 @@ struct DashboardView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
     @EnvironmentObject var apiService: SpotifyAPIService
     @EnvironmentObject var audioManager: AudioPreviewManager
+    @EnvironmentObject var appleMusicService: AppleMusicService
     
     @State private var showGenreSelection = false
     @State private var showDiscoveryError = false
@@ -45,8 +46,10 @@ struct DashboardView: View {
                         // Header
                         headerView
                         
-                        // Analysis needed prompt
-                        if profileAnalyzer.profile.totalTracksAnalyzed == 0 && !profileAnalyzer.isAnalyzing {
+                        // Analysis needed prompt — also shown when Apple Music
+                        // was connected after the last analysis (e.g. a stale
+                        // Spotify profile exists but no Apple tracks were read).
+                        if (profileAnalyzer.profile.totalTracksAnalyzed == 0 || needsAppleMusicAnalysis) && !profileAnalyzer.isAnalyzing {
                             analyzePromptCard
                         }
                         
@@ -174,6 +177,15 @@ struct DashboardView: View {
     
     private var userFirstName: String? {
         authManager.user?.displayName?.components(separatedBy: " ").first
+    }
+    
+    /// True when Apple Music is connected but no Apple Music tracks have been
+    /// analyzed yet (e.g. connected after the last analysis, or on a fresh
+    /// install with a stale cached profile). Without this the dashboard hides
+    /// the analysis prompt and discovery has no seeds.
+    private var needsAppleMusicAnalysis: Bool {
+        appleMusicService.isConnected
+            && !profileAnalyzer.libraryTracks.contains(where: { $0.source == .appleMusic })
     }
     
     // MARK: - Analyze Prompt
@@ -313,7 +325,16 @@ struct DashboardView: View {
             Task {
                 let token = authManager.accessToken
                 // Apple Music-only users seed discovery from their library tracks
-                let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+                var appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+
+                // Self-heal: Apple Music connected but no Apple tracks analyzed
+                // yet (e.g. connected after the last analysis). Analyze first
+                // so one tap goes from connect → hidden jams, even with a
+                // tiny library.
+                if token == nil && appleSeeds.isEmpty && appleMusicService.isConnected {
+                    await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: nil)
+                    appleSeeds = profileAnalyzer.libraryTracks
+                }
 
                 await discoveryEngine.discoverHiddenGems(
                     profile: profileAnalyzer.profile,

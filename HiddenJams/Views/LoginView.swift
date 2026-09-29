@@ -11,6 +11,7 @@ struct LoginView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
     @EnvironmentObject var appleMusicService: AppleMusicService
     @EnvironmentObject var sourceManager: MusicSourceManager
+    @EnvironmentObject var profileAnalyzer: AIProfileAnalyzer
     @State private var isAnimating = false
     @State private var isConnectingAppleMusic = false
     @State private var appleMusicError: String?
@@ -168,6 +169,11 @@ struct LoginView: View {
                 } else {
                     appleMusicError = "Apple Music access was not granted. You can enable it in Settings → Privacy → Media & Apple Music."
                 }
+            }
+            if authorized {
+                // Read the library right away — otherwise the dashboard shows
+                // a stale profile with no Apple tracks and discovery fails.
+                await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: authManager.accessToken)
             }
         }
     }

@@ -73,4 +73,16 @@ struct AppleMusicDiscoveryTests {
         #expect(engine.errorMessage != nil)
         #expect(engine.discoveredGems.isEmpty)
     }
+
+    @Test func appleAnalysisWithoutAuthorizationFailsGracefully() async {
+        // The dashboard's Discover button now auto-analyzes when Apple Music
+        // is connected but no Apple tracks were read yet. If authorization is
+        // actually missing (e.g. revoked in Settings), the analysis must
+        // surface an error instead of hanging or crashing.
+        let analyzer = AIProfileAnalyzer(appleMusicService: AppleMusicService())
+        await analyzer.analyzeAllConnectedSources(spotifyToken: nil)
+        #expect(analyzer.errorMessage != nil)
+        #expect(analyzer.isAnalyzing == false)
+        #expect(analyzer.libraryTracks.isEmpty)
+    }
 }

@@ -4,6 +4,7 @@ struct OnboardingView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
     @EnvironmentObject var appleMusicService: AppleMusicService
     @EnvironmentObject var sourceManager: MusicSourceManager
+    @EnvironmentObject var profileAnalyzer: AIProfileAnalyzer
     @Binding var isPresented: Bool
     @State private var currentPage = 0
     @State private var isConnectingAppleMusic = false
@@ -143,6 +144,11 @@ struct OnboardingView: View {
                 } else {
                     appleMusicError = "Apple Music access was not granted. You can enable it in Settings → Privacy → Media & Apple Music."
                 }
+            }
+            if authorized {
+                // Read the library right away — otherwise discovery has no
+                // Apple tracks to learn from.
+                await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: authManager.accessToken)
             }
         }
     }
