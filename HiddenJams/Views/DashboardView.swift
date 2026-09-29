@@ -15,6 +15,7 @@ struct DashboardView: View {
     @EnvironmentObject var audioManager: AudioPreviewManager
     
     @State private var showGenreSelection = false
+    @State private var showDiscoveryError = false
     @AppStorage("selectedGenres") private var selectedGenresData: Data = Data()
     
     // Popularity slider state
@@ -106,6 +107,18 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showGenreSelection) {
                 GenreSelectionView(topGenres: Array(profileAnalyzer.profile.genreWeights.keys))
+            }
+            // Surface discovery failures — they used to fail silently, which
+            // looked like the app "glitched" back to the dashboard.
+            .onChange(of: discoveryEngine.errorMessage) { newValue in
+                showDiscoveryError = newValue != nil
+            }
+            .alert("Couldn't Find New Music", isPresented: $showDiscoveryError) {
+                Button("OK") {
+                    discoveryEngine.clearError()
+                }
+            } message: {
+                Text(discoveryEngine.errorMessage ?? "Something went wrong. Please try again.")
             }
         }
     }

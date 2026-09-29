@@ -172,6 +172,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     
     // MARK: - Main Discovery Function
     
+    /// Dismiss the current discovery error (called from the dashboard error alert).
+    func clearError() {
+        Task { @MainActor in self.errorMessage = nil }
+    }
+    
     func discoverHiddenGems(
         profile: ListeningProfile,
         userTracks: [String],
@@ -197,6 +202,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         await MainActor.run {
             isDiscovering = true
             isDnBMode = false  // Reset DnB mode flag for each discovery session
+            errorMessage = nil  // Clear any stale error from a previous run
             // Only clear if not appending
             if !appendResults {
                 discoveredGems = []
@@ -570,8 +576,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             if seedPairs.count >= 8 { break }
         }
         guard !seedPairs.isEmpty else {
-            print("⚠️ No Apple Music seed tracks for discovery")
-            return []
+            // Throw instead of silently returning [] — an empty result used
+            // to look like discovery "glitched" back to the dashboard.
+            throw AppleMusicError.fetchFailed("No Apple Music tracks to learn from yet. Analyze your library first, then try discovery.")
         }
 
         // 1. Gather similar tracks from Last.fm
@@ -582,7 +589,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
         var similar: [SimilarCandidate] = []
         for (index, seed) in seedPairs.enumerated() {
-            await updateProgress("Finding sounds like \(seed.artist) (\(index + 1))/\(seedPairs.count))...")
+            await updateProgress("Finding sounds like \(seed.artist) (\(index + 1)/\(seedPairs.count))...")
             do {
                 let results = try await lastFmService.getSimilarTracks(
                     trackName: seed.track,
@@ -601,11 +608,21 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
         }
 
-        // 2. Best matches first; one candidate per artist
+        // 2. Best matches first; one candidate per artist.
+        // Two-pass obscurity gate: prefer genuinely obscure artists (<100k
+        // Last.fm listeners), but fall back to <500k rather than returning
+        // nothing for mainstream libraries — an empty result used to look
+        // like the app "glitched".
+        struct GatedCandidate {
+            let name: String
+            let artist: String
+            let listeners: Int
+        }
+        var obscure: [GatedCandidate] = []
+        var fallback: [GatedCandidate] = []
         var seenArtists = Set<String>()
-        var candidates: [SpotifyTrack] = []
         for candidate in similar.sorted(by: { $0.match > $1.match }) {
-            guard candidates.count < maxCandidates else { break }
+            guard obscure.count + fallback.count < maxCandidates else { break }
             let artistKey = candidate.artist.lowercased()
             guard seenArtists.insert(artistKey).inserted else { continue }
 
@@ -616,23 +633,40 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             do {
                 // 3. Obscurity check via Last.fm listeners (replaces Spotify followers)
                 let info = try await lastFmService.getArtistInfo(name: candidate.artist)
-                guard info.listeners < 100_000 else {
+                let entry = GatedCandidate(
+                    name: candidate.name,
+                    artist: candidate.artist,
+                    listeners: info.listeners
+                )
+                if info.listeners < 100_000 {
+                    obscure.append(entry)
+                } else if info.listeners < 500_000 {
+                    fallback.append(entry)
+                } else {
                     print("   ⏭️ Skipping \(candidate.artist) (\(info.listeners) listeners — too popular)")
-                    continue
                 }
-
-                // 4. Resolve playable preview + artwork via iTunes
-                guard let itunes = await itunesService.searchTrack(name: candidate.name, artist: candidate.artist),
-                      let preview = itunes.previewUrl else {
-                    continue
-                }
-
-                let popularity = Self.pseudoPopularity(listeners: info.listeners)
-                candidates.append(itunes.toSpotifyTrack(previewURL: preview, popularity: popularity))
-                await updateProgress("Found gem: \(candidate.name) (\(candidates.count))")
             } catch {
                 print("⚠️ Candidate check failed for \(candidate.artist) - \(candidate.name): \(error)")
             }
+        }
+
+        let gated = obscure.isEmpty ? fallback : obscure
+        if obscure.isEmpty, !fallback.isEmpty {
+            print("🍏 No <100k-listener candidates — falling back to <500k listeners")
+        }
+
+        // 4. Resolve playable previews + artwork via iTunes
+        var candidates: [SpotifyTrack] = []
+        for candidate in gated {
+            guard candidates.count < maxCandidates else { break }
+            guard let itunes = await itunesService.searchTrack(name: candidate.name, artist: candidate.artist),
+                  let preview = itunes.previewUrl else {
+                continue
+            }
+
+            let popularity = Self.pseudoPopularity(listeners: candidate.listeners)
+            candidates.append(itunes.toSpotifyTrack(previewURL: preview, popularity: popularity))
+            await updateProgress("Found gem: \(candidate.name) (\(candidates.count))")
         }
 
         print("🍏 Apple Music discovery produced \(candidates.count) candidates")
@@ -642,7 +676,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Map Last.fm listener counts onto Spotify's 0-100 popularity scale so
     /// downstream filters and scoring keep working. ~1k listeners ≈ 25
     /// (passes the default <30 "hidden gem" threshold); 100k ≈ 42.
-    private static func pseudoPopularity(listeners: Int) -> Int {
+    /// Pseudo-popularity derived from Last.fm listener counts for Apple Music candidates.
+    static func pseudoPopularity(listeners: Int) -> Int {
         let value = (25.0 / 3.0) * log10(Double(max(listeners, 1)) + 1.0)
         return min(100, max(0, Int(value)))
     }

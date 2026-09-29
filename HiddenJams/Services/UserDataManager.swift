@@ -14,6 +14,7 @@ class UserDataManager {
     private let userProfileKey = "spotify_user_profile"
     private let lastAnalysisDateKey = "last_analysis_date"
     private let libraryFileName = "user_library.json"
+    private let sourceLibraryFileName = "source_library.json"
     
     // MARK: - User Profile Persistence
     
@@ -76,6 +77,45 @@ class UserDataManager {
         }
     }
     
+    // MARK: - Source Library Tracks Persistence (the [LibraryTrack] seeds Apple discovery needs)
+    
+    /// Persists the source-agnostic library (Spotify + Apple Music merged).
+    /// `loadProfile()` restores this so Apple Music discovery has seeds after
+    /// an app restart — without it, discovery silently returned zero results.
+    func saveSourceLibrary(_ tracks: [LibraryTrack]) {
+        guard let url = sourceLibraryFileURL else {
+            print("❌ Could not get source library file URL")
+            return
+        }
+        
+        do {
+            let directory = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(tracks)
+            try data.write(to: url)
+            print("✅ Saved \(tracks.count) source tracks to library cache")
+        } catch {
+            print("❌ Failed to save source library: \(error)")
+        }
+    }
+    
+    func loadSourceLibrary() -> [LibraryTrack]? {
+        guard let url = sourceLibraryFileURL,
+              FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let tracks = try JSONDecoder().decode([LibraryTrack].self, from: data)
+            print("✅ Loaded \(tracks.count) source tracks from library cache")
+            return tracks
+        } catch {
+            print("❌ Failed to load source library: \(error)")
+            return nil
+        }
+    }
+    
     // MARK: - Analysis Timestamp
     
     var lastAnalysisDate: Date? {
@@ -105,8 +145,11 @@ class UserDataManager {
         UserDefaults.standard.removeObject(forKey: lastAnalysisDateKey)
         UserDefaults.standard.removeObject(forKey: "listening_profile")
         
-        // Clear library file
+        // Clear library files
         if let url = libraryFileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let url = sourceLibraryFileURL {
             try? FileManager.default.removeItem(at: url)
         }
         
@@ -122,5 +165,14 @@ class UserDataManager {
         return documentsURL
             .appendingPathComponent("HiddenJams")
             .appendingPathComponent(libraryFileName)
+    }
+    
+    private var sourceLibraryFileURL: URL? {
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documentsURL
+            .appendingPathComponent("HiddenJams")
+            .appendingPathComponent(sourceLibraryFileName)
     }
 }

@@ -469,6 +469,9 @@ class AIProfileAnalyzer: ObservableObject {
 
     private func saveUserLibrary() {
         UserDataManager.shared.saveUserLibrary(userLibraryTracks)
+        // Persist the source-agnostic tracks too — Apple Music discovery seeds
+        // from these, and without this the seeds were lost on every restart.
+        UserDataManager.shared.saveSourceLibrary(libraryTracks)
     }
 
     func loadProfile() {
@@ -482,6 +485,14 @@ class AIProfileAnalyzer: ObservableObject {
         if let cachedTracks = UserDataManager.shared.loadUserLibrary() {
             self.userLibraryTracks = cachedTracks
             print("✅ Loaded \(cachedTracks.count) cached library tracks")
+        }
+
+        // Restore the source-agnostic library as well — Apple Music discovery
+        // seeds from `libraryTracks`, which used to be empty after a restart
+        // even when a cached profile existed (silent zero-result discovery).
+        if let cachedSourceTracks = UserDataManager.shared.loadSourceLibrary() {
+            self.libraryTracks = cachedSourceTracks
+            print("✅ Loaded \(cachedSourceTracks.count) cached source library tracks")
         }
     }
 
