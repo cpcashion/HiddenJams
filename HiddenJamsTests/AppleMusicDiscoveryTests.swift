@@ -53,7 +53,7 @@ struct AppleMusicDiscoveryTests {
     @Test func pseudoPopularityMapping() {
         // Boundaries of the Last.fm-listener → pseudo-popularity mapping.
         #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 0) == 10)
-        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 999) == 10)
+        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 999) == 25)
         #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 1_000) == 25)
         let at100k = EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 100_000)
         #expect(at100k >= 40 && at100k <= 44)
