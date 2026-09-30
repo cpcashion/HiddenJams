@@ -40,6 +40,9 @@ class AppleMusicService: ObservableObject {
     // MARK: - Authorization
 
     /// Requests Apple Music / media-library access. Returns true when authorized.
+    /// Also requests the on-device media-library permission up front, so
+    /// swipe-right playlist saves never hit a mid-gesture system prompt —
+    /// that prompt is the #1 silent reason saves "don't work".
     func requestAuthorization() async -> Bool {
         let status = await MusicAuthorization.request()
         let granted = status == .authorized
@@ -49,7 +52,29 @@ class AppleMusicService: ObservableObject {
                 self.isConnected = true
             }
         }
+        if granted {
+            let mediaGranted = await requestMediaLibraryAuthorization()
+            print(mediaGranted
+                ? "🍏 Media-library access granted — playlist saves enabled"
+                : "🍏 Media-library access NOT granted — playlist saves will explain how to enable it")
+        }
         return granted
+    }
+
+    /// The separate MediaPlayer permission needed to create the on-device
+    /// "Hidden Gems" playlist. Requested at connect time, not mid-swipe.
+    @discardableResult
+    func requestMediaLibraryAuthorization() async -> Bool {
+        if MPMediaLibrary.authorizationStatus() == .authorized { return true }
+        let status = await withCheckedContinuation { (cont: CheckedContinuation<MPMediaLibraryAuthorizationStatus, Never>) in
+            MPMediaLibrary.requestAuthorization { s in cont.resume(returning: s) }
+        }
+        return status == .authorized
+    }
+
+    /// True when the app may write the on-device "Hidden Gems" playlist.
+    var canWritePlaylist: Bool {
+        MPMediaLibrary.authorizationStatus() == .authorized
     }
 
     func refreshStatus() {
@@ -98,25 +123,47 @@ class AppleMusicService: ObservableObject {
     /// Adds a catalog track (by iTunes Store ID) to the user's "Hidden Gems"
     /// playlist, creating the playlist on first use. Uses the on-device media
     /// library (MediaPlayer) — no developer token or web API needed.
+    /// Throws human-readable errors; callers must surface them (never silent).
     func saveTrackToHiddenGemsPlaylist(storeID: Int) async throws {
-        guard isAuthorized else { throw AppleMusicError.notAuthorized }
-        if MPMediaLibrary.authorizationStatus() != .authorized {
-            let status = await withCheckedContinuation { cont in
-                MPMediaLibrary.requestAuthorization { s in cont.resume(returning: s) }
-            }
-            guard status == .authorized else { throw AppleMusicError.notAuthorized }
+        guard isAuthorized else {
+            throw AppleMusicError.fetchFailed("Apple Music isn't connected. Connect it on the Profile tab to save to your library.")
+        }
+        guard await requestMediaLibraryAuthorization() else {
+            throw AppleMusicError.fetchFailed(
+                "HiddenJams needs media-library access to save to Apple Music. Enable it in Settings → Privacy & Security → Media & Apple Music."
+            )
         }
         let playlist = try await hiddenGemsPlaylist()
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            playlist.addItem(withProductID: String(storeID)) { error in
-                if let error {
-                    cont.resume(throwing: error)
-                } else {
-                    cont.resume()
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                playlist.addItem(withProductID: String(storeID)) { error in
+                    if let error {
+                        cont.resume(throwing: error)
+                    } else {
+                        cont.resume()
+                    }
                 }
             }
+        } catch {
+            throw AppleMusicError.fetchFailed(
+                "Couldn't add that track to your Apple Music Hidden Gems playlist (\(error.localizedDescription))."
+            )
         }
         print("🍏 Added store ID \(storeID) to Apple Music '\(Self.hiddenGemsPlaylistName)' playlist")
+    }
+
+    /// This app's stable identifier for the Hidden Gems playlist, persisted
+    /// across launches so MediaPlayer always resolves the SAME playlist
+    /// instead of minting duplicates.
+    private var hiddenGemsPlaylistUUID: UUID {
+        let key = "hiddenGemsPlaylistUUID"
+        if let saved = UserDefaults.standard.string(forKey: key),
+           let uuid = UUID(uuidString: saved) {
+            return uuid
+        }
+        let uuid = UUID()
+        UserDefaults.standard.set(uuid.uuidString, forKey: key)
+        return uuid
     }
 
     /// Finds the existing "Hidden Gems" playlist or creates it.
@@ -130,16 +177,22 @@ class AppleMusicService: ObservableObject {
             return existing
         }
         let metadata = MPMediaPlaylistCreationMetadata(name: Self.hiddenGemsPlaylistName)
-        return try await withCheckedThrowingContinuation { cont in
-            MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
-                if let playlist {
-                    cont.resume(returning: playlist)
-                } else {
-                    cont.resume(throwing: error ?? AppleMusicError.fetchFailed(
-                        "Couldn't create the Hidden Gems playlist in your library."
-                    ))
+        do {
+            return try await withCheckedThrowingContinuation { cont in
+                MPMediaLibrary.default().getPlaylist(with: hiddenGemsPlaylistUUID, creationMetadata: metadata) { playlist, error in
+                    if let playlist {
+                        cont.resume(returning: playlist)
+                    } else {
+                        cont.resume(throwing: error ?? AppleMusicError.fetchFailed(
+                            "Couldn't create the Hidden Gems playlist in your library."
+                        ))
+                    }
                 }
             }
+        } catch {
+            throw AppleMusicError.fetchFailed(
+                "Couldn't create the Hidden Gems playlist in your Apple Music library (\(error.localizedDescription))."
+            )
         }
     }
 }

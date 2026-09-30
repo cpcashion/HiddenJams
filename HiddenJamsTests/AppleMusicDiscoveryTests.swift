@@ -51,11 +51,13 @@ struct AppleMusicDiscoveryTests {
     }
 
     @Test func pseudoPopularityMapping() {
-        // Spot-checks of the Last.fm-listener → pseudo-popularity mapping.
-        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 0) == 2)
-        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 1_000) == 25)
+        // Spot-checks of the Last.fm-listener → pseudo-popularity mapping
+        // (inverse of the understandable listener bands).
+        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 0) == 0)
+        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 500) == 14)
+        #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 1_000) == 18)
         let at100k = EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 100_000)
-        #expect(at100k >= 40 && at100k <= 44)
+        #expect(at100k >= 60 && at100k <= 64)
     }
 
     @Test func tagTopTracksDecoding() throws {

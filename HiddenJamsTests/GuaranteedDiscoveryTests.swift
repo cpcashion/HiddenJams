@@ -280,7 +280,8 @@ struct GuaranteedDiscoveryTests {
         )
 
         #expect(!tracks.isEmpty)
-        // 1k listeners → pseudo-popularity 25, not a hardcoded estimate.
+        // 1k listeners → pseudo-popularity from the band inverse (≈18), never
+        // a hardcoded estimate.
         #expect(tracks.allSatisfy {
             $0.popularity == EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 1_000)
         })
@@ -309,27 +310,97 @@ struct GuaranteedDiscoveryTests {
         }
     }
 
-    @Test func itunesFallbackEmptyOnlyWhenCatalogUnreachable() async throws {
+    @Test func itunesFallbackThrowsFetchFailedWhenCatalogUnreachable() async throws {
         // Stub returns nothing for every genre = iTunes Search unreachable.
+        // This is the ONLY path that may report a catalog-connection failure —
+        // it must throw honestly, never return a silent empty that a caller
+        // could misdiagnose.
+        let discovery = EnhancedHiddenGemsDiscovery()
+        do {
+            _ = try await discovery.itunesGenreFallbackCandidates(
+                profile: ListeningProfile(),
+                seedTracks: [],
+                listenerCheck: listenerCheck(),
+                itunesService: StubCatalog()
+            )
+            #expect(Bool(false), "expected fetchFailed to be thrown")
+        } catch let error as AppleMusicError {
+            if case .fetchFailed(let message) = error {
+                #expect(message.contains("catalog"))
+            } else {
+                #expect(Bool(false), "wrong error: \(error)")
+            }
+        }
+    }
+
+    @Test func itunesFallbackRelaxesStrictCapInsteadOfFailing() async throws {
+        // Chris's exact failure: Deep Cuts (threshold 15) with a genre whose
+        // catalog artists all sit above the strict band. The old code threw
+        // "Couldn't reach Apple's music catalog" — a lie. The fallback must
+        // relax the band and return tracks.
+        var stub = StubCatalog()
+        stub.resultsByGenre["reggae"] = genreResults(genre: "reggae", count: 30)
+
         let discovery = EnhancedHiddenGemsDiscovery()
         let tracks = try await discovery.itunesGenreFallbackCandidates(
             profile: ListeningProfile(),
             seedTracks: [],
-            listenerCheck: listenerCheck(),
-            itunesService: StubCatalog()
+            maxCandidates: 10,
+            sessionGenres: ["reggae"],
+            popularityThreshold: 15, // Deep Cuts: strict cap ≈ 500 listeners
+            listenerCheck: { _ in 3_000 }, // every artist above the strict band
+            itunesService: stub
         )
-        #expect(tracks.isEmpty)
+
+        #expect(!tracks.isEmpty, "strict band must relax, not fail")
+        #expect(tracks.count <= 10)
     }
 
-    @Test func maxListenersInvertsPseudoPopularity() {
-        // Slider 15 ("Deep Cuts") ≈ artists under ~62 Last.fm listeners;
-        // slider 30 ≈ under ~4k. The verified popularity must pass the
+    @Test func itunesFallbackStrictCapWinsWhenPossible() async throws {
+        // When artists DO fit the strict band, no relaxation happens — the
+        // first rung of the ladder is the user's own cap.
+        var stub = StubCatalog()
+        stub.resultsByGenre["reggae"] = genreResults(genre: "reggae", count: 30)
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            maxCandidates: 10,
+            sessionGenres: ["reggae"],
+            popularityThreshold: 15,
+            listenerCheck: { _ in 200 }, // comfortably under the 500 cap
+            itunesService: stub
+        )
+
+        #expect(!tracks.isEmpty)
+        // 200 listeners → pseudo-popularity well under the 15 threshold.
+        #expect(tracks.allSatisfy { $0.popularity < 15 })
+    }
+
+    @Test func listenerCapLadderShape() {
+        // Starts at the user's strict cap, climbs the anchor bands, and tops
+        // out at the 1M "Mainstream" band — never uncapped.
+        let ladder = EnhancedHiddenGemsDiscovery.listenerCapLadder(startingAt: 499)
+        #expect(ladder.first == 499)
+        #expect(ladder.last == 1_000_000)
+        #expect(ladder == ladder.sorted())
+        #expect(ladder.contains(5_000) && ladder.contains(20_000))
+
+        let topLadder = EnhancedHiddenGemsDiscovery.listenerCapLadder(startingAt: 1_000_000)
+        #expect(topLadder == [1_000_000])
+    }
+
+    @Test func maxListenersUsesUnderstandableBands() {
+        // Slider 15 ("Deep Cuts") ≈ under 500 listeners; 30 ≈ under 5,000;
+        // 45 ≈ under 20,000. The verified popularity must pass the
         // downstream `popularity < threshold` filter by construction.
-        for threshold in [15, 30, 45, 60] {
+        for threshold in [15, 30, 45, 60, 90] {
             let cap = EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: threshold)
             #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: cap) < threshold)
         }
-        #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 15) == 62)
-        #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 30) == 3980)
+        #expect(abs(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 15) - 500) <= 1)
+        #expect(abs(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 30) - 5_000) <= 2)
+        #expect(abs(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 45) - 20_000) <= 5)
     }
 }

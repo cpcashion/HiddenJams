@@ -600,21 +600,16 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         if candidates.isEmpty {
             print("🍏 Last.fm pipeline yielded nothing — engaging guaranteed iTunes genre fallback")
             await updateProgress("Exploring fresh sounds...")
-            // popularityUnavailable propagates as-is (honest, retryable);
-            // any other failure mode returns [] and is handled below.
+            // The fallback guarantees tracks whenever Apple's catalog answers
+            // (relaxing the obscurity band if needed). It throws honestly when
+            // the catalog is unreachable (fetchFailed) or the popularity
+            // service is down (popularityUnavailable) — both propagate as-is.
             candidates = try await itunesGenreFallbackCandidates(
                 profile: profile,
                 seedTracks: seedTracks,
                 maxCandidates: maxCandidates,
                 sessionGenres: sessionGenres,
                 itunesService: itunesService
-            )
-        }
-        guard !candidates.isEmpty else {
-            // Only reachable when the iTunes Search API itself is unreachable —
-            // Apple's own infrastructure, which Apple Music also requires.
-            throw AppleMusicError.fetchFailed(
-                "Couldn't reach Apple's music catalog. Check your connection and try again."
             )
         }
         return candidates
@@ -848,7 +843,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     ) async throws -> [SpotifyTrack] {
         let knownKeys = Set(seedTracks.map { $0.dedupeKey })
         let threshold = popularityThreshold ?? self.popularityThreshold
-        let maxListeners = Self.maxListeners(forPopularityThreshold: threshold)
+        let strictCap = Self.maxListeners(forPopularityThreshold: threshold)
 
         // Genre selection: the SESSION's genres win (a hip-hop session must
         // query hip-hop, not the user's rock-heavy profile). Within the
@@ -881,14 +876,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
         }
 
-        var tracks: [SpotifyTrack] = []
-        var seenArtists = Set<String>()
-        var attemptedChecks = 0
-        var failedChecks = 0
+        // Phase 1 — gather: query the catalog per genre and pick candidates
+        // (head skipped, tail shuffled). No listener checks yet.
         var catalogReached = false
-
+        var pickedArtists = Set<String>()
+        var gathered: [ItunesPreviewService.ItunesTrack] = []
         for genre in genres {
-            guard tracks.count < maxCandidates else { break }
             await updateProgress("Exploring \(genre)...")
             let results = await itunesService.searchGenreTracks(genre: genre, limit: perGenreLimit)
             if !results.isEmpty { catalogReached = true }
@@ -897,75 +890,177 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 from: results,
                 genre: genre,
                 knownKeys: knownKeys,
-                seenArtists: seenArtists,
-                limit: min(maxCandidates - tracks.count + 20, 60)
+                seenArtists: pickedArtists,
+                limit: 60
             )
-            guard !picked.isEmpty else { continue }
-
-            // Verify obscurity concurrently (Last.fm throttles internally).
-            // Outcomes per artist: verified (listener count), unknownArtist
-            // (Last.fm doesn't know them — skip), serviceError (Last.fm itself
-            // failed — counted to detect a full outage).
-            enum CheckOutcome { case listeners(Int), unknownArtist, serviceError }
-            let outcomes = await withTaskGroup(
-                of: (ItunesPreviewService.ItunesTrack, CheckOutcome).self
-            ) { group in
-                for itunes in picked {
-                    group.addTask {
-                        do {
-                            if let listeners = try await check(itunes.artistName) {
-                                return (itunes, .listeners(listeners))
-                            }
-                            return (itunes, .unknownArtist)
-                        } catch {
-                            return (itunes, .serviceError)
-                        }
-                    }
-                }
-                var collected: [(ItunesPreviewService.ItunesTrack, CheckOutcome)] = []
-                for await result in group { collected.append(result) }
-                return collected
-            }
-            attemptedChecks += outcomes.count
-            failedChecks += outcomes.filter {
-                if case .serviceError = $0.1 { return true }; return false
-            }.count
-
-            var verifiedCount = 0
-            for (itunes, outcome) in outcomes {
-                guard case .listeners(let listeners) = outcome else { continue }
-                let key = itunes.artistName.lowercased()
-                // Mark every checked artist seen (kept or too popular) so a
-                // later genre never pays for the same Last.fm lookup twice.
-                guard seenArtists.insert(key).inserted else { continue }
-                guard listeners <= maxListeners else { continue }
-                guard tracks.count < maxCandidates else { break }
-                tracks.append(itunes.toSpotifyTrack(
-                    previewURL: itunes.previewUrl,
-                    popularity: Self.pseudoPopularity(listeners: listeners)
-                ))
-                verifiedCount += 1
-            }
-            print("🍏 iTunes fallback: '\(genre)' verified \(verifiedCount)/\(picked.count) obscure artists")
+            for track in picked { pickedArtists.insert(track.artistName.lowercased()) }
+            gathered.append(contentsOf: picked)
         }
 
-        if tracks.isEmpty && catalogReached && attemptedChecks > 0 && failedChecks == attemptedChecks {
+        guard catalogReached else {
+            // Apple's own catalog didn't answer for a single genre — the
+            // device is effectively offline. This is the ONLY path that may
+            // report a catalog-connection failure.
+            print("🍏 iTunes fallback: catalog unreachable for all genres")
+            throw AppleMusicError.fetchFailed(
+                "Couldn't reach Apple's music catalog. Check your connection and try again."
+            )
+        }
+
+        // Phase 2 — verify: one concurrent listener-check pass over every
+        // picked artist. Outcomes: verified (listener count), unknownArtist
+        // (Last.fm doesn't know them — skip), serviceError (Last.fm itself
+        // failed — counted to detect a full outage).
+        enum CheckOutcome { case listeners(Int), unknownArtist, serviceError }
+        let outcomes = await withTaskGroup(
+            of: (ItunesPreviewService.ItunesTrack, CheckOutcome).self
+        ) { group in
+            for itunes in gathered {
+                group.addTask {
+                    do {
+                        if let listeners = try await check(itunes.artistName) {
+                            return (itunes, .listeners(listeners))
+                        }
+                        return (itunes, .unknownArtist)
+                    } catch {
+                        return (itunes, .serviceError)
+                    }
+                }
+            }
+            var collected: [(ItunesPreviewService.ItunesTrack, CheckOutcome)] = []
+            for await result in group { collected.append(result) }
+            return collected
+        }
+        let attemptedChecks = outcomes.count
+        let failedChecks = outcomes.filter {
+            if case .serviceError = $0.1 { return true }; return false
+        }.count
+        let verified: [(ItunesPreviewService.ItunesTrack, Int)] = outcomes.compactMap {
+            guard case .listeners(let listeners) = $0.1 else { return nil }
+            return ($0.0, listeners)
+        }
+
+        if attemptedChecks > 0 && failedChecks == attemptedChecks {
             // Apple's catalog answered, but not one artist's popularity could
             // be verified — Last.fm is unreachable. Honest, retryable error.
             print("🍏 iTunes fallback: catalog reachable, popularity service down")
             throw AppleMusicError.popularityUnavailable
         }
-        print("🍏 iTunes fallback produced \(tracks.count) verified hidden-jam candidates")
-        return tracks
+
+        // Phase 3 — relax: try the user's strict cap first, then progressively
+        // looser bands. The first cap that yields tracks wins, so discovery
+        // ALWAYS returns music when the catalog answered — never a dead end
+        // masquerading as a connection failure.
+        let ladder = Self.listenerCapLadder(startingAt: strictCap)
+        for (index, cap) in ladder.enumerated() {
+            var tracks: [SpotifyTrack] = []
+            for (itunes, listeners) in verified {
+                guard listeners <= cap else { continue }
+                guard tracks.count < maxCandidates else { break }
+                tracks.append(itunes.toSpotifyTrack(
+                    previewURL: itunes.previewUrl,
+                    popularity: Self.pseudoPopularity(listeners: listeners)
+                ))
+            }
+            if !tracks.isEmpty {
+                if index > 0 {
+                    let label = cap >= 1_000_000 ? "under a million" : "under \(cap.formatted())"
+                    await updateProgress("Loosened to \(label) listeners to find your gems…")
+                    print("🍏 iTunes fallback: strict cap yielded nothing — relaxed to \(cap) listeners, found \(tracks.count)")
+                } else {
+                    print("🍏 iTunes fallback: verified \(tracks.count) hidden-jam candidates at strict cap \(cap)")
+                }
+                return tracks
+            }
+        }
+
+        // Catalog reached, popularity service up, but no picked artist could
+        // be verified at any band — nothing honest to serve.
+        print("🍏 iTunes fallback: catalog reachable, no artist verifiable at any band")
+        throw AppleMusicError.popularityUnavailable
     }
 
-    /// Inverse of `pseudoPopularity(listeners:)`: the maximum Last.fm listener
-    /// count that still passes a given 0-100 popularity threshold.
-    /// threshold 15 ("Deep Cuts") → ~62 listeners; 30 → ~4k; 45 → ~250k.
+    /// Progressive-relaxation ladder for the guaranteed fallback: the user's
+    /// strict cap first, then the looser anchor bands, topping out at the
+    /// 1M "Mainstream" band. Never uncapped — a hidden-gems app must not
+    /// serve stadium acts just to fill a screen.
+    /// (Made internal for unit tests.)
+    static func listenerCapLadder(startingAt strictCap: Int) -> [Int] {
+        let anchors = listenerAnchors.map { Int($0.listeners) }
+        var ladder = [strictCap]
+        for anchor in anchors where Double(anchor) > Double(strictCap) * 1.5 {
+            ladder.append(anchor)
+        }
+        if ladder.last != anchors.last { ladder.append(anchors.last!) }
+        return ladder
+    }
+
+    /// Listener-cap anchors mapping the 0-100 popularity slider onto explicit,
+    /// understandable bands: Deep Cuts (15) ≈ under 500 listeners, 30 ≈ under
+    /// 5,000, 45 ≈ under 20,000, max (90) ≈ 1M (mainstream). Shared by
+    /// `maxListeners` and `pseudoPopularity`, which are inverses.
+    /// (Made internal for unit tests.)
+    static let listenerAnchors: [(threshold: Double, listeners: Double)] = [
+        (15, 500),
+        (30, 5_000),
+        (45, 20_000),
+        (90, 1_000_000),
+    ]
+
+    /// The maximum Last.fm listener count that still passes a given 0-100
+    /// popularity threshold. Log-interpolated between the anchor bands, so
+    /// every slider stop is a sane, achievable obscurity bar.
     /// (Made internal for unit tests.)
     static func maxListeners(forPopularityThreshold threshold: Int) -> Int {
-        let exponent = Double(threshold) * 3.0 / 25.0
-        return max(0, Int(pow(10.0, exponent)) - 1)
+        let t = Double(threshold)
+        let a = listenerAnchors
+        // Below the first anchor, extend the first segment's slope so the
+        // mapping stays strictly increasing all the way down.
+        let slope0 = (log10(a[1].listeners) - log10(a[0].listeners)) / (a[1].threshold - a[0].threshold)
+        if t <= a[0].threshold {
+            return max(1, Int(pow(10.0, log10(a[0].listeners) + slope0 * (t - a[0].threshold))))
+        }
+        if t >= a.last!.threshold { return Int(a.last!.listeners) }
+        for i in 0..<(a.count - 1) {
+            let lo = a[i], hi = a[i + 1]
+            if t <= hi.threshold {
+                let frac = (t - lo.threshold) / (hi.threshold - lo.threshold)
+                let logCap = log10(lo.listeners) + (log10(hi.listeners) - log10(lo.listeners)) * frac
+                return Int(pow(10.0, logCap))
+            }
+        }
+        return Int(a.last!.listeners)
+    }
+
+    /// Inverse of `maxListeners`: the slider threshold whose cap equals this
+    /// listener count. Minus one so the downstream `< threshold` filter keeps
+    /// every artist the cap admitted (strict `<` vs `<=` boundary).
+    /// (Made internal for unit tests.)
+    static func pseudoPopularity(listeners: Int) -> Int {
+        let l = Double(max(listeners, 0))
+        let a = listenerAnchors
+        let slope0 = (log10(a[1].listeners) - log10(a[0].listeners)) / (a[1].threshold - a[0].threshold)
+        let t: Double
+        if l >= a.last!.listeners {
+            // Top of the scale: the "Mainstream" anchor itself. (Verification
+            // already caps at this band, so this only ever sees ≤1M.)
+            t = a.last!.threshold
+        } else if l <= a[0].listeners {
+            // Inverse of the extended first segment: t = 15 + log10(l/500)/slope0
+            t = a[0].threshold + (log10(max(l, 1)) - log10(a[0].listeners)) / slope0
+        } else {
+            var found = a.last!.threshold
+            for i in 0..<(a.count - 1) {
+                let lo = a[i], hi = a[i + 1]
+                if l <= hi.listeners {
+                    let frac = (log10(l) - log10(lo.listeners)) / (log10(hi.listeners) - log10(lo.listeners))
+                    found = lo.threshold + frac * (hi.threshold - lo.threshold)
+                    break
+                }
+            }
+            t = found
+        }
+        return min(100, max(0, Int(t) - 1))
     }
 
     /// Pure selection logic for the guaranteed fallback. Deterministic and
@@ -1023,15 +1118,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         return Array(tail.prefix(max(limit, 0)))
     }
 
-    /// Map Last.fm listener counts onto Spotify's 0-100 popularity scale so
-    /// downstream filters and scoring keep working. Logarithmic: a handful
-    /// of listeners ≈ 2; ~1k listeners ≈ 25; ~100k ≈ 41; ~500k ≈ 47.
-    /// (Made internal for unit tests.)
-    static func pseudoPopularity(listeners: Int) -> Int {
-        let value = (25.0 / 3.0) * log10(Double(max(listeners, 1)) + 1.0)
-        return min(100, max(0, Int(value)))
-    }
-    
     // MARK: - Simple Genre-Based Discovery (WORKS!)
     
     // MARK: - Simple Genre-Based Discovery (WORKS!)

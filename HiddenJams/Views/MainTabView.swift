@@ -14,6 +14,11 @@ struct MainTabView: View {
     // Cache the Hidden Jams playlist ID
     @State private var hiddenJamsPlaylistId: String?
     
+    // Toast for swipe-save outcomes (e.g. Apple Music playlist saves)
+    @State private var toastMessage: String?
+    @State private var toastIsError: Bool = false
+    @State private var toastWorkItem: DispatchWorkItem?
+    
     enum Tab {
         case home, player, profile
     }
@@ -101,8 +106,47 @@ struct MainTabView: View {
             LiquidTabBar(selectedTab: $selectedTab)
                 .padding(.horizontal, Theme.Spacing.lg)
                 .padding(.bottom, 20)
+            
+            // Toast overlay for swipe-save outcomes
+            if let toastMessage {
+                VStack {
+                    Spacer()
+                    Text(toastMessage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(
+                            (toastIsError ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
+                            .cornerRadius(12)
+                            .applyShadow(Theme.Shadows.medium)
+                        )
+                        .padding(.horizontal, 32)
+                        .padding(.bottom, 110)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                .zIndex(100)
+            }
         }
         .ignoresSafeArea()
+    }
+    
+    // MARK: - Toast
+    
+    /// Shows a transient toast. Success toasts confirm where the swiped track
+    /// went; error toasts give the real reason a save failed.
+    private func showToast(_ message: String, isError: Bool) {
+        toastWorkItem?.cancel()
+        withAnimation(.spring()) {
+            toastMessage = message
+            toastIsError = isError
+        }
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeOut) { toastMessage = nil }
+        }
+        toastWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: workItem)
     }
     
     // MARK: - Save to Hidden Jams Playlist
@@ -110,8 +154,11 @@ struct MainTabView: View {
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {
         // Apple Music users get a real "Hidden Gems" playlist in their Apple
         // Music library — the same swipe-right promise Spotify users get.
-        // Saved alongside any Spotify save, never instead of it.
-        await saveTrackToAppleMusicPlaylist(track)
+        // Saved alongside any Spotify save, never instead of it. The result
+        // is shown as a toast so a swipe never "saves" silently.
+        if let (success, message) = await saveTrackToAppleMusicPlaylist(track) {
+            await MainActor.run { showToast(message, isError: !success) }
+        }
 
         // Without Spotify there's no Spotify playlist — save to the in-app collection
         guard authManager.isAuthenticated else {
@@ -182,17 +229,27 @@ struct MainTabView: View {
 
     /// Swipe-right for Apple Music users: resolves the track to an Apple Music
     /// catalog ID and adds it to the "Hidden Gems" playlist in their library.
-    private func saveTrackToAppleMusicPlaylist(_ track: RecommendedTrack) async {
-        guard appleMusicService.isConnected, appleMusicService.isAuthorized else { return }
+    /// Returns a user-facing message describing the outcome — success or the
+    /// real reason it failed. NEVER silent: a swipe that "saves" must tell
+    /// the user where their track went.
+    /// - Returns: `(true, message)` on success, `(false, reason)` on failure,
+    ///   or `nil` when Apple Music isn't the active source (nothing to say).
+    private func saveTrackToAppleMusicPlaylist(_ track: RecommendedTrack) async -> (Bool, String)? {
+        guard appleMusicService.isConnected else { return nil }
+        guard appleMusicService.isAuthorized else {
+            return (false, "Apple Music isn't authorized — reconnect it on the Profile tab to save to your library.")
+        }
         guard let storeID = await appleMusicStoreID(for: track) else {
-            print("🍏 Couldn't find '\(track.track.name)' in the Apple Music catalog — kept in-app only")
-            return
+            return (false, "Couldn't find '\(track.track.name)' in the Apple Music catalog — kept in your in-app gems only.")
         }
         do {
             try await appleMusicService.saveTrackToHiddenGemsPlaylist(storeID: storeID)
             print("✅ Saved '\(track.track.name)' to the Apple Music Hidden Gems playlist")
+            return (true, "Saved to your Apple Music Hidden Gems playlist ✓")
         } catch {
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             print("❌ Apple Music playlist save failed for '\(track.track.name)': \(error)")
+            return (false, reason)
         }
     }
 
