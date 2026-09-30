@@ -108,7 +108,7 @@ class AppleMusicService: ObservableObject {
         }
         let playlist = try await hiddenGemsPlaylist()
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            playlist.addItem(withProductID: NSNumber(value: storeID)) { error in
+            playlist.addItem(withProductID: String(storeID)) { error in
                 if let error {
                     cont.resume(throwing: error)
                 } else {
