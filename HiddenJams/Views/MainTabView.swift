@@ -7,6 +7,7 @@ struct MainTabView: View {
     // Auth is likely environment
     @EnvironmentObject var authManager: SpotifyAuthManager
     @EnvironmentObject var apiService: SpotifyAPIService
+    @EnvironmentObject var appleMusicService: AppleMusicService
     
     @Binding var selectedTab: Tab
     
@@ -107,6 +108,11 @@ struct MainTabView: View {
     // MARK: - Save to Hidden Jams Playlist
     
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {
+        // Apple Music users get a real "Hidden Gems" playlist in their Apple
+        // Music library — the same swipe-right promise Spotify users get.
+        // Saved alongside any Spotify save, never instead of it.
+        await saveTrackToAppleMusicPlaylist(track)
+
         // Without Spotify there's no Spotify playlist — save to the in-app collection
         guard authManager.isAuthenticated else {
             await MainActor.run {
@@ -172,6 +178,37 @@ struct MainTabView: View {
         }
     }
     
+    // MARK: - Save to Apple Music Playlist
+
+    /// Swipe-right for Apple Music users: resolves the track to an Apple Music
+    /// catalog ID and adds it to the "Hidden Gems" playlist in their library.
+    private func saveTrackToAppleMusicPlaylist(_ track: RecommendedTrack) async {
+        guard appleMusicService.isConnected, appleMusicService.isAuthorized else { return }
+        guard let storeID = await appleMusicStoreID(for: track) else {
+            print("🍏 Couldn't find '\(track.track.name)' in the Apple Music catalog — kept in-app only")
+            return
+        }
+        do {
+            try await appleMusicService.saveTrackToHiddenGemsPlaylist(storeID: storeID)
+            print("✅ Saved '\(track.track.name)' to the Apple Music Hidden Gems playlist")
+        } catch {
+            print("❌ Apple Music playlist save failed for '\(track.track.name)': \(error)")
+        }
+    }
+
+    /// Maps a discovered track to its iTunes Store ID. Apple-branch tracks
+    /// already carry it ("itunes:<id>"); Spotify-branch tracks are resolved
+    /// through the iTunes Search API by name + artist.
+    private func appleMusicStoreID(for track: RecommendedTrack) async -> Int? {
+        let spotifyId = track.track.spotifyId ?? ""
+        if spotifyId.hasPrefix("itunes:"), let id = Int(spotifyId.dropFirst("itunes:".count)) {
+            return id
+        }
+        let artist = track.track.artists.first?.name ?? ""
+        let found = await ItunesPreviewService().searchTrack(name: track.track.name, artist: artist)
+        return found?.trackId
+    }
+
     private func getOrCreateHiddenJamsPlaylist(token: String) async throws -> String {
         // Return cached ID if available
         if let cachedId = hiddenJamsPlaylistId {

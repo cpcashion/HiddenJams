@@ -160,17 +160,27 @@ struct GuaranteedDiscoveryTests {
 
     // MARK: - End-to-end fallback
 
-    @Test func itunesFallbackProducesPlayableTracksForEmptyLibrary() async {
+    /// Canned listener counts: obscure artists pass, famous ones don't.
+    private func listenerCheck(obscure: Set<String> = []) -> (String) async throws -> Int? {
+        { artist in
+            if artist.lowercased().contains("famous") { return 2_000_000 }
+            if obscure.contains(artist) { return 40 }
+            return 40 // generic stub artist: comfortably under the default cap
+        }
+    }
+
+    @Test func itunesFallbackProducesPlayableTracksForEmptyLibrary() async throws {
         var stub = StubCatalog()
         stub.resultsByGenre["alternative"] = genreResults(genre: "alternative", count: 30)
         stub.resultsByGenre["indie"] = genreResults(genre: "indie", count: 30, idBase: 1000)
 
         // Brand-new user: no profile genres, no library tracks at all.
         let discovery = EnhancedHiddenGemsDiscovery()
-        let tracks = await discovery.itunesGenreFallbackCandidates(
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
             profile: ListeningProfile(),
             seedTracks: [],
             maxCandidates: 20,
+            listenerCheck: listenerCheck(),
             itunesService: stub
         )
 
@@ -182,7 +192,7 @@ struct GuaranteedDiscoveryTests {
         #expect(Set(artists).count == artists.count)
     }
 
-    @Test func itunesFallbackUsesProfileGenresFirst() async {
+    @Test func itunesFallbackUsesProfileGenresFirst() async throws {
         var stub = StubCatalog()
         stub.resultsByGenre["jazz"] = genreResults(genre: "jazz", count: 30)
         stub.resultsByGenre["alternative"] = genreResults(genre: "alternative", count: 30, idBase: 5000)
@@ -191,10 +201,11 @@ struct GuaranteedDiscoveryTests {
         profile.genreWeights = ["jazz": 0.9, "alternative": 0.1]
 
         let discovery = EnhancedHiddenGemsDiscovery()
-        let tracks = await discovery.itunesGenreFallbackCandidates(
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
             profile: profile,
             seedTracks: [],
             maxCandidates: 10,
+            listenerCheck: listenerCheck(),
             itunesService: stub
         )
 
@@ -203,20 +214,118 @@ struct GuaranteedDiscoveryTests {
         #expect(tracks.allSatisfy { $0.name.hasPrefix("Jazz Song") })
     }
 
-    @Test func itunesFallbackEmptyOnlyWhenCatalogUnreachable() async {
-        // Stub returns nothing for every genre = iTunes Search unreachable.
+    @Test func itunesFallbackUsesSessionGenresOverProfile() async throws {
+        // The hip-hop bug: the session picked hip-hop, the user's profile is
+        // rock-heavy — the fallback must query hip-hop, not rock.
+        var stub = StubCatalog()
+        stub.resultsByGenre["hip-hop"] = genreResults(genre: "hip-hop", count: 30)
+        stub.resultsByGenre["rock"] = genreResults(genre: "rock", count: 30, idBase: 9000)
+
+        var profile = ListeningProfile()
+        profile.genreWeights = ["rock": 0.9, "metal": 0.8]
+
         let discovery = EnhancedHiddenGemsDiscovery()
-        let tracks = await discovery.itunesGenreFallbackCandidates(
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: profile,
+            seedTracks: [],
+            maxCandidates: 10,
+            sessionGenres: ["hip-hop"],
+            listenerCheck: listenerCheck(),
+            itunesService: stub
+        )
+
+        #expect(!tracks.isEmpty)
+        #expect(tracks.allSatisfy { $0.name.hasPrefix("Hip-hop Song") })
+    }
+
+    @Test func itunesFallbackDropsArtistsAboveListenerCap() async throws {
+        var stub = StubCatalog()
+        stub.resultsByGenre["rock"] = [
+            makeTrack(id: 1, name: "Hit Single", artist: "Famous Rockers", genre: "Rock"),
+            makeTrack(id: 2, name: "Deep Cut", artist: "Obscure Trio", genre: "Rock"),
+        ]
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
             profile: ListeningProfile(),
             seedTracks: [],
+            maxCandidates: 10,
+            sessionGenres: ["rock"],
+            listenerCheck: listenerCheck(),
+            itunesService: stub
+        )
+
+        // Beck/Avenged Sevenfold-style mainstream acts are dropped even
+        // though the catalog surfaced them; the obscure act survives.
+        #expect(tracks.count == 1)
+        #expect(tracks.first?.artists.first?.name == "Obscure Trio")
+    }
+
+    @Test func itunesFallbackAssignsRealPseudoPopularity() async throws {
+        var stub = StubCatalog()
+        stub.resultsByGenre["indie"] = genreResults(genre: "indie", count: 12)
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            maxCandidates: 5,
+            sessionGenres: ["indie"],
+            popularityThreshold: 90, // accept everything the stub verifies
+            listenerCheck: { _ in 1_000 },
+            itunesService: stub
+        )
+
+        #expect(!tracks.isEmpty)
+        // 1k listeners → pseudo-popularity 25, not a hardcoded estimate.
+        #expect(tracks.allSatisfy {
+            $0.popularity == EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: 1_000)
+        })
+    }
+
+    @Test func itunesFallbackThrowsHonestErrorWhenPopularityServiceDown() async throws {
+        var stub = StubCatalog()
+        stub.resultsByGenre["indie"] = genreResults(genre: "indie", count: 12)
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        // Every listener check fails service-side, but the catalog answers.
+        struct ServiceDown: Error {}
+        do {
+            _ = try await discovery.itunesGenreFallbackCandidates(
+                profile: ListeningProfile(),
+                seedTracks: [],
+                maxCandidates: 5,
+                sessionGenres: ["indie"],
+                listenerCheck: { _ in throw ServiceDown() },
+                itunesService: stub
+            )
+            #expect(Bool(false), "expected popularityUnavailable to be thrown")
+        } catch let error as AppleMusicError {
+            if case .popularityUnavailable = error { /* expected */ }
+            else { #expect(Bool(false), "wrong error: \(error)") }
+        }
+    }
+
+    @Test func itunesFallbackEmptyOnlyWhenCatalogUnreachable() async throws {
+        // Stub returns nothing for every genre = iTunes Search unreachable.
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            listenerCheck: listenerCheck(),
             itunesService: StubCatalog()
         )
         #expect(tracks.isEmpty)
     }
 
-    @Test func fallbackPopularityPassesDefaultSlider() {
-        // Downstream filters drop tracks with popularity >= the slider
-        // threshold (default 15 in the UI). The fallback estimate must pass.
-        #expect(EnhancedHiddenGemsDiscovery.itunesFallbackPopularity < 15)
+    @Test func maxListenersInvertsPseudoPopularity() {
+        // Slider 15 ("Deep Cuts") ≈ artists under ~62 Last.fm listeners;
+        // slider 30 ≈ under ~4k. The verified popularity must pass the
+        // downstream `popularity < threshold` filter by construction.
+        for threshold in [15, 30, 45, 60] {
+            let cap = EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: threshold)
+            #expect(EnhancedHiddenGemsDiscovery.pseudoPopularity(listeners: cap) < threshold)
+        }
+        #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 15) == 62)
+        #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 30) == 3980)
     }
-}

@@ -332,7 +332,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 await updateProgress("Finding similar artists...")
                 let appleCandidates = try await discoverViaLastFmAppleMusic(
                     profile: profile,
-                    seedTracks: appleMusicSeeds
+                    seedTracks: appleMusicSeeds,
+                    sessionGenres: activeGenres
                 )
                 print("✅ Apple Music discovery: Found \(appleCandidates.count) candidates")
                 allCandidates.append(contentsOf: appleCandidates)
@@ -586,21 +587,26 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
         maxCandidates: Int = 120,
+        sessionGenres: [String] = [],
         itunesService: any ItunesCatalog = ItunesPreviewService()
     ) async throws -> [SpotifyTrack] {
         var candidates = await lastFmAppleCandidates(
             profile: profile,
             seedTracks: seedTracks,
             maxCandidates: maxCandidates,
+            sessionGenres: sessionGenres,
             itunesService: itunesService
         )
         if candidates.isEmpty {
             print("🍏 Last.fm pipeline yielded nothing — engaging guaranteed iTunes genre fallback")
             await updateProgress("Exploring fresh sounds...")
-            candidates = await itunesGenreFallbackCandidates(
+            // popularityUnavailable propagates as-is (honest, retryable);
+            // any other failure mode returns [] and is handled below.
+            candidates = try await itunesGenreFallbackCandidates(
                 profile: profile,
                 seedTracks: seedTracks,
                 maxCandidates: maxCandidates,
+                sessionGenres: sessionGenres,
                 itunesService: itunesService
             )
         }
@@ -621,6 +627,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
         maxCandidates: Int = 120,
+        sessionGenres: [String] = [],
         itunesService: any ItunesCatalog = ItunesPreviewService()
     ) async -> [SpotifyTrack] {
 
@@ -658,7 +665,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             var seen = Set<String>()
             var pairs: [(track: String, artist: String)] = []
             let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
-            let genres = ranked.isEmpty ? ["alternative", "indie", "electronic", "hip-hop"] : Array(ranked.prefix(4))
+            // Respect the session's genre selection: when the user picked
+            // specific genres (e.g. hip-hop), seeds must come from those, not
+            // from unrelated profile favorites.
+            let session = sessionGenres.filter { !$0.isEmpty }
+            let baseGenres: [String]
+            if !session.isEmpty {
+                let rankedSession = ranked.filter { session.contains($0) }
+                baseGenres = rankedSession + session.filter { !rankedSession.contains($0) }
+            } else {
+                baseGenres = ranked
+            }
+            let genres = baseGenres.isEmpty ? ["alternative", "indie", "electronic", "hip-hop"] : Array(baseGenres.prefix(4))
             for genre in genres {
                 do {
                     let tops = try await lastFmService.getTagTopTracks(tag: genre.lowercased(), limit: 6)
@@ -806,57 +824,149 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // MARK: - Guaranteed Discovery (iTunes genre fallback)
 
     /// The discovery backend of last resort. Queries the iTunes Search API
-    /// directly for each of the user's top genres — no Last.fm, no Spotify
-    /// token, no API key. Never throws; returns [] only when Apple's own
-    /// catalog is unreachable (device effectively offline).
+    /// directly for the session's genres — no Spotify token, no API key.
+    /// Every candidate artist is then verified against Last.fm listener
+    /// counts: only artists at or under the slider's popularity threshold
+    /// survive, and each gets its real pseudo-popularity (not an estimate).
+    /// Apple's catalog APIs expose no popularity signal of their own, so
+    /// Last.fm listener counts ARE the popularity score for Apple Music
+    /// users — on the same 0-100 scale the slider uses for Spotify.
     ///
-    /// This is what guarantees every Apple Music user sees hidden jams:
-    /// every layer above can fail (bad network, Last.fm outage, empty
-    /// library, no profile) and this layer still produces playable tracks.
+    /// Throws `AppleMusicError.popularityUnavailable` when Apple's catalog is
+    /// reachable but obscurity couldn't be verified for a single artist
+    /// (Last.fm unreachable) — serving unverified mainstream tracks as
+    /// "hidden gems" would be worse than an honest, retryable error.
+    /// Returns [] only when Apple's own catalog is unreachable.
     internal func itunesGenreFallbackCandidates(
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
         maxCandidates: Int = 120,
+        sessionGenres: [String] = [],
+        popularityThreshold: Int? = nil,
+        listenerCheck: ((String) async throws -> Int?)? = nil,
         itunesService: any ItunesCatalog = ItunesPreviewService()
-    ) async -> [SpotifyTrack] {
+    ) async throws -> [SpotifyTrack] {
         let knownKeys = Set(seedTracks.map { $0.dedupeKey })
+        let threshold = popularityThreshold ?? self.popularityThreshold
+        let maxListeners = Self.maxListeners(forPopularityThreshold: threshold)
+
+        // Genre selection: the SESSION's genres win (a hip-hop session must
+        // query hip-hop, not the user's rock-heavy profile). Within the
+        // session, profile-ranked genres come first for personalization.
         let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
-        let genres = ranked.isEmpty
-            ? ["alternative", "indie", "electronic", "hip-hop"]
-            : Array(ranked.prefix(4))
+        let session = sessionGenres.filter { !$0.isEmpty }
+        let baseGenres: [String]
+        if !session.isEmpty {
+            let rankedSession = ranked.filter { session.contains($0) }
+            baseGenres = rankedSession + session.filter { !rankedSession.contains($0) }
+        } else {
+            baseGenres = ranked
+        }
+        let resolved = baseGenres.isEmpty ? ["alternative", "indie", "electronic", "hip-hop"] : baseGenres
+        // A wide session selection (e.g. Select All) should span genres:
+        // query more genres with fewer results each.
+        let genreCount = resolved.count > 4 ? min(resolved.count, 8) : min(resolved.count, 4)
+        let genres = Array(resolved.prefix(genreCount))
+        let perGenreLimit = genreCount > 4 ? 100 : 200
+
+        // Default listener check: Last.fm artist.getinfo. A decoding failure
+        // means Last.fm doesn't know the artist (skip it); any other failure
+        // is service-level (count it — all-failed means Last.fm is down).
+        let check: (String) async throws -> Int? = listenerCheck ?? { artist in
+            do {
+                return try await self.lastFmService.getArtistInfo(name: artist).listeners
+            } catch let error as LastFmError {
+                if case .decodingError = error { return nil }
+                throw error
+            }
+        }
 
         var tracks: [SpotifyTrack] = []
         var seenArtists = Set<String>()
+        var attemptedChecks = 0
+        var failedChecks = 0
+        var catalogReached = false
+
         for genre in genres {
             guard tracks.count < maxCandidates else { break }
             await updateProgress("Exploring \(genre)...")
-            let results = await itunesService.searchGenreTracks(genre: genre, limit: 200)
+            let results = await itunesService.searchGenreTracks(genre: genre, limit: perGenreLimit)
+            if !results.isEmpty { catalogReached = true }
+            // Over-select per genre: verification will drop the mainstream.
             let picked = Self.selectFallbackTracks(
                 from: results,
                 genre: genre,
                 knownKeys: knownKeys,
                 seenArtists: seenArtists,
-                limit: maxCandidates - tracks.count
+                limit: min(maxCandidates - tracks.count + 20, 60)
             )
-            for itunes in picked {
-                seenArtists.insert(itunes.artistName.lowercased())
-                // Deep-tail genre results are the least-mainstream tracks the
-                // catalog surfaces for the term — a conservative low
-                // obscurity estimate so they pass the default popularity
-                // slider. (No listener stats exist outside Last.fm.)
+            guard !picked.isEmpty else { continue }
+
+            // Verify obscurity concurrently (Last.fm throttles internally).
+            // Outcomes per artist: verified (listener count), unknownArtist
+            // (Last.fm doesn't know them — skip), serviceError (Last.fm itself
+            // failed — counted to detect a full outage).
+            enum CheckOutcome { case listeners(Int), unknownArtist, serviceError }
+            let outcomes = await withTaskGroup(
+                of: (ItunesPreviewService.ItunesTrack, CheckOutcome).self
+            ) { group in
+                for itunes in picked {
+                    group.addTask {
+                        do {
+                            if let listeners = try await check(itunes.artistName) {
+                                return (itunes, .listeners(listeners))
+                            }
+                            return (itunes, .unknownArtist)
+                        } catch {
+                            return (itunes, .serviceError)
+                        }
+                    }
+                }
+                var collected: [(ItunesPreviewService.ItunesTrack, CheckOutcome)] = []
+                for await result in group { collected.append(result) }
+                return collected
+            }
+            attemptedChecks += outcomes.count
+            failedChecks += outcomes.filter {
+                if case .serviceError = $0.1 { return true }; return false
+            }.count
+
+            var verifiedCount = 0
+            for (itunes, outcome) in outcomes {
+                guard case .listeners(let listeners) = outcome else { continue }
+                let key = itunes.artistName.lowercased()
+                // Mark every checked artist seen (kept or too popular) so a
+                // later genre never pays for the same Last.fm lookup twice.
+                guard seenArtists.insert(key).inserted else { continue }
+                guard listeners <= maxListeners else { continue }
+                guard tracks.count < maxCandidates else { break }
                 tracks.append(itunes.toSpotifyTrack(
                     previewURL: itunes.previewUrl,
-                    popularity: Self.itunesFallbackPopularity
+                    popularity: Self.pseudoPopularity(listeners: listeners)
                 ))
+                verifiedCount += 1
             }
-            print("🍏 iTunes fallback: '\(genre)' yielded \(picked.count) tracks")
+            print("🍏 iTunes fallback: '\(genre)' verified \(verifiedCount)/\(picked.count) obscure artists")
         }
-        print("🍏 iTunes fallback produced \(tracks.count) guaranteed candidates")
+
+        if tracks.isEmpty && catalogReached && attemptedChecks > 0 && failedChecks == attemptedChecks {
+            // Apple's catalog answered, but not one artist's popularity could
+            // be verified — Last.fm is unreachable. Honest, retryable error.
+            print("🍏 iTunes fallback: catalog reachable, popularity service down")
+            throw AppleMusicError.popularityUnavailable
+        }
+        print("🍏 iTunes fallback produced \(tracks.count) verified hidden-jam candidates")
         return tracks
     }
 
-    /// Obscurity estimate assigned to guaranteed-fallback tracks.
-    static let itunesFallbackPopularity = 12
+    /// Inverse of `pseudoPopularity(listeners:)`: the maximum Last.fm listener
+    /// count that still passes a given 0-100 popularity threshold.
+    /// threshold 15 ("Deep Cuts") → ~62 listeners; 30 → ~4k; 45 → ~250k.
+    /// (Made internal for unit tests.)
+    static func maxListeners(forPopularityThreshold threshold: Int) -> Int {
+        let exponent = Double(threshold) * 3.0 / 25.0
+        return max(0, Int(pow(10.0, exponent)) - 1)
+    }
 
     /// Pure selection logic for the guaranteed fallback. Deterministic and
     /// fully unit-testable:

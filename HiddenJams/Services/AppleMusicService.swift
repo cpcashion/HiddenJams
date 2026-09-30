@@ -11,6 +11,7 @@
 import Foundation
 import Combine
 import MusicKit
+import MediaPlayer
 
 /// Apple Music integration via MusicKit. Plain class (like SpotifyAuthManager);
 /// published state is updated on the main thread.
@@ -87,11 +88,69 @@ class AppleMusicService: ObservableObject {
         print("🍏 Fetched \(tracks.count) Apple Music library tracks")
         return tracks
     }
+
+    // MARK: - Hidden Gems Playlist
+
+    /// The playlist swiped-right gems land in — the Apple Music mirror of the
+    /// Spotify "Hidden Jams" playlist.
+    static let hiddenGemsPlaylistName = "Hidden Gems"
+
+    /// Adds a catalog track (by iTunes Store ID) to the user's "Hidden Gems"
+    /// playlist, creating the playlist on first use. Uses the on-device media
+    /// library (MediaPlayer) — no developer token or web API needed.
+    func saveTrackToHiddenGemsPlaylist(storeID: Int) async throws {
+        guard isAuthorized else { throw AppleMusicError.notAuthorized }
+        if MPMediaLibrary.authorizationStatus() != .authorized {
+            let status = await withCheckedContinuation { cont in
+                MPMediaLibrary.requestAuthorization { s in cont.resume(returning: s) }
+            }
+            guard status == .authorized else { throw AppleMusicError.notAuthorized }
+        }
+        let playlist = try await hiddenGemsPlaylist()
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            playlist.addItem(withProductID: NSNumber(value: storeID)) { error in
+                if let error {
+                    cont.resume(throwing: error)
+                } else {
+                    cont.resume()
+                }
+            }
+        }
+        print("🍏 Added store ID \(storeID) to Apple Music '\(Self.hiddenGemsPlaylistName)' playlist")
+    }
+
+    /// Finds the existing "Hidden Gems" playlist or creates it.
+    private func hiddenGemsPlaylist() async throws -> MPMediaPlaylist {
+        if let existing = MPMediaQuery.playlists().collections?
+            .compactMap({ $0 as? MPMediaPlaylist })
+            .first(where: {
+                ($0.value(forProperty: MPMediaPlaylistPropertyName) as? String)
+                    == Self.hiddenGemsPlaylistName
+            }) {
+            return existing
+        }
+        let metadata = MPMediaPlaylistCreationMetadata(name: Self.hiddenGemsPlaylistName)
+        return try await withCheckedThrowingContinuation { cont in
+            MPMediaLibrary.default().getPlaylist(with: UUID(), creationMetadata: metadata) { playlist, error in
+                if let playlist {
+                    cont.resume(returning: playlist)
+                } else {
+                    cont.resume(throwing: error ?? AppleMusicError.fetchFailed(
+                        "Couldn't create the Hidden Gems playlist in your library."
+                    ))
+                }
+            }
+        }
+    }
 }
 
 enum AppleMusicError: LocalizedError {
     case notAuthorized
     case fetchFailed(String)
+    /// Apple's catalog is reachable but no artist's popularity could be
+    /// verified (the popularity lookup is temporarily unavailable). Served
+    /// instead of mislabeling unverified mainstream tracks as hidden gems.
+    case popularityUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -99,6 +158,8 @@ enum AppleMusicError: LocalizedError {
             return "Apple Music access is not authorized. Connect Apple Music to analyze your library."
         case .fetchFailed(let message):
             return "Couldn't read your Apple Music library: \(message)"
+        case .popularityUnavailable:
+            return "We couldn't check what's underground right now — the popularity lookup is temporarily unavailable. Try again in a bit."
         }
     }
 }
