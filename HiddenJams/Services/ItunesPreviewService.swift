@@ -9,7 +9,14 @@
 
 import Foundation
 
-class ItunesPreviewService {
+/// Abstraction over the iTunes Search API catalog. Lets the discovery
+/// pipeline (and its tests) swap in a stub without touching the network.
+protocol ItunesCatalog {
+    func searchTrack(name: String, artist: String) async -> ItunesPreviewService.ItunesTrack?
+    func searchGenreTracks(genre: String, limit: Int) async -> [ItunesPreviewService.ItunesTrack]
+}
+
+class ItunesPreviewService: ItunesCatalog {
     private let baseURL = "https://itunes.apple.com/search"
 
     struct ItunesResponse: Codable {
@@ -75,6 +82,34 @@ class ItunesPreviewService {
 
     func findPreview(for trackName: String, artist: String) async -> String? {
         await searchTrack(name: trackName, artist: artist)?.previewUrl
+    }
+
+    /// Direct genre discovery via the iTunes Search API.
+    ///
+    /// This is the guaranteed-discovery backend of last resort: it needs no
+    /// API key, no Last.fm, and no Spotify token. If the device can reach
+    /// Apple at all (which Apple Music itself requires), this returns tracks.
+    /// Results arrive newest-relevance-first with preview URLs, artwork, and
+    /// genre metadata inline — no second lookup needed.
+    func searchGenreTracks(genre: String, limit: Int = 200) async -> [ItunesTrack] {
+        var components = URLComponents(string: baseURL)!
+        components.queryItems = [
+            URLQueryItem(name: "term", value: genre),
+            URLQueryItem(name: "media", value: "music"),
+            URLQueryItem(name: "entity", value: "song"),
+            URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 200))")
+        ]
+
+        guard let url = components.url else { return [] }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(ItunesResponse.self, from: data)
+            return response.results
+        } catch {
+            print("⚠️ iTunes genre search failed for '\(genre)': \(error.localizedDescription)")
+            return []
+        }
     }
 
     /// Full iTunes Search API lookup for a track. Returns the best fuzzy match

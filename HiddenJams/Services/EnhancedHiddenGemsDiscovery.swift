@@ -577,12 +577,52 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// followers), and the iTunes Search API resolves playable 30s previews
     /// plus artwork. Candidates are synthesized into the SpotifyTrack shape so
     /// the rest of the pipeline (filters, scoring, playback) works unchanged.
+    ///
+    /// Entry point: tries the personalized Last.fm pipeline first, then the
+    /// guaranteed iTunes genre fallback (no Last.fm / Spotify needed). Only
+    /// throws when Apple's own catalog is unreachable — i.e. the device is
+    /// effectively offline.
     private func discoverViaLastFmAppleMusic(
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
-        maxCandidates: Int = 120
+        maxCandidates: Int = 120,
+        itunesService: any ItunesCatalog = ItunesPreviewService()
     ) async throws -> [SpotifyTrack] {
-        let itunesService = ItunesPreviewService()
+        var candidates = await lastFmAppleCandidates(
+            profile: profile,
+            seedTracks: seedTracks,
+            maxCandidates: maxCandidates,
+            itunesService: itunesService
+        )
+        if candidates.isEmpty {
+            print("🍏 Last.fm pipeline yielded nothing — engaging guaranteed iTunes genre fallback")
+            await updateProgress("Exploring fresh sounds...")
+            candidates = await itunesGenreFallbackCandidates(
+                profile: profile,
+                seedTracks: seedTracks,
+                maxCandidates: maxCandidates,
+                itunesService: itunesService
+            )
+        }
+        guard !candidates.isEmpty else {
+            // Only reachable when the iTunes Search API itself is unreachable —
+            // Apple's own infrastructure, which Apple Music also requires.
+            throw AppleMusicError.fetchFailed(
+                "Couldn't reach Apple's music catalog. Check your connection and try again."
+            )
+        }
+        return candidates
+    }
+
+    /// The Last.fm-powered Apple discovery pipeline. Never throws: every
+    /// failure mode degrades to an empty result so the caller can engage the
+    /// guaranteed iTunes fallback instead of surfacing an error.
+    private func lastFmAppleCandidates(
+        profile: ListeningProfile,
+        seedTracks: [LibraryTrack],
+        maxCandidates: Int = 120,
+        itunesService: any ItunesCatalog = ItunesPreviewService()
+    ) async -> [SpotifyTrack] {
 
         // Don't recommend songs the user already has (cross-source, by name)
         let knownKeys = Set(seedTracks.map { $0.dedupeKey })
@@ -679,9 +719,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
 
         guard !similar.isEmpty else {
-            // Only reachable with no network access or a total Last.fm outage —
-            // every empty-library case now falls back to genre seeds first.
-            throw AppleMusicError.fetchFailed("Couldn't reach the music catalog. Check your connection and try again.")
+            // Soft-fail: the caller engages the guaranteed iTunes fallback.
+            // (Previously this threw "Couldn't reach the music catalog".)
+            print("🍏 Last.fm similar-track lookup yielded nothing — deferring to iTunes fallback")
+            return []
         }
 
         // 2. Best matches first; one candidate per artist.
@@ -730,9 +771,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🍏 No <100k-listener candidates — falling back to <500k listeners")
         }
         guard !gated.isEmpty else {
-            throw AppleMusicError.fetchFailed(
-                "Every similar artist was too well-known (or their stats couldn't be checked). Try moving the popularity slider up."
-            )
+            // Soft-fail: every similar artist was too well-known (or their
+            // stats couldn't be checked) — the iTunes fallback doesn't need
+            // listener stats, so let it try.
+            print("🍏 All similar artists too well-known — deferring to iTunes fallback")
+            return []
         }
 
         // 4. Resolve playable previews + artwork via iTunes
@@ -751,11 +794,123 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
         print("🍏 Apple Music discovery produced \(candidates.count) candidates")
         guard !candidates.isEmpty else {
-            throw AppleMusicError.fetchFailed(
-                "Found \(gated.count) candidate artists but no playable previews. Try again later."
-            )
+            // Soft-fail: candidates existed but none resolved to a playable
+            // iTunes preview — the genre fallback queries iTunes directly and
+            // only keeps results that already carry a preview URL.
+            print("🍏 No playable previews resolved — deferring to iTunes fallback")
+            return []
         }
         return candidates
+    }
+
+    // MARK: - Guaranteed Discovery (iTunes genre fallback)
+
+    /// The discovery backend of last resort. Queries the iTunes Search API
+    /// directly for each of the user's top genres — no Last.fm, no Spotify
+    /// token, no API key. Never throws; returns [] only when Apple's own
+    /// catalog is unreachable (device effectively offline).
+    ///
+    /// This is what guarantees every Apple Music user sees hidden jams:
+    /// every layer above can fail (bad network, Last.fm outage, empty
+    /// library, no profile) and this layer still produces playable tracks.
+    internal func itunesGenreFallbackCandidates(
+        profile: ListeningProfile,
+        seedTracks: [LibraryTrack],
+        maxCandidates: Int = 120,
+        itunesService: any ItunesCatalog = ItunesPreviewService()
+    ) async -> [SpotifyTrack] {
+        let knownKeys = Set(seedTracks.map { $0.dedupeKey })
+        let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
+        let genres = ranked.isEmpty
+            ? ["alternative", "indie", "electronic", "hip-hop"]
+            : Array(ranked.prefix(4))
+
+        var tracks: [SpotifyTrack] = []
+        var seenArtists = Set<String>()
+        for genre in genres {
+            guard tracks.count < maxCandidates else { break }
+            await updateProgress("Exploring \(genre)...")
+            let results = await itunesService.searchGenreTracks(genre: genre)
+            let picked = Self.selectFallbackTracks(
+                from: results,
+                genre: genre,
+                knownKeys: knownKeys,
+                seenArtists: seenArtists,
+                limit: maxCandidates - tracks.count
+            )
+            for itunes in picked {
+                seenArtists.insert(itunes.artistName.lowercased())
+                // Deep-tail genre results are the least-mainstream tracks the
+                // catalog surfaces for the term — a conservative low
+                // obscurity estimate so they pass the default popularity
+                // slider. (No listener stats exist outside Last.fm.)
+                tracks.append(itunes.toSpotifyTrack(
+                    previewURL: itunes.previewUrl,
+                    popularity: Self.itunesFallbackPopularity
+                ))
+            }
+            print("🍏 iTunes fallback: '\(genre)' yielded \(picked.count) tracks")
+        }
+        print("🍏 iTunes fallback produced \(tracks.count) guaranteed candidates")
+        return tracks
+    }
+
+    /// Obscurity estimate assigned to guaranteed-fallback tracks.
+    static let itunesFallbackPopularity = 12
+
+    /// Pure selection logic for the guaranteed fallback. Deterministic and
+    /// fully unit-testable:
+    ///  1. Keep only results with a playable preview URL.
+    ///  2. Keep genre-relevant results (loose primaryGenreName match); if the
+    ///     genre filter would leave almost nothing (catalog naming mismatch),
+    ///     fall back to the unfiltered-with-preview list rather than nothing.
+    ///  3. Exclude tracks already in the user's library.
+    ///  4. One track per artist.
+    ///  5. Skip the head of the results (a genre search ranks the mainstream
+    ///     first) and shuffle the tail, so the fallback surfaces hidden jams,
+    ///     not chart hits.
+    static func selectFallbackTracks(
+        from results: [ItunesPreviewService.ItunesTrack],
+        genre: String,
+        knownKeys: Set<String>,
+        seenArtists: Set<String>,
+        limit: Int
+    ) -> [ItunesPreviewService.ItunesTrack] {
+        func norm(_ s: String) -> String {
+            s.lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        let genreNorm = norm(genre)
+
+        var pool = results.filter { $0.previewUrl != nil }
+        let genreMatched = pool.filter { track in
+            guard let g = track.primaryGenreName else { return false }
+            let n = norm(g)
+            return n.contains(genreNorm) || genreNorm.contains(n)
+        }
+        // Only trust the genre filter when it leaves a healthy pool — a
+        // catalog naming mismatch must never zero out the guarantee.
+        if genreMatched.count >= 8 { pool = genreMatched }
+
+        // Exclude the user's library (same key format as dedupeKey).
+        pool = pool.filter { track in
+            let key = LibraryTrack.normalize(track.trackName)
+                + " " + LibraryTrack.normalize(track.artistName)
+            return !knownKeys.contains(key)
+        }
+
+        // One track per artist; skip artists already picked for other genres.
+        var seen = seenArtists
+        pool = pool.filter { track in
+            let key = track.artistName.lowercased()
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
+        }
+
+        // Skip the mainstream head, shuffle the tail.
+        let skip = pool.count > 8 ? pool.count / 4 : 0
+        let tail = Array(pool.dropFirst(skip)).shuffled()
+        return Array(tail.prefix(max(limit, 0)))
     }
 
     /// Map Last.fm listener counts onto Spotify's 0-100 popularity scale so
