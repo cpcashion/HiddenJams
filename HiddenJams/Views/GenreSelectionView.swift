@@ -52,7 +52,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Color.white.opacity(0.1))
+                                    .background(Theme.Colors.textPrimary.opacity(0.1))
                                     .cornerRadius(12)
                             }
                             
@@ -64,7 +64,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Color.white.opacity(0.1))
+                                    .background(Theme.Colors.textPrimary.opacity(0.1))
                                     .cornerRadius(12)
                             }
                         }
@@ -123,7 +123,7 @@ struct GenreSelectionView: View {
                         }) {
                             Text("Apply")
                                 .font(Theme.Typography.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(Theme.Colors.buttonText)
                                 .padding(.horizontal, 60)
                                 .padding(.vertical, 14)
                                 .background(
@@ -236,7 +236,7 @@ struct GenrePillContent: View {
             .overlay(
                 Capsule()
                     .stroke(
-                        isSelected ? pillColor : Color.white.opacity(0.3),
+                        isSelected ? pillColor : Theme.Colors.textPrimary.opacity(0.3),
                         lineWidth: 1
                     )
             )

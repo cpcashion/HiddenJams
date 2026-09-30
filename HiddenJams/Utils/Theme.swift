@@ -11,54 +11,98 @@ struct Theme {
     // MARK: - Colors
     
     struct Colors {
-        // Brand Colors - Gold "Hidden Gems" theme
-        static let gemGold = Color(hex: "F59E0B")         // Primary accent
-        static let gemGoldLight = Color(hex: "FBBF24")    // Light gold
-        static let gemGoldDark = Color(hex: "D97706")     // Dark gold
-        static let spotifyGreen = gemGold                  // Alias for compatibility
-        static let spotifyBlack = Color(hex: "000000")    // Pure Black
-        static let spotifyDarkGray = Color(hex: "121212") // Off-black
-        
-        // Premium Gradients - Gold
-        static let primaryGradient = LinearGradient(
-            colors: [Color(hex: "F59E0B"), Color(hex: "FBBF24")],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        
-        static let goldGradient = LinearGradient(
-            colors: [Color(hex: "D97706"), Color(hex: "F59E0B"), Color(hex: "FBBF24")],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        
-        static let backgroundGradient = LinearGradient(
-            colors: [Color(hex: "000000"), Color(hex: "121212")],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        
-        static let cardGradient = LinearGradient(
-            colors: [
-                Color(hex: "181818"),
-                Color(hex: "121212")
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        
+        // All colors are computed from the current appearance mode so the
+        // whole UI re-themes instantly when the user flips the switch.
+        // Dark = signature gold "hidden gems" look.
+        // Light = monochrome with blue accent pops.
+        private static var isLight: Bool { ThemeManager.shared.isLight }
+
+        // Brand Colors
+        static var gemGold: Color { // Primary accent: gold in dark, blue pop in light
+            isLight ? Color(hex: "2563EB") : Color(hex: "F59E0B")
+        }
+        static var gemGoldLight: Color {
+            isLight ? Color(hex: "60A5FA") : Color(hex: "FBBF24")
+        }
+        static var gemGoldDark: Color {
+            isLight ? Color(hex: "1E40AF") : Color(hex: "D97706")
+        }
+        static var spotifyGreen: Color { gemGold } // Alias for compatibility
+        static var spotifyBlack: Color { // Primary background
+            isLight ? Color(hex: "FFFFFF") : Color(hex: "000000")
+        }
+        static var spotifyDarkGray: Color { // Secondary background
+            isLight ? Color(hex: "F4F4F5") : Color(hex: "121212")
+        }
+
+        // Brand Gradients
+        static var primaryGradient: LinearGradient {
+            LinearGradient(
+                colors: isLight
+                    ? [Color(hex: "2563EB"), Color(hex: "60A5FA")]
+                    : [Color(hex: "F59E0B"), Color(hex: "FBBF24")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        static var goldGradient: LinearGradient {
+            LinearGradient(
+                colors: isLight
+                    ? [Color(hex: "1E40AF"), Color(hex: "2563EB"), Color(hex: "60A5FA")]
+                    : [Color(hex: "D97706"), Color(hex: "F59E0B"), Color(hex: "FBBF24")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        static var backgroundGradient: LinearGradient {
+            LinearGradient(
+                colors: isLight
+                    ? [Color(hex: "FFFFFF"), Color(hex: "F4F4F5")]
+                    : [Color(hex: "000000"), Color(hex: "121212")],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+
+        static var cardGradient: LinearGradient {
+            LinearGradient(
+                colors: isLight
+                    ? [Color(hex: "FFFFFF"), Color(hex: "F1F1F1")]
+                    : [Color(hex: "181818"), Color(hex: "121212")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
         // Accent Colors
-        static let accentGold = Color(hex: "F59E0B")
-        static let accentPurple = Color(hex: "8B5CF6")
-        static let accentBlue = Color(hex: "3B82F6")
-        static let accentPink = Color(hex: "EC4899")
-        
-        // Text Colors - High Contrast
-        static let textPrimary = Color(hex: "FFFFFF")
-        static let textSecondary = Color(hex: "9CA3AF")
-        static let textTertiary = Color(hex: "6B7280")
-        static let error = Color(hex: "EF4444")
-        static let buttonText = Color(hex: "121212") // Dark grey, almost black
+        static var accentGold: Color {
+            isLight ? Color(hex: "2563EB") : Color(hex: "F59E0B")
+        }
+        static var accentPurple: Color {
+            // Decorative glow only — keep monochrome in light mode
+            isLight ? Color(hex: "9CA3AF") : Color(hex: "8B5CF6")
+        }
+        static var accentBlue: Color { Color(hex: "3B82F6") } // Blue in both modes
+        static var accentPink: Color {
+            isLight ? Color(hex: "2563EB") : Color(hex: "EC4899")
+        }
+
+        // Text Colors
+        static var textPrimary: Color {
+            isLight ? Color(hex: "111827") : Color(hex: "FFFFFF")
+        }
+        static var textSecondary: Color {
+            isLight ? Color(hex: "6B7280") : Color(hex: "9CA3AF")
+        }
+        static var textTertiary: Color {
+            isLight ? Color(hex: "9CA3AF") : Color(hex: "6B7280")
+        }
+        static var error: Color { Color(hex: "EF4444") }
+        static var buttonText: Color { // Text on accent buttons
+            isLight ? Color(hex: "FFFFFF") : Color(hex: "121212")
+        }
     }
     
     // MARK: - Typography
@@ -99,10 +143,12 @@ struct Theme {
     // MARK: - Shadows
     
     struct Shadows {
-        static let small = Shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-        static let medium = Shadow(color: .black.opacity(0.3), radius: 6, y: 2)
-        static let large = Shadow(color: .black.opacity(0.4), radius: 12, y: 4)
-        static let glow = Shadow(color: Theme.Colors.gemGold.opacity(0.15), radius: 15, y: 0)
+        // Computed so the gold/blue glow follows the appearance mode
+        // (static lets would capture the dark-mode color forever).
+        static var small: Shadow { Shadow(color: .black.opacity(0.2), radius: 2, y: 1) }
+        static var medium: Shadow { Shadow(color: .black.opacity(0.3), radius: 6, y: 2) }
+        static var large: Shadow { Shadow(color: .black.opacity(0.4), radius: 12, y: 4) }
+        static var glow: Shadow { Shadow(color: Theme.Colors.gemGold.opacity(0.15), radius: 15, y: 0) }
     }
     
     struct Shadow {

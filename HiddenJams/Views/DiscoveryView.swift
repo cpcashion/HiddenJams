@@ -213,7 +213,7 @@ struct TrackCard: View {
                     
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.title3)
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.Colors.buttonText)
                 }
             }
         }
@@ -224,7 +224,7 @@ struct TrackCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                .stroke(isPlaying ? Theme.Colors.spotifyGreen : Color.white.opacity(0.08), lineWidth: isPlaying ? 2 : 1)
+                .stroke(isPlaying ? Theme.Colors.spotifyGreen : Theme.Colors.textPrimary.opacity(0.08), lineWidth: isPlaying ? 2 : 1)
         )
         .applyShadow(Theme.Shadows.medium)
     }

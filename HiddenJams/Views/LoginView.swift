@@ -145,7 +145,7 @@ struct LoginView: View {
                 Text(title)
                     .font(Theme.Typography.headline)
             }
-            .foregroundColor(.white)
+            .foregroundColor(Theme.Colors.buttonText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.md)
             .background(disabled ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(gradient))

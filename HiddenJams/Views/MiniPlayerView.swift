@@ -59,7 +59,7 @@ struct MiniPlayerView: View {
                     .fill(Theme.Colors.cardGradient)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(Theme.Colors.textPrimary.opacity(0.1), lineWidth: 1)
                     )
             )
             .padding(.horizontal, Theme.Spacing.md)

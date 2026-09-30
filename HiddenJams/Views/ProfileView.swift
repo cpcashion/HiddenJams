@@ -15,6 +15,7 @@ struct ProfileView: View {
     @StateObject private var profileDataService = ProfileDataService()
     @StateObject private var savedGems = SavedGemsStore.shared
     @EnvironmentObject var audioManager: AudioPreviewManager
+    @EnvironmentObject var themeManager: ThemeManager
 
     @State private var selectedTimeRange: TimeRange = .longTerm
     @State private var hasLoadedData = false
@@ -22,7 +23,7 @@ struct ProfileView: View {
     
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Theme.Colors.spotifyBlack.ignoresSafeArea()
             
             if profileDataService.isLoading && !hasLoadedData {
                 loadingView
@@ -46,9 +47,9 @@ struct ProfileView: View {
                         } else if sourceManager.appleMusicConnected {
                             appleMusicSummarySection
                         }
+                        appearanceSection
                         logoutSection
-                        Spacer(minLength: 100)
-                    }
+                        Spacer(minLength: 100)                    }
                     .padding(.horizontal, 20)
                     .padding(.top, 60) // Account for status bar
                 }
@@ -68,10 +69,10 @@ struct ProfileView: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-                .tint(.white)
+                .tint(Theme.Colors.textPrimary)
             Text(profileDataService.loadingMessage)
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(Theme.Colors.textSecondary)
         }
     }
     
@@ -84,7 +85,7 @@ struct ProfileView: View {
                 AsyncImage(url: imageUrl) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
-                    Circle().fill(Color.white.opacity(0.1))
+                    Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
                 }
                 .frame(width: 64, height: 64)
                 .clipShape(Circle())
@@ -97,23 +98,23 @@ struct ProfileView: View {
                     .clipShape(Circle())
             } else {
                 Circle()
-                    .fill(Color.white.opacity(0.1))
+                    .fill(Theme.Colors.textPrimary.opacity(0.1))
                     .frame(width: 64, height: 64)
                     .overlay(
                         Text(String(authManager.user?.displayName?.prefix(1) ?? "?"))
                             .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.textPrimary)
                     )
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(authManager.user?.displayName ?? "")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.textPrimary)
                 
                 Text("Your listening profile")
                     .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(Theme.Colors.textSecondary)
             }
             
             Spacer()
@@ -129,7 +130,7 @@ struct ProfileView: View {
             statItem(value: profileDataService.stats.formattedListeningTime, label: "Recent")
         }
         .padding(.vertical, 20)
-        .background(Color.white.opacity(0.05))
+        .background(Theme.Colors.textPrimary.opacity(0.05))
         .cornerRadius(12)
     }
     
@@ -137,10 +138,10 @@ struct ProfileView: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             Text(label)
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(Theme.Colors.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -168,7 +169,7 @@ struct ProfileView: View {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFill()
                     } placeholder: {
-                        Rectangle().fill(Color.white.opacity(0.1))
+                        Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
                     }
                     .frame(width: 100, height: 100)
                     .cornerRadius(6)
@@ -176,12 +177,12 @@ struct ProfileView: View {
                 
                 Text(track.name)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.textPrimary)
                     .lineLimit(1)
                 
                 Text(track.artistNames)
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(Theme.Colors.textSecondary)
                     .lineLimit(1)
             }
             .frame(width: 100)
@@ -203,11 +204,11 @@ struct ProfileView: View {
                 ForEach(Array(tracksForTimeRange.prefix(5).enumerated()), id: \.element.id) { index, track in
                     trackRow(rank: index + 1, track: track)
                     if index < 4 {
-                        Divider().background(Color.white.opacity(0.1))
+                        Divider().background(Theme.Colors.textPrimary.opacity(0.1))
                     }
                 }
             }
-            .background(Color.white.opacity(0.03))
+            .background(Theme.Colors.textPrimary.opacity(0.03))
             .cornerRadius(12)
         }
     }
@@ -226,19 +227,19 @@ struct ProfileView: View {
                 Button(action: { selectedTimeRange = range }) {
                     Text(shortLabel(for: range))
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(selectedTimeRange == range ? .black : .white.opacity(0.5))
+                        .foregroundColor(selectedTimeRange == range ? Theme.Colors.buttonText : Theme.Colors.textSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
                             selectedTimeRange == range ?
-                            Capsule().fill(Color.white) :
+                            Capsule().fill(Theme.Colors.gemGold) :
                             Capsule().fill(Color.clear)
                         )
                 }
             }
         }
         .padding(3)
-        .background(Capsule().fill(Color.white.opacity(0.1)))
+        .background(Capsule().fill(Theme.Colors.textPrimary.opacity(0.1)))
     }
     
     private func shortLabel(for range: TimeRange) -> String {
@@ -254,14 +255,14 @@ struct ProfileView: View {
             HStack(spacing: 14) {
                 Text("\(rank)")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(Theme.Colors.textSecondary)
                     .frame(width: 24)
                 
                 if let url = track.album.images.first?.url {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFill()
                     } placeholder: {
-                        Rectangle().fill(Color.white.opacity(0.1))
+                        Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
                     }
                     .frame(width: 44, height: 44)
                     .cornerRadius(4)
@@ -270,11 +271,11 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.Colors.textPrimary)
                         .lineLimit(1)
                     Text(track.artistNames)
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(Theme.Colors.textSecondary)
                         .lineLimit(1)
                 }
                 
@@ -282,7 +283,7 @@ struct ProfileView: View {
                 
                 Image(systemName: "play.fill")
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.3))
+                    .foregroundColor(Theme.Colors.textTertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -313,33 +314,33 @@ struct ProfileView: View {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFill()
                     } placeholder: {
-                        Circle().fill(Color.white.opacity(0.1))
+                        Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
                     }
                     .frame(width: 72, height: 72)
                     .clipShape(Circle())
                 } else {
                     Circle()
-                        .fill(Color.white.opacity(0.1))
+                        .fill(Theme.Colors.textPrimary.opacity(0.1))
                         .frame(width: 72, height: 72)
                         .overlay(
                             Text(String(artist.name.prefix(1)))
                                 .font(.system(size: 24, weight: .medium))
-                                .foregroundColor(.white.opacity(0.5))
+                                .foregroundColor(Theme.Colors.textSecondary)
                         )
                 }
                 
                 if rank <= 3 {
                     Text("\(rank)")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.black)
+                        .foregroundColor(Theme.Colors.spotifyBlack)
                         .frame(width: 18, height: 18)
-                        .background(Circle().fill(Color.white))
+                        .background(Circle().fill(Theme.Colors.textPrimary))
                 }
             }
             
             Text(artist.name)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
                 .lineLimit(1)
                 .frame(width: 72)
         }
@@ -359,7 +360,7 @@ struct ProfileView: View {
                     audioBar("Acoustic", value: features.acousticness)
                 }
                 .padding(16)
-                .background(Color.white.opacity(0.03))
+                .background(Theme.Colors.textPrimary.opacity(0.03))
                 .cornerRadius(12)
                 
                 HStack(spacing: 12) {
@@ -374,16 +375,16 @@ struct ProfileView: View {
         HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(Theme.Colors.textSecondary)
                 .frame(width: 90, alignment: .leading)
             
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Rectangle()
-                        .fill(Color.white.opacity(0.1))
+                        .fill(Theme.Colors.textPrimary.opacity(0.1))
                         .cornerRadius(2)
                     Rectangle()
-                        .fill(Color.white.opacity(0.8))
+                        .fill(Theme.Colors.textPrimary.opacity(0.8))
                         .cornerRadius(2)
                         .frame(width: geo.size.width * value)
                 }
@@ -392,7 +393,7 @@ struct ProfileView: View {
             
             Text("\(Int(value * 100))%")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(Theme.Colors.textSecondary)
                 .frame(width: 36, alignment: .trailing)
         }
     }
@@ -401,14 +402,14 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(Theme.Colors.textSecondary)
             Text(value)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color.white.opacity(0.03))
+        .background(Theme.Colors.textPrimary.opacity(0.03))
         .cornerRadius(8)
     }
     
@@ -430,19 +431,60 @@ struct ProfileView: View {
     private func genreChip(_ name: String) -> some View {
         Text(name)
             .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.white.opacity(0.8))
+            .foregroundColor(Theme.Colors.textSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.08))
+            .background(Theme.Colors.textPrimary.opacity(0.08))
             .cornerRadius(16)
     }
     
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Appearance")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(Theme.Colors.textPrimary)
+
+            HStack(spacing: 0) {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            themeManager.mode = theme
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: theme.iconName)
+                                .font(.system(size: 14, weight: .medium))
+                            Text(theme.displayName)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(themeManager.mode == theme
+                                         ? Theme.Colors.buttonText
+                                         : Theme.Colors.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            themeManager.mode == theme
+                            ? Theme.Colors.gemGold
+                            : Color.clear
+                        )
+                        .cornerRadius(10)
+                    }
+                }
+            }
+            .padding(4)
+            .background(Theme.Colors.textPrimary.opacity(0.08))
+            .cornerRadius(14)
+        }
+    }
+
     // MARK: - Logout
     
     private var logoutSection: some View {
         VStack(spacing: 16) {
             Divider()
-                .background(Color.white.opacity(0.1))
+                .background(Theme.Colors.textPrimary.opacity(0.1))
                 .padding(.vertical, 8)
             
             Button(action: {
@@ -458,7 +500,7 @@ struct ProfileView: View {
                 .foregroundColor(.red.opacity(0.9))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(Color.white.opacity(0.05))
+                .background(Theme.Colors.textPrimary.opacity(0.05))
                 .cornerRadius(12)
             }
         }
@@ -490,7 +532,7 @@ struct ProfileView: View {
             if sourceManager.connectedSources.count == 2 {
                 Text("Blending both libraries for analysis")
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(Theme.Colors.textSecondary)
             }
         }
     }
@@ -498,11 +540,11 @@ struct ProfileView: View {
     private func sourceRow(icon: String, name: String, connected: Bool, connect: @escaping () -> Void, disconnect: @escaping () -> Void) -> some View {
         HStack {
             Image(systemName: icon)
-                .foregroundColor(connected ? .green : .white.opacity(0.4))
+                .foregroundColor(connected ? .green : Theme.Colors.textTertiary)
                 .frame(width: 28)
             Text(name)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             Spacer()
             if connected {
                 Text("Connected")
@@ -515,17 +557,17 @@ struct ProfileView: View {
             } else {
                 Button("Connect") { connect() }
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(Color.white)
+                    .background(Theme.Colors.gemGold)
                     .cornerRadius(16)
                     .disabled(isConnectingAppleMusic)
             }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
-        .background(Color.white.opacity(0.05))
+        .background(Theme.Colors.textPrimary.opacity(0.05))
         .cornerRadius(12)
     }
 
@@ -555,7 +597,7 @@ struct ProfileView: View {
                 Spacer()
                 Text("\(savedGems.savedTracks.count)")
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(Theme.Colors.textSecondary)
             }
             ForEach(savedGems.savedTracks.prefix(10)) { track in
                 trackRow(rank: 0, track: track)
@@ -571,27 +613,27 @@ struct ProfileView: View {
             if profileAnalyzer.profile.topArtists.isEmpty {
                 Text("Analyze your Apple Music library from the Home tab to see your taste profile.")
                     .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(Theme.Colors.textSecondary)
             } else {
                 ForEach(Array(profileAnalyzer.profile.topArtists.prefix(5).enumerated()), id: \.element.id) { index, artist in
                     HStack {
                         Text("\(index + 1)")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(Theme.Colors.textSecondary)
                             .frame(width: 24)
                         Text(artist.name)
                             .font(.system(size: 15))
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.textPrimary)
                         Spacer()
                         Text("\(artist.frequency) plays")
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(Theme.Colors.textSecondary)
                     }
                 }
                 if !profileAnalyzer.profile.genreWeights.isEmpty {
                     Text("Top genres: " + profileAnalyzer.profile.genreWeights.sorted { $0.value > $1.value }.prefix(5).map { $0.key }.joined(separator: ", "))
                         .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(Theme.Colors.textSecondary)
                         .padding(.top, 4)
                 }
             }
@@ -603,7 +645,7 @@ struct ProfileView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.white.opacity(0.4))
+            .foregroundColor(Theme.Colors.textSecondary)
             .textCase(.uppercase)
             .tracking(0.5)
     }

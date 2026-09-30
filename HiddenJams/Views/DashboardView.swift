@@ -39,7 +39,7 @@ struct DashboardView: View {
         NavigationView {
             ZStack {
                 // Solid black background
-                Color.black.ignoresSafeArea()
+                Theme.Colors.spotifyBlack.ignoresSafeArea()
                 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
@@ -133,12 +133,12 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(timeBasedGreeting)
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.textPrimary)
                 
                 if let name = userFirstName {
                     Text(name)
                         .font(.system(size: 34, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.Colors.textPrimary)
                 }
             }
             
@@ -205,7 +205,7 @@ struct DashboardView: View {
             
             Text("Analyze Your Library")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             
             Text("We'll analyze your music to find tracks that match your taste")
                 .font(.system(size: 14))
@@ -230,7 +230,7 @@ struct DashboardView: View {
         .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
+                .fill(Theme.Colors.textPrimary.opacity(0.05))
         )
     }
     
@@ -240,7 +240,7 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             Text("Analyzing Your Music")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             
             Text(profileAnalyzer.currentStep)
                 .font(.system(size: 14))
@@ -260,7 +260,7 @@ struct DashboardView: View {
         .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
+                .fill(Theme.Colors.textPrimary.opacity(0.05))
         )
     }
     
@@ -277,17 +277,17 @@ struct DashboardView: View {
                     if selectedGenres.isEmpty {
                         Text("All Genres")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.textPrimary)
                     } else if selectedGenres.count > 3 {
                         // Show count for many genres
                         Text("\(selectedGenres.count) Genres")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.textPrimary)
                     } else {
                         // Show genre names for 1-3 genres
                         Text(Array(selectedGenres).sorted().joined(separator: ", "))
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.textPrimary)
                             .lineLimit(1)
                     }
                 }
@@ -319,7 +319,7 @@ struct DashboardView: View {
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(Theme.Colors.textPrimary.opacity(0.05))
             )
         }
         .buttonStyle(.plain)
@@ -401,13 +401,13 @@ struct DashboardView: View {
             QuickStat(value: "\(profileAnalyzer.profile.totalTracksAnalyzed)", label: "Tracks")
             
             Rectangle()
-                .fill(Color.white.opacity(0.1))
+                .fill(Theme.Colors.textPrimary.opacity(0.1))
                 .frame(width: 1, height: 40)
             
             QuickStat(value: "\(discoveryEngine.discoveredGems.count)", label: "Gems Found")
             
             Rectangle()
-                .fill(Color.white.opacity(0.1))
+                .fill(Theme.Colors.textPrimary.opacity(0.1))
                 .frame(width: 1, height: 40)
             
             QuickStat(value: "\(profileAnalyzer.profile.genreWeights.count)", label: "Genres")
@@ -415,7 +415,7 @@ struct DashboardView: View {
         .padding(.vertical, 16)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(0.05))
+                .fill(Theme.Colors.textPrimary.opacity(0.05))
         )
     }
     
@@ -425,7 +425,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recently Discovered")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -448,7 +448,7 @@ struct QuickStat: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Theme.Colors.textPrimary)
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.gray)
@@ -473,7 +473,7 @@ struct CompactGemCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(gem.track.name)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.textPrimary)
                     .lineLimit(1)
                 
                 Text(gem.track.artistNames)

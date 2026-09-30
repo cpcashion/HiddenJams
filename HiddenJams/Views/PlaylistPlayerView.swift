@@ -436,7 +436,7 @@ struct PlaylistPlayerView: View {
                     Text("Skip")
                 }
                 .font(Theme.Typography.caption)
-                .foregroundColor(Color.white.opacity(0.25)) // Much darker
+                .foregroundColor(Theme.Colors.textTertiary)
                 
                 Spacer()
                 
@@ -449,7 +449,7 @@ struct PlaylistPlayerView: View {
                         
                         Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
                             .font(.title2)
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.Colors.buttonText)
                     }
                 }
                 .disabled(!audioPlayer.hasPreview)
@@ -461,7 +461,7 @@ struct PlaylistPlayerView: View {
                     Image(systemName: "arrow.right")
                 }
                 .font(Theme.Typography.caption)
-                .foregroundColor(Color.white.opacity(0.25)) // Much darker
+                .foregroundColor(Theme.Colors.textTertiary)
             }
             .padding(.horizontal, Theme.Spacing.xl)
             
@@ -477,7 +477,7 @@ struct PlaylistPlayerView: View {
                         Text("Open in Spotify")
                     }
                     .font(Theme.Typography.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, Theme.Spacing.lg)
                     .padding(.vertical, Theme.Spacing.sm)
                     .background(Theme.Colors.spotifyGreen)
@@ -495,7 +495,7 @@ struct PlaylistPlayerView: View {
                     ZStack(alignment: .leading) {
                         // Background Track
                         Rectangle()
-                            .fill(Color.white.opacity(0.2))
+                            .fill(Theme.Colors.textPrimary.opacity(0.2))
                             .frame(height: 4)
                         
                         // Active Progress

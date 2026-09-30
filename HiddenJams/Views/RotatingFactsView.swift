@@ -37,11 +37,11 @@ struct RotatingFactsView: View {
         .padding(Theme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
-                .fill(Color.white.opacity(0.03))
+                .fill(Theme.Colors.textPrimary.opacity(0.03))
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
-                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                .stroke(Theme.Colors.textPrimary.opacity(0.05), lineWidth: 1)
         )
         .onAppear {
             // Load and shuffle facts on each appearance

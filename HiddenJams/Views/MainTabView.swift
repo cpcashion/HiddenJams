@@ -390,7 +390,7 @@ struct EmptyPlayerStateView: View {
                 Button(action: action) {
                     Text("Go to Home")
                         .font(Theme.Typography.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.Colors.buttonText)
                         .padding(.horizontal, 32)
                         .padding(.vertical, 16)
                         .background(Theme.Colors.spotifyGreen)

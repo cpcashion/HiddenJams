@@ -16,6 +16,7 @@ struct HiddenJamsApp: App {
     @StateObject private var audioManager = AudioPreviewManager()
     @StateObject private var appleMusicService = AppleMusicService()
     @StateObject private var sourceManager: MusicSourceManager
+    @StateObject private var themeManager = ThemeManager.shared
 
     init() {
         let auth = SpotifyAuthManager()
@@ -39,7 +40,11 @@ struct HiddenJamsApp: App {
                 .environmentObject(audioManager)
                 .environmentObject(appleMusicService)
                 .environmentObject(sourceManager)
-                .preferredColorScheme(.dark)
+                .environmentObject(themeManager)
+                // Dynamic: follows the appearance switch on the profile page.
+                // Reading themeManager.mode here makes the whole UI re-render
+                // on toggle (no state is rebuilt, so playback etc. survive).
+                .preferredColorScheme(themeManager.mode == .light ? .light : .dark)
                 .task {
                     // Fetch fresh music facts on app launch
                     await factsService.fetchMusicFacts()

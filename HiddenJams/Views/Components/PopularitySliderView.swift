@@ -51,7 +51,7 @@ struct PopularitySliderView: View {
                     ZStack(alignment: .leading) {
                         // Track background
                         Capsule()
-                            .fill(Color.white.opacity(0.1))
+                            .fill(Theme.Colors.textPrimary.opacity(0.1))
                             .frame(height: 8)
                         
                         // Filled track

@@ -28,7 +28,7 @@ struct DiscoveryLoadingView: View {
     var body: some View {
         ZStack {
             // Clean dark background
-            Color.black.ignoresSafeArea()
+            Theme.Colors.spotifyBlack.ignoresSafeArea()
             
             // Subtle ambient glow
             RadialGradient(
@@ -56,7 +56,7 @@ struct DiscoveryLoadingView: View {
                 VStack(spacing: 12) {
                     Text("Discovering")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.Colors.textPrimary)
                     
                     Text(searchMessages[messageIndex])
                         .font(.system(size: 15, weight: .regular))
