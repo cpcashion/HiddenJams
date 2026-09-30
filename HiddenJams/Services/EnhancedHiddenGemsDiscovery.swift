@@ -29,6 +29,17 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private var followerThreshold = 50_000  // Artists with fewer followers (raised from 15k)
     private var recencyMonths = 12  // Tracks from last N months
     
+    // The DnB-related genre names that can trigger Drum & Bass mode.
+    private static let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
+
+    /// True only when the user's genre selection consists EXCLUSIVELY of
+    /// DnB-related genres. A broad selection (e.g. "Select All", which happens
+    /// to include "Drum and Bass" among dozens of genres) must not trigger it.
+    static func isDnBExclusiveSelection(_ selected: Set<String>?) -> Bool {
+        guard let selected = selected, !selected.isEmpty else { return false }
+        return Set(selected.map { $0.lowercased() }).isSubset(of: dnbGenres)
+    }
+
     // Relaxed settings for genres with limited Spotify search support
     private func getPopularityThreshold(for genres: [String]) -> Int {
         let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
@@ -227,10 +238,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // STRICT MODE: Determine active genres
             var strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty)
             
-            // DRUM AND BASS OVERRIDE: Force electronic + DnB search!
-            if let selected = selectedGenres {
-                let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
-                if !Set(selected.map { $0.lowercased() }).isDisjoint(with: dnbGenres) {
+            // DRUM AND BASS OVERRIDE: only when the user's selection is EXCLUSIVELY
+            // DnB-related genres. A broad selection (e.g. "Select All", which
+            // includes "Drum and Bass" among dozens of genres) must NOT collapse
+            // the whole discovery session into DnB mode.
+            if let selected = selectedGenres, !selected.isEmpty {
+                if Self.isDnBExclusiveSelection(selected) {
                     print("🎵 DRUM AND BASS MODE ACTIVATED")
                     isDnBMode = true  // Set persistent flag for filter bypass!
                     activeGenres = ["drum-and-bass", "electronic", "jungle"]  // Include actual DnB genres
@@ -774,7 +787,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 "genre:electronic jungle",
                 "genre:electronic breakbeat",
                 "genre:electronic 170 bpm",
-                "genre:electronic bassline",
+                // NOTE: "bassline" intentionally omitted — Spotify matches it
+                // against track TITLES, flooding results with UK bassline-house
+                // tracks literally named "Bassline" instead of drum & bass.
             ]
             
             print("🎵 DnB Mode: Using genre:electronic + DnB keywords for proper filtering")

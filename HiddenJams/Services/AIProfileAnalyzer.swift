@@ -209,6 +209,16 @@ class AIProfileAnalyzer: ObservableObject {
             // Build profile (source-agnostic)
             let newProfile = buildProfile(tracks: libraryTracks)
 
+            // Merge genre weights with any previously analyzed sources instead of
+            // replacing them: connecting a second source (e.g. Apple Music after
+            // Spotify) must ADD genres to the profile, never wipe the ones already
+            // learned. The genre picker and discovery should only ever grow.
+            let existingGenreWeights: [String: Double] = await MainActor.run { self.profile.genreWeights }
+            let mergedGenreWeights = Self.mergedGenreWeights(existing: existingGenreWeights, new: newProfile.genreWeights)
+            if mergedGenreWeights.count != newProfile.genreWeights.count {
+                print("🎵 Genre merge: \(existingGenreWeights.count) existing + \(newProfile.genreWeights.count) new → \(mergedGenreWeights.count) total")
+            }
+
             await MainActor.run {
                 currentStep = "Generating personality..."
                 analysisProgress = 0.9
@@ -216,10 +226,13 @@ class AIProfileAnalyzer: ObservableObject {
 
             // Generate taste profile
             var finalProfile = newProfile
-            finalProfile.listeningPersonality = TasteProfileGenerator.generatePersonality(from: newProfile)
-            finalProfile.profileSummary = TasteProfileGenerator.generateProfileSummary(from: newProfile)
-            finalProfile.topInsights = TasteProfileGenerator.generateTopInsights(from: newProfile)
-            finalProfile.topGenresFormatted = TasteProfileGenerator.generateTopGenresFormatted(from: newProfile)
+            // Use the merged cross-source genre weights so personality text and the
+            // genre picker reflect everything learned, not just this analysis run.
+            finalProfile.genreWeights = mergedGenreWeights
+            finalProfile.listeningPersonality = TasteProfileGenerator.generatePersonality(from: finalProfile)
+            finalProfile.profileSummary = TasteProfileGenerator.generateProfileSummary(from: finalProfile)
+            finalProfile.topInsights = TasteProfileGenerator.generateTopInsights(from: finalProfile)
+            finalProfile.topGenresFormatted = TasteProfileGenerator.generateTopGenresFormatted(from: finalProfile)
 
             // Audio features are Spotify-only; skip gracefully otherwise
             await MainActor.run {
@@ -364,6 +377,18 @@ class AIProfileAnalyzer: ObservableObject {
     }
 
     // MARK: - Genre Analysis
+
+    /// Merges genre weights from a fresh analysis into the weights learned from
+    /// previously analyzed sources. The union only ever grows: connecting a new
+    /// source (e.g. Apple Music after Spotify) adds its genres instead of
+    /// wiping the ones already learned. Per-genre weight is the max seen.
+    static func mergedGenreWeights(existing: [String: Double], new: [String: Double]) -> [String: Double] {
+        var merged = existing
+        for (genre, weight) in new {
+            merged[genre] = max(merged[genre] ?? 0, weight)
+        }
+        return merged
+    }
 
     private func calculateGenreWeights(tracks: [LibraryTrack]) -> [String: Double] {
         var genreCounts: [String: Int] = [:]
