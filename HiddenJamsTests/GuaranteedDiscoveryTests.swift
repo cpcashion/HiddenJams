@@ -235,7 +235,10 @@ struct GuaranteedDiscoveryTests {
         )
 
         #expect(!tracks.isEmpty)
-        #expect(tracks.allSatisfy { $0.name.hasPrefix("Hip-hop Song") })
+        // Case-insensitive: Swift's `capitalized` renders "hip-hop" as
+        // "Hip-Hop" (hyphen is a word boundary) — don't depend on that.
+        #expect(tracks.allSatisfy { $0.name.lowercased().hasPrefix("hip-hop song") })
+        #expect(!tracks.contains { $0.name.lowercased().hasPrefix("rock song") })
     }
 
     @Test func itunesFallbackDropsArtistsAboveListenerCap() async throws {
