@@ -329,3 +329,4 @@ struct GuaranteedDiscoveryTests {
         #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 15) == 62)
         #expect(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 30) == 3980)
     }
+}
