@@ -89,6 +89,66 @@ struct Theme {
             isLight ? Color(hex: "2563EB") : Color(hex: "EC4899")
         }
 
+        // MARK: - Genre neon palette (Chris's lotus screenshots, build 22)
+        //
+        // Every selected genre gets its own color. Neon by design: these pop
+        // on black AND on white, so the palette is identical in both themes.
+
+        /// The neon palette, sampled from Chris's neon-lotus screenshots:
+        /// hot pink, electric blue, cyan, lime, golden yellow, orange, red,
+        /// violet, emerald, fuchsia.
+        static let genrePalette: [Color] = [
+            Color(hex: "FF4D8D"), // hot pink
+            Color(hex: "3B82F6"), // electric blue
+            Color(hex: "22D3EE"), // cyan
+            Color(hex: "A3E635"), // lime
+            Color(hex: "FACC15"), // golden yellow
+            Color(hex: "FB923C"), // orange
+            Color(hex: "EF4444"), // red
+            Color(hex: "A855F7"), // violet
+            Color(hex: "34D399"), // emerald
+            Color(hex: "D946EF"), // fuchsia
+        ]
+
+        /// Assigns every genre in the set a distinct palette color.
+        /// Deterministic: the same genre always hashes to the same base slot
+        /// (FNV-1a over the lowercased name — stable across launches), and
+        /// hash collisions probe forward to the next free slot. Any selection
+        /// of up to `genrePalette.count` genres gets all-different colors;
+        /// keys are lowercased genre names.
+        static func genreColors(for genres: [String]) -> [String: Color] {
+            let sorted = genres.map { $0.lowercased() }.sorted()
+            var used = Set<Int>()
+            var result: [String: Color] = [:]
+            for genre in sorted {
+                var idx = stableGenreHash(genre) % genrePalette.count
+                while used.contains(idx) { idx = (idx + 1) % genrePalette.count }
+                used.insert(idx)
+                result[genre] = genrePalette[idx]
+            }
+            return result
+        }
+
+        /// Readable text color on top of a saturated genre color —
+        /// near-black on light neons (lime, yellow, cyan), white on the rest.
+        static func textOnGenreColor(_ color: Color) -> Color {
+            let ui = UIColor(color)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return luminance > 0.55 ? Color(hex: "111827") : .white
+        }
+
+        /// FNV-1a 64-bit — stable across launches (Swift's Hasher is not).
+        private static func stableGenreHash(_ s: String) -> Int {
+            var hash: UInt64 = 0xcbf29ce484222325
+            for byte in s.lowercased().utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3
+            }
+            return Int(hash & 0x7fffffffffffffff)
+        }
+
         // Text Colors
         static var textPrimary: Color {
             isLight ? Color(hex: "111827") : Color(hex: "FFFFFF")

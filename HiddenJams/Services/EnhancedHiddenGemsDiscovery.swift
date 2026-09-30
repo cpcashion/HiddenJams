@@ -9,6 +9,20 @@
 import Foundation
 import Combine
 
+/// Verified artist signals for the Apple Music discovery path: obscurity
+/// (Last.fm listeners) plus genre tags (Last.fm taxonomy). Both come from a
+/// single `artist.getinfo` call. Tags let the pipeline verify a candidate
+/// artist actually belongs to the session's genre WITHOUT matching on
+/// track/artist names — a song merely *called* "Jungle" can never pass a
+/// drum & bass session on its name again.
+struct VerifiedArtist: Sendable {
+    /// Last.fm total listeners (0 when unknown)
+    let listeners: Int
+    /// Normalized genre tags: lowercased, alphanumeric only
+    /// (e.g. "drum and bass" -> "drumandbass")
+    let tags: Set<String>
+}
+
 class EnhancedHiddenGemsDiscovery: ObservableObject {
     @Published var discoveredGems: [RecommendedTrack] = []
     @Published var isDiscovering = false
@@ -246,7 +260,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 if Self.isDnBExclusiveSelection(selected) {
                     print("🎵 DRUM AND BASS MODE ACTIVATED")
                     isDnBMode = true  // Set persistent flag for filter bypass!
-                    activeGenres = ["drum-and-bass", "electronic", "jungle"]  // Include actual DnB genres
+                    // NOTE: never put a bare genre word like "jungle" here.
+                    // These strings become iTunes/Spotify catalog queries, and
+                    // catalogs match them against track/artist NAMES — "jungle"
+                    // returns songs *titled* "Jungle" (Drake, H.E.R., …), not
+                    // drum & bass. Genre membership is verified per-artist via
+                    // Last.fm tags instead (see itunesGenreFallbackCandidates).
+                    activeGenres = ["drum-and-bass", "electronic"]
                     strictMode = false  // Disable strict genre validation
                 }
             }
@@ -838,7 +858,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         maxCandidates: Int = 120,
         sessionGenres: [String] = [],
         popularityThreshold: Int? = nil,
-        listenerCheck: ((String) async throws -> Int?)? = nil,
+        artistCheck: ((String) async throws -> VerifiedArtist?)? = nil,
         itunesService: any ItunesCatalog = ItunesPreviewService()
     ) async throws -> [SpotifyTrack] {
         let knownKeys = Set(seedTracks.map { $0.dedupeKey })
@@ -864,12 +884,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let genres = Array(resolved.prefix(genreCount))
         let perGenreLimit = genreCount > 4 ? 100 : 200
 
-        // Default listener check: Last.fm artist.getinfo. A decoding failure
-        // means Last.fm doesn't know the artist (skip it); any other failure
-        // is service-level (count it — all-failed means Last.fm is down).
-        let check: (String) async throws -> Int? = listenerCheck ?? { artist in
+        // Default artist check: one Last.fm artist.getinfo call yields BOTH the
+        // listener count (obscurity) and the genre tags (genre verification).
+        // A decoding failure means Last.fm doesn't know the artist (skip it);
+        // any other failure is service-level (count it — all-failed means
+        // Last.fm is down).
+        let check: (String) async throws -> VerifiedArtist? = artistCheck ?? { artist in
             do {
-                return try await self.lastFmService.getArtistInfo(name: artist).listeners
+                let info = try await self.lastFmService.getArtistInfo(name: artist)
+                return VerifiedArtist(
+                    listeners: info.listeners,
+                    tags: Set(info.tagNames.map(Self.normGenreTag))
+                )
             } catch let error as LastFmError {
                 if case .decodingError = error { return nil }
                 throw error
@@ -907,19 +933,19 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             )
         }
 
-        // Phase 2 — verify: one concurrent listener-check pass over every
-        // picked artist. Outcomes: verified (listener count), unknownArtist
+        // Phase 2 — verify: one concurrent artist-check pass over every picked
+        // artist. Outcomes: verified (listeners + genre tags), unknownArtist
         // (Last.fm doesn't know them — skip), serviceError (Last.fm itself
         // failed — counted to detect a full outage).
-        enum CheckOutcome { case listeners(Int), unknownArtist, serviceError }
+        enum CheckOutcome { case verified(VerifiedArtist), unknownArtist, serviceError }
         let outcomes = await withTaskGroup(
             of: (ItunesPreviewService.ItunesTrack, CheckOutcome).self
         ) { group in
             for itunes in gathered {
                 group.addTask {
                     do {
-                        if let listeners = try await check(itunes.artistName) {
-                            return (itunes, .listeners(listeners))
+                        if let signal = try await check(itunes.artistName) {
+                            return (itunes, .verified(signal))
                         }
                         return (itunes, .unknownArtist)
                     } catch {
@@ -935,9 +961,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let failedChecks = outcomes.filter {
             if case .serviceError = $0.1 { return true }; return false
         }.count
-        let verified: [(ItunesPreviewService.ItunesTrack, Int)] = outcomes.compactMap {
-            guard case .listeners(let listeners) = $0.1 else { return nil }
-            return ($0.0, listeners)
+        let verified: [(ItunesPreviewService.ItunesTrack, VerifiedArtist)] = outcomes.compactMap {
+            guard case .verified(let signal) = $0.1 else { return nil }
+            return ($0.0, signal)
         }
 
         if attemptedChecks > 0 && failedChecks == attemptedChecks {
@@ -947,6 +973,27 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             throw AppleMusicError.popularityUnavailable
         }
 
+        // Phase 2b — genre verification: the iTunes `term` parameter is pure
+        // TEXT search, so a candidate is never trusted on the query alone.
+        // Each artist's Last.fm genre tags (a real genre taxonomy —
+        // independent of track/artist names) must intersect the session's
+        // genre family. This is what stops a drum & bass session from serving
+        // a song merely *titled* "Jungle". Artists with no tag data are let
+        // through (can't-verify ≠ wrong genre), and the healthy-pool guard
+        // below keeps a taxonomy mismatch from ever zeroing out discovery.
+        let acceptedTags = Self.acceptedGenreTags(for: genres, families: genreFamilies)
+        let tagMatched = verified.filter { _, signal in
+            signal.tags.isEmpty || !signal.tags.isDisjoint(with: acceptedTags)
+        }
+        let genreVerified: [(ItunesPreviewService.ItunesTrack, VerifiedArtist)]
+        if tagMatched.count >= 8 {
+            genreVerified = tagMatched
+            print("🏷️ Genre-tag verification kept \(tagMatched.count)/\(verified.count) candidates")
+        } else {
+            genreVerified = verified
+            print("🏷️ Genre-tag verification too strict (\(tagMatched.count) matched) — keeping listener-verified pool")
+        }
+
         // Phase 3 — relax: try the user's strict cap first, then progressively
         // looser bands. The first cap that yields tracks wins, so discovery
         // ALWAYS returns music when the catalog answered — never a dead end
@@ -954,12 +1001,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let ladder = Self.listenerCapLadder(startingAt: strictCap)
         for (index, cap) in ladder.enumerated() {
             var tracks: [SpotifyTrack] = []
-            for (itunes, listeners) in verified {
-                guard listeners <= cap else { continue }
+            for (itunes, signal) in genreVerified {
+                guard signal.listeners <= cap else { continue }
                 guard tracks.count < maxCandidates else { break }
                 tracks.append(itunes.toSpotifyTrack(
                     previewURL: itunes.previewUrl,
-                    popularity: Self.pseudoPopularity(listeners: listeners)
+                    popularity: Self.pseudoPopularity(listeners: signal.listeners)
                 ))
             }
             if !tracks.isEmpty {
@@ -1074,6 +1121,32 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     ///  5. Skip the head of the results (a genre search ranks the mainstream
     ///     first) and shuffle the tail, so the fallback surfaces hidden jams,
     ///     not chart hits.
+    ///
+    /// Normalizes a genre/tag string for comparison: lowercased, alphanumeric
+    /// only ("Drum & Bass" -> "drumandbass", "hip-hop" -> "hiphop").
+    static func normGenreTag(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The set of normalized genre tags an artist may carry while still
+    /// belonging to the session's genres. Uses the genre-family map when a
+    /// session genre has one (so "drum-and-bass" accepts "liquid funk",
+    /// "neurofunk", …); otherwise the normalized genre name itself.
+    static func acceptedGenreTags(
+        for genres: [String],
+        families: [String: Set<String>]
+    ) -> Set<String> {
+        var out = Set<String>()
+        for genre in genres {
+            if let family = families[genre.lowercased()] {
+                out.formUnion(family.map(normGenreTag))
+            } else {
+                out.insert(normGenreTag(genre))
+            }
+        }
+        return out
+    }
+
     static func selectFallbackTracks(
         from results: [ItunesPreviewService.ItunesTrack],
         genre: String,
@@ -1125,25 +1198,25 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private func discoverViaSpotifyHipster(profile: ListeningProfile, activeGenres: [String], token: String) async throws -> [SpotifyTrack] {
         var candidates: [SpotifyTrack] = []
         
-        // SPECIAL DnB HANDLING: Spotify search doesn't support genre:"drum-and-bass" well
-        // Use electronic genre filter + DnB-specific terms instead of plain label names
+        // SPECIAL DnB HANDLING: free-text DnB keywords match track/artist
+        // NAMES, so this path uses pure `genre:` operators only.
         if self.isDnBMode {
-            // Use genre:electronic combined with DnB-specific terms
-            // This prevents returning "Hospital Bed" by country singers or "Medicine" by random artists
+            // Pure `genre:` operators only — NO free-text keywords. Spotify
+            // matches unquoted words against track/artist NAMES, which is how
+            // "jungle" flooded results with songs *called* "Jungle" (and why
+            // "bassline" had to be omitted: it matched UK bassline-house
+            // tracks literally named "Bassline"). `genre:jungle` is fine —
+            // that's the genre operator filtering Spotify's genre taxonomy,
+            // not a name match.
             let dnbSearchTerms = [
-                "genre:electronic dnb",
-                "genre:electronic drum and bass",
-                "genre:electronic liquid funk",
-                "genre:electronic neurofunk",
-                "genre:electronic jungle",
-                "genre:electronic breakbeat",
-                "genre:electronic 170 bpm",
-                // NOTE: "bassline" intentionally omitted — Spotify matches it
-                // against track TITLES, flooding results with UK bassline-house
-                // tracks literally named "Bassline" instead of drum & bass.
+                "genre:\"drum and bass\"",
+                "genre:\"liquid funk\"",
+                "genre:neurofunk",
+                "genre:jungle",
+                "genre:breakbeat",
             ]
             
-            print("🎵 DnB Mode: Using genre:electronic + DnB keywords for proper filtering")
+            print("🎵 DnB Mode: Using pure genre: operators (no name-matching keywords)")
             
             for term in dnbSearchTerms.shuffled().prefix(6) {
                 do {

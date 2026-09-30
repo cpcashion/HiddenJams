@@ -296,13 +296,17 @@ struct DashboardView: View {
                 
                 // Genre preview chips (show only 1 to prevent layout issues)
                 if let firstGenre = selectedGenres.sorted().first {
+                    // Chip wears the genre's own neon color (same mapping as
+                    // the genre picker, so colors stay consistent).
+                    let chipColor = Theme.Colors.genreColors(for: Array(selectedGenres))[firstGenre.lowercased()]
+                        ?? Theme.Colors.gemGold
                     HStack(spacing: 6) {
-                        Text(firstGenre)
+                Text(firstGenre)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
+                            .foregroundColor(Theme.Colors.textPrimary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Capsule().fill(Theme.Colors.gemGold.opacity(0.25)))
+                            .background(Capsule().fill(chipColor.opacity(0.25)))
                         
                         if selectedGenres.count > 1 {
                             Text("+\(selectedGenres.count - 1)")

@@ -70,15 +70,52 @@ struct LastFmArtistInfoResponse: Codable {
 struct LastFmArtistInfo: Codable {
     let name: String
     let stats: LastFmArtistStats?
+    let tags: LastFmArtistTags?
 
     /// Total Last.fm listeners; 0 when unknown
     var listeners: Int {
         Int(stats?.listeners ?? "") ?? 0
     }
 
+    /// Raw genre tag names from Last.fm (e.g. "drum and bass", "liquid funk").
+    /// Used to verify a candidate artist actually belongs to the session's
+    /// genre — independent of track/artist NAMES, so a song merely *called*
+    /// "Jungle" can't pass as drum & bass.
+    var tagNames: [String] {
+        tags?.tag.map { $0.name } ?? []
+    }
+
     struct LastFmArtistStats: Codable {
         let listeners: String?
         let playcount: String?
+    }
+
+    /// Lenient: Last.fm sometimes returns `"tags": ""` or omits it; either
+    /// way we keep the artist's listener stats instead of failing the decode.
+    struct LastFmArtistTags: Codable {
+        let tag: [LastFmTag]
+
+        struct LastFmTag: Codable {
+            let name: String
+        }
+
+        enum CodingKeys: String, CodingKey { case tag }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            tag = (try? container.decode([LastFmTag].self, forKey: .tag)) ?? []
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, stats, tags
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        stats = try container.decodeIfPresent(LastFmArtistStats.self, forKey: .stats)
+        tags = try? container.decodeIfPresent(LastFmArtistTags.self, forKey: .tags)
     }
 }
 

@@ -356,12 +356,19 @@ struct LiquidTabButton: View {
         }) {
             Image(systemName: isSelected ? activeIcon : inactiveIcon)
                 .font(.system(size: 26, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : .secondary)
+                // Theme-aware: white pops on the dark bar, but is invisible
+                // on the light glass capsule — there the accent color marks
+                // the active tab.
+                .foregroundStyle(isSelected ? selectedTabColor : .secondary)
                 .frame(width: 60, height: 44)
                 .contentShape(Rectangle())
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
         }
         .buttonStyle(.plain)
+    }
+
+    private var selectedTabColor: Color {
+        ThemeManager.shared.isLight ? Theme.Colors.gemGold : .white
     }
 }
 

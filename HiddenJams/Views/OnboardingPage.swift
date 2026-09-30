@@ -15,12 +15,12 @@ struct OnboardingPage: View {
             Text(item.title)
                 .font(.system(size: 28, weight: .bold))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.Colors.textPrimary)
             
             Text(item.description)
                 .font(.body)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(Theme.Colors.textSecondary)
                 .padding(.horizontal, 32)
         }
         .padding()

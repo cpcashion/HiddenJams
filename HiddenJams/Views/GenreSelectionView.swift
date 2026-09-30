@@ -75,20 +75,21 @@ struct GenreSelectionView: View {
                         FlowLayout(spacing: 8) {
                             // Combine top genres and common genres, removing case-insensitive duplicates
                             let allGenres = Array(Set((commonGenres + topGenres).map { $0.lowercased() })).sorted()
-                            let totalCount = allGenres.count
-                            
-                            ForEach(Array(allGenres.enumerated()), id: \.element) { index, genre in
+                            // Distinct neon color per selected genre — stable
+                            // across launches (hash of the genre name), so the
+                            // same genre always wears the same color.
+                            let genreColorMap = Theme.Colors.genreColors(for: Array(selectedGenres))
+
+                            ForEach(allGenres, id: \.self) { genre in
                                 let isSelected = selectedGenres.contains(genre)
-                                // Calculate gradient position (0.0 = top-left, 1.0 = bottom-right)
-                                let gradientPosition = CGFloat(index) / CGFloat(max(totalCount - 1, 1))
-                                
+
                                 Button(action: {
                                     toggleGenre(genre)
                                 }) {
                                     GenrePillContent(
                                         genre: genre,
                                         isSelected: isSelected,
-                                        gradientPosition: gradientPosition
+                                        pillColor: genreColorMap[genre.lowercased()] ?? Theme.Colors.gemGold
                                     )
                                 }
                             }
@@ -192,46 +193,25 @@ struct GenreSelectionView: View {
     }
 }
 
-// MARK: - Genre Pill with Position-Based Gradient
+// MARK: - Genre Pill with per-genre neon color
 
 struct GenrePillContent: View {
     let genre: String
     let isSelected: Bool
-    let gradientPosition: CGFloat
-    
-    // Gold gradient colors (dark → medium → light)
-    private let gradientColors: [Color] = [
-        Color(hex: "B45309"),  // Dark amber
-        Color(hex: "D97706"),  // Amber
-        Color(hex: "F59E0B"),  // Gold
-        Color(hex: "FBBF24"),  // Light gold
-    ]
-    
-    private var pillColor: Color {
-        // Interpolate through the gradient based on position
-        let segments = gradientColors.count - 1
-        let scaledPosition = gradientPosition * CGFloat(segments)
-        let lowerIndex = Int(scaledPosition)
-        let upperIndex = min(lowerIndex + 1, segments)
-        let fraction = scaledPosition - CGFloat(lowerIndex)
-        
-        return interpolateColor(
-            from: gradientColors[lowerIndex],
-            to: gradientColors[upperIndex],
-            fraction: fraction
-        )
-    }
-    
+    /// The genre's own neon color (from Theme.Colors.genreColors — distinct
+    /// per selected genre, stable across launches).
+    let pillColor: Color
+
     var body: some View {
         Text(genre.capitalized)
             .font(Theme.Typography.body2)
             .fontWeight(isSelected ? .semibold : .medium)
-            .foregroundColor(isSelected ? .white : Theme.Colors.textSecondary)
+            .foregroundColor(isSelected ? Theme.Colors.textOnGenreColor(pillColor) : Theme.Colors.textSecondary)
             .padding(.vertical, 10)
             .padding(.horizontal, 16)
             .background(
                 Capsule()
-                    .fill(isSelected ? pillColor.opacity(0.6) : Color.clear)
+                    .fill(isSelected ? pillColor : Color.clear)
             )
             .overlay(
                 Capsule()
@@ -240,19 +220,9 @@ struct GenrePillContent: View {
                         lineWidth: 1
                     )
             )
+            .shadow(color: isSelected ? pillColor.opacity(0.45) : .clear, radius: 8, x: 0, y: 2)
             .scaleEffect(isSelected ? 1.02 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
-    }
-    
-    private func interpolateColor(from: Color, to: Color, fraction: CGFloat) -> Color {
-        let fromComponents = UIColor(from).cgColor.components ?? [0, 0, 0, 1]
-        let toComponents = UIColor(to).cgColor.components ?? [0, 0, 0, 1]
-        
-        let r = fromComponents[0] + (toComponents[0] - fromComponents[0]) * fraction
-        let g = fromComponents[1] + (toComponents[1] - fromComponents[1]) * fraction
-        let b = fromComponents[2] + (toComponents[2] - fromComponents[2]) * fraction
-        
-        return Color(red: r, green: g, blue: b)
     }
 }
 

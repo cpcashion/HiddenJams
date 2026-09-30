@@ -160,12 +160,22 @@ struct GuaranteedDiscoveryTests {
 
     // MARK: - End-to-end fallback
 
-    /// Canned listener counts: obscure artists pass, famous ones don't.
-    private func listenerCheck(obscure: Set<String> = []) -> (String) async throws -> Int? {
+    /// Canned artist verification: obscure artists pass, famous ones don't.
+    /// Tags default to empty — the genre-tag gate lets artists with no tag
+    /// data through (can't-verify ≠ wrong genre).
+    private func artistCheck(
+        listeners: [String: Int] = [:],
+        tags: [String: Set<String>] = [:],
+        defaultListeners: Int = 40
+    ) -> (String) async throws -> VerifiedArtist? {
         { artist in
-            if artist.lowercased().contains("famous") { return 2_000_000 }
-            if obscure.contains(artist) { return 40 }
-            return 40 // generic stub artist: comfortably under the default cap
+            if artist.lowercased().contains("famous") {
+                return VerifiedArtist(listeners: 2_000_000, tags: [])
+            }
+            return VerifiedArtist(
+                listeners: listeners[artist] ?? defaultListeners,
+                tags: tags[artist] ?? []
+            )
         }
     }
 
@@ -180,7 +190,7 @@ struct GuaranteedDiscoveryTests {
             profile: ListeningProfile(),
             seedTracks: [],
             maxCandidates: 20,
-            listenerCheck: listenerCheck(),
+            artistCheck: artistCheck(),
             itunesService: stub
         )
 
@@ -205,7 +215,7 @@ struct GuaranteedDiscoveryTests {
             profile: profile,
             seedTracks: [],
             maxCandidates: 10,
-            listenerCheck: listenerCheck(),
+            artistCheck: artistCheck(),
             itunesService: stub
         )
 
@@ -230,7 +240,7 @@ struct GuaranteedDiscoveryTests {
             seedTracks: [],
             maxCandidates: 10,
             sessionGenres: ["hip-hop"],
-            listenerCheck: listenerCheck(),
+            artistCheck: artistCheck(),
             itunesService: stub
         )
 
@@ -254,7 +264,7 @@ struct GuaranteedDiscoveryTests {
             seedTracks: [],
             maxCandidates: 10,
             sessionGenres: ["rock"],
-            listenerCheck: listenerCheck(),
+            artistCheck: artistCheck(),
             itunesService: stub
         )
 
@@ -275,7 +285,7 @@ struct GuaranteedDiscoveryTests {
             maxCandidates: 5,
             sessionGenres: ["indie"],
             popularityThreshold: 90, // accept everything the stub verifies
-            listenerCheck: { _ in 1_000 },
+            artistCheck: { _ in VerifiedArtist(listeners: 1_000, tags: []) },
             itunesService: stub
         )
 
@@ -300,7 +310,7 @@ struct GuaranteedDiscoveryTests {
                 seedTracks: [],
                 maxCandidates: 5,
                 sessionGenres: ["indie"],
-                listenerCheck: { _ in throw ServiceDown() },
+                artistCheck: { _ in throw ServiceDown() },
                 itunesService: stub
             )
             #expect(Bool(false), "expected popularityUnavailable to be thrown")
@@ -320,7 +330,7 @@ struct GuaranteedDiscoveryTests {
             _ = try await discovery.itunesGenreFallbackCandidates(
                 profile: ListeningProfile(),
                 seedTracks: [],
-                listenerCheck: listenerCheck(),
+                artistCheck: artistCheck(),
                 itunesService: StubCatalog()
             )
             #expect(Bool(false), "expected fetchFailed to be thrown")
@@ -348,7 +358,7 @@ struct GuaranteedDiscoveryTests {
             maxCandidates: 10,
             sessionGenres: ["reggae"],
             popularityThreshold: 15, // Deep Cuts: strict cap ≈ 500 listeners
-            listenerCheck: { _ in 3_000 }, // every artist above the strict band
+            artistCheck: { _ in VerifiedArtist(listeners: 3_000, tags: []) }, // every artist above the strict band
             itunesService: stub
         )
 
@@ -369,7 +379,7 @@ struct GuaranteedDiscoveryTests {
             maxCandidates: 10,
             sessionGenres: ["reggae"],
             popularityThreshold: 15,
-            listenerCheck: { _ in 200 }, // comfortably under the 500 cap
+            artistCheck: { _ in VerifiedArtist(listeners: 200, tags: []) }, // comfortably under the 500 cap
             itunesService: stub
         )
 
@@ -389,6 +399,63 @@ struct GuaranteedDiscoveryTests {
 
         let topLadder = EnhancedHiddenGemsDiscovery.listenerCapLadder(startingAt: 1_000_000)
         #expect(topLadder == [1_000_000])
+    }
+
+    // MARK: - Genre-name matching regression (Chris 2026-09-30)
+
+    /// Selecting Drum and Bass must never play songs that merely *match the
+    /// genre word* in their title or artist name (Chris 2026-09-30: the app
+    /// played "Jungle (feat. Mendy Worch)" and Drake's "Jungle" for a DnB
+    /// session). The iTunes `term` parameter is pure text search, so the
+    /// fallback verifies every candidate artist's Last.fm genre TAGS — a
+    /// real genre taxonomy independent of names.
+    ///
+    /// The stub catalog serves 12 genuine DnB tracks plus 2 name-bait tracks
+    /// titled "Jungle" whose *catalog* genre claims DnB but whose Last.fm
+    /// tags say hip-hop. Both must be dropped by tag verification.
+    @Test func dnbFallbackRejectsTracksMatchedOnlyByName() async throws {
+        var stub = StubCatalog()
+        var results: [ItunesPreviewService.ItunesTrack] = []
+        // 12 genuine DnB tracks (catalog genre + Last.fm tags agree).
+        for i in 0..<12 {
+            results.append(makeTrack(
+                id: i,
+                name: "Roller \(i)",
+                artist: "DnB Producer \(i)",
+                genre: "Jungle/Drum'n'bass"
+            ))
+        }
+        // 2 name-bait tracks: titled "Jungle", catalog genre claims DnB,
+        // but the artists are hip-hop by Last.fm's taxonomy.
+        results.append(makeTrack(id: 100, name: "Jungle", artist: "Name Bait A", genre: "Jungle/Drum'n'bass"))
+        results.append(makeTrack(id: 101, name: "Jungle (Remix)", artist: "Name Bait B", genre: "Jungle/Drum'n'bass"))
+        stub.resultsByGenre["drum-and-bass"] = results
+
+        var tagMap: [String: Set<String>] = [:]
+        for i in 0..<12 {
+            tagMap["DnB Producer \(i)"] = ["drumandbass", "liquidfunk"]
+        }
+        tagMap["Name Bait A"] = ["hiphop", "rap"]
+        tagMap["Name Bait B"] = ["hiphop", "trap"]
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            maxCandidates: 20,
+            sessionGenres: ["drum-and-bass"],
+            popularityThreshold: 45,
+            artistCheck: artistCheck(tags: tagMap),
+            itunesService: stub
+        )
+
+        // 14 picked, head-skip drops 3, tag gate drops the 2 name-baits.
+        let artists = Set(tracks.compactMap { $0.artists.first?.name })
+        #expect(tracks.count == 9, "expected 9 genuine DnB tracks, got \(tracks.count)")
+        #expect(!artists.contains("Name Bait A") && !artists.contains("Name Bait B"),
+                "name-bait artists must not survive genre-tag verification")
+        #expect(!tracks.contains { $0.name.lowercased().contains("jungle") },
+                "no track may be selected merely for matching the genre word")
     }
 
     @Test func maxListenersUsesUnderstandableBands() {

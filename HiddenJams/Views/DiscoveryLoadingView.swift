@@ -60,7 +60,7 @@ struct DiscoveryLoadingView: View {
                     
                     Text(searchMessages[messageIndex])
                         .font(.system(size: 15, weight: .regular))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(Theme.Colors.textSecondary)
                         .animation(.easeInOut(duration: 0.4), value: messageIndex)
                 }
                 
