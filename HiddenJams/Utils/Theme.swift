@@ -110,19 +110,29 @@ struct Theme {
             Color(hex: "D946EF"), // fuchsia
         ]
 
-        /// Assigns every genre in the set a distinct palette color.
+        /// Assigns every genre in the set a palette color.
         /// Deterministic: the same genre always hashes to the same base slot
         /// (FNV-1a over the lowercased name — stable across launches), and
         /// hash collisions probe forward to the next free slot. Any selection
-        /// of up to `genrePalette.count` genres gets all-different colors;
-        /// keys are lowercased genre names.
+        /// of up to `genrePalette.count` genres gets all-different colors.
+        /// The probe is BOUNDED by the palette size: once all 10 slots are
+        /// taken, colors repeat deterministically instead of spinning forever
+        /// (an unbounded probe here froze the app on the 11th selected genre
+        /// in build 22). Keys are lowercased genre names.
         static func genreColors(for genres: [String]) -> [String: Color] {
-            let sorted = genres.map { $0.lowercased() }.sorted()
+            let sorted = Array(Set(genres.map { $0.lowercased() })).sorted()
             var used = Set<Int>()
             var result: [String: Color] = [:]
             for genre in sorted {
                 var idx = stableGenreHash(genre) % genrePalette.count
-                while used.contains(idx) { idx = (idx + 1) % genrePalette.count }
+                var probes = 0
+                while used.contains(idx) && probes < genrePalette.count {
+                    idx = (idx + 1) % genrePalette.count
+                    probes += 1
+                }
+                // probes == genrePalette.count means every slot is taken;
+                // idx has wrapped back to the hashed slot, so the color
+                // repeats deterministically. Always terminates.
                 used.insert(idx)
                 result[genre] = genrePalette[idx]
             }
