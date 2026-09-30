@@ -830,7 +830,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         for genre in genres {
             guard tracks.count < maxCandidates else { break }
             await updateProgress("Exploring \(genre)...")
-            let results = await itunesService.searchGenreTracks(genre: genre)
+            let results = await itunesService.searchGenreTracks(genre: genre, limit: 200)
             let picked = Self.selectFallbackTracks(
                 from: results,
                 genre: genre,
