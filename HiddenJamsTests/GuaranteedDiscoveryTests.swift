@@ -105,7 +105,9 @@ struct GuaranteedDiscoveryTests {
             knownKeys: [owned.dedupeKey], seenArtists: [], limit: 10
         )
         #expect(!picked.contains { $0.trackId == 0 })
-        #expect(picked.count == 9)
+        // 9 survive the library exclusion; the mainstream-head skip (9/4 = 2)
+        // then drops the first two, leaving 7 hidden-jam candidates.
+        #expect(picked.count == 7)
     }
 
     @Test func fallbackOneTrackPerArtist() {
