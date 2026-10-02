@@ -543,8 +543,8 @@ struct GuaranteedDiscoveryTests {
         let tracks = try await discovery.itunesGenreFallbackCandidates(
             profile: ListeningProfile(),
             seedTracks: [],
-            sessionGenres: ["alternative"],
             maxCandidates: 20,
+            sessionGenres: ["alternative"],
             artistCheck: alwaysFails,
             itunesService: stub
         )
