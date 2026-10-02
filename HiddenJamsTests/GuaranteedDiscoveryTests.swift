@@ -470,4 +470,62 @@ struct GuaranteedDiscoveryTests {
         #expect(abs(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 30) - 5_000) <= 2)
         #expect(abs(EnhancedHiddenGemsDiscovery.maxListeners(forPopularityThreshold: 45) - 20_000) <= 5)
     }
+
+    // MARK: - Apple Music full batches (Chris 2026-10-01: Apple Music users
+    // saw ~5 songs per batch and had to keep hitting Discover)
+
+    @Test func appleMusicBatchTopsUpToFullBatch() async throws {
+        // The personalized pipeline yields only 5 — the old experience.
+        let pipeline = (0..<5).map { i in
+            makeTrack(id: 9000 + i, name: "Pipeline Song \(i)", artist: "Pipeline Artist \(i)", genre: "Rock")
+                .toSpotifyTrack(previewURL: "https://example.com/p\(i).m4a", popularity: 5)
+        }
+        // The fallback catalog holds 40 fresh rock tracks.
+        var stub = StubCatalog()
+        stub.resultsByGenre["rock"] = (0..<40).map { i in
+            makeTrack(id: i, name: "TopUp Song \(i)", artist: "TopUp Artist \(i)", genre: "Rock")
+        }
+
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.discoverViaLastFmAppleMusic(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            sessionGenres: ["rock"],
+            pipelineTracks: pipeline,
+            artistCheck: artistCheck(),
+            itunesService: stub
+        )
+
+        // Full batch: 5 personalized + 25 top-up, no duplicate artists.
+        #expect(tracks.count == EnhancedHiddenGemsDiscovery.appleMusicBatchTarget,
+                "expected a full \(EnhancedHiddenGemsDiscovery.appleMusicBatchTarget)-song batch, got \(tracks.count)")
+        let artists = tracks.map { $0.artistNames.lowercased() }
+        #expect(Set(artists).count == artists.count, "duplicate artists in batch")
+        #expect(tracks.prefix(5).allSatisfy { $0.artistNames.hasPrefix("Pipeline Artist") },
+                "personalized pipeline tracks must come first")
+        let pipelineArtists = Set(artists.prefix(5))
+        let topUpArtists = Set(artists.dropFirst(5))
+        #expect(pipelineArtists.isDisjoint(with: topUpArtists),
+                "top-up must not repeat pipeline artists")
+    }
+
+    @Test func appleMusicBatchSkipsTopUpWhenFull() async throws {
+        // Pipeline already meets the target — the fallback must not run.
+        // (The stub catalog is empty, so any fallback call would throw.)
+        let pipeline = (0..<30).map { i in
+            makeTrack(id: 9000 + i, name: "Pipeline Song \(i)", artist: "Pipeline Artist \(i)", genre: "Rock")
+                .toSpotifyTrack(previewURL: "https://example.com/p\(i).m4a", popularity: 5)
+        }
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.discoverViaLastFmAppleMusic(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            sessionGenres: ["rock"],
+            pipelineTracks: pipeline,
+            artistCheck: artistCheck(),
+            itunesService: StubCatalog()
+        )
+        #expect(tracks.count == EnhancedHiddenGemsDiscovery.appleMusicBatchTarget)
+    }
 }
+

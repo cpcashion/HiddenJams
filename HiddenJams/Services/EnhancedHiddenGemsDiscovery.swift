@@ -603,34 +603,64 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// guaranteed iTunes genre fallback (no Last.fm / Spotify needed). Only
     /// throws when Apple's own catalog is unreachable — i.e. the device is
     /// effectively offline.
-    private func discoverViaLastFmAppleMusic(
+    /// Apple Music discovery should hand the swipe deck a FULL batch (20-50
+    /// songs), not the handful the personalized pipeline often yields on its
+    /// own. The Last.fm similar-tracks path is the personal part; the iTunes
+    /// genre fallback tops it up to the batch target.
+    static let appleMusicBatchTarget = 30
+
+    /// - Parameters:
+    ///   - pipelineTracks: test seam — when provided, the real Last.fm
+    ///     pipeline is skipped and these tracks stand in as its result.
+    ///   - artistCheck: forwarded to the iTunes fallback (test seam).
+    internal func discoverViaLastFmAppleMusic(
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
         maxCandidates: Int = 120,
         sessionGenres: [String] = [],
+        pipelineTracks: [SpotifyTrack]? = nil,
+        artistCheck: ((String) async throws -> VerifiedArtist?)? = nil,
         itunesService: any ItunesCatalog = ItunesPreviewService()
     ) async throws -> [SpotifyTrack] {
-        var candidates = await lastFmAppleCandidates(
-            profile: profile,
-            seedTracks: seedTracks,
-            maxCandidates: maxCandidates,
-            sessionGenres: sessionGenres,
-            itunesService: itunesService
-        )
-        if candidates.isEmpty {
-            print("🍏 Last.fm pipeline yielded nothing — engaging guaranteed iTunes genre fallback")
-            await updateProgress("Exploring fresh sounds...")
-            // The fallback guarantees tracks whenever Apple's catalog answers
-            // (relaxing the obscurity band if needed). It throws honestly when
-            // the catalog is unreachable (fetchFailed) or the popularity
-            // service is down (popularityUnavailable) — both propagate as-is.
-            candidates = try await itunesGenreFallbackCandidates(
+        var candidates: [SpotifyTrack]
+        if let stubbed = pipelineTracks {
+            candidates = stubbed
+        } else {
+            candidates = await lastFmAppleCandidates(
                 profile: profile,
                 seedTracks: seedTracks,
                 maxCandidates: maxCandidates,
                 sessionGenres: sessionGenres,
                 itunesService: itunesService
             )
+        }
+        if candidates.count < Self.appleMusicBatchTarget {
+            let shortfall = Self.appleMusicBatchTarget - candidates.count
+            print("🍏 Last.fm pipeline yielded \(candidates.count) — topping up \(shortfall) from the iTunes genre fallback")
+            await updateProgress("Exploring fresh sounds...")
+            // The fallback guarantees tracks whenever Apple's catalog answers
+            // (relaxing the obscurity band if needed). It throws honestly when
+            // the catalog is unreachable (fetchFailed) or the popularity
+            // service is down (popularityUnavailable) — both propagate as-is.
+            let topUp = try await itunesGenreFallbackCandidates(
+                profile: profile,
+                seedTracks: seedTracks,
+                maxCandidates: maxCandidates,
+                sessionGenres: sessionGenres,
+                artistCheck: artistCheck,
+                itunesService: itunesService
+            )
+            // Never duplicate artists/tracks the personalized pipeline found.
+            let seenArtists = Set(candidates.map { $0.artistNames.lowercased() })
+            let seenKeys = Set(candidates.map {
+                LibraryTrack.normalize($0.name) + " " + LibraryTrack.normalize($0.artistNames)
+            })
+            let fresh = topUp.filter {
+                !seenArtists.contains($0.artistNames.lowercased())
+                    && !seenKeys.contains(LibraryTrack.normalize($0.name) + " " + LibraryTrack.normalize($0.artistNames))
+            }
+            candidates.append(contentsOf: fresh.prefix(shortfall))
+            print("🍏 Apple Music batch complete: \(candidates.count) tracks")
         }
         return candidates
     }
@@ -671,7 +701,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 if seen.insert(key).inserted {
                     pairs.append((seed.title, seed.artistName))
                 }
-                if pairs.count >= 8 { break }
+                if pairs.count >= 12 { break }
             }
             return pairs
         }
@@ -718,7 +748,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     let results = try await lastFmService.getSimilarTracks(
                         trackName: seed.track,
                         artistName: seed.artist,
-                        limit: 10
+                        limit: 15
                     )
                     for result in results {
                         similar.append(SimilarCandidate(

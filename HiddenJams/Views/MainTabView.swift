@@ -74,6 +74,9 @@ struct MainTabView: View {
                                         selectedGenres = decoded
                                     }
                                     
+                                    // "Discover More" must honor the popularity slider —
+                                    // it previously reset to default thresholds on every refresh.
+                                    // PopularitySliderSettings() loads the persisted slider value.
                                     await discoveryEngine.discoverHiddenGems(
                                         profile: profileAnalyzer.profile,
                                         userTracks: profileAnalyzer.userLibraryTracks.map { $0.id },
@@ -81,8 +84,10 @@ struct MainTabView: View {
                                         selectedGenres: selectedGenres,
                                         token: token,
                                         appleMusicSeeds: appleSeeds,
-                                        count: 30,
-                                        appendResults: false
+                                        count: 50,
+                                        appendResults: false,
+                                        popularityOverride: PopularitySliderSettings().popularityThreshold,
+                                        followerOverride: PopularitySliderSettings().followerThreshold
                                     )
                                 }
                             },
