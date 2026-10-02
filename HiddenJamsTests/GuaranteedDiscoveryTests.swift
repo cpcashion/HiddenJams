@@ -297,27 +297,26 @@ struct GuaranteedDiscoveryTests {
         })
     }
 
-    @Test func itunesFallbackThrowsHonestErrorWhenPopularityServiceDown() async throws {
+    /// Contract change (build 26): when the popularity service is down but
+    /// Apple's catalog answers, the fallback serves the genre-searched tail
+    /// unverified instead of throwing — "there should always be music."
+    @Test func itunesFallbackServesTailWhenPopularityServiceDown() async throws {
         var stub = StubCatalog()
         stub.resultsByGenre["indie"] = genreResults(genre: "indie", count: 12)
 
         let discovery = EnhancedHiddenGemsDiscovery()
         // Every listener check fails service-side, but the catalog answers.
         struct ServiceDown: Error {}
-        do {
-            _ = try await discovery.itunesGenreFallbackCandidates(
-                profile: ListeningProfile(),
-                seedTracks: [],
-                maxCandidates: 5,
-                sessionGenres: ["indie"],
-                artistCheck: { _ in throw ServiceDown() },
-                itunesService: stub
-            )
-            #expect(Bool(false), "expected popularityUnavailable to be thrown")
-        } catch let error as AppleMusicError {
-            if case .popularityUnavailable = error { /* expected */ }
-            else { #expect(Bool(false), "wrong error: \(error)") }
-        }
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            maxCandidates: 5,
+            sessionGenres: ["indie"],
+            artistCheck: { _ in throw ServiceDown() },
+            itunesService: stub
+        )
+        #expect(!tracks.isEmpty, "unverified tail must be served, not an error")
+        #expect(tracks.allSatisfy { $0.previewUrl != nil })
     }
 
     @Test func itunesFallbackThrowsFetchFailedWhenCatalogUnreachable() async throws {
