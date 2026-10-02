@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C9BEFFBE2ED679400033752E /* HiddenJamsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C9BEFFB62ED679400033752E /* HiddenJamsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C9BEFF6A2ED679420033752E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,6 +33,20 @@
 			remoteInfo = HiddenJamsWatch;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C9BEFFBF2ED679400033752E /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 16;
+			files = (
+				C9BEFFBE2ED679400033752E /* HiddenJamsWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		C9BEFF5C2ED679400033752E /* HiddenJams.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HiddenJams.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -165,6 +183,7 @@
 				C9BEFF582ED679400033752E /* Sources */,
 				C9BEFF592ED679400033752E /* Frameworks */,
 				C9BEFF5A2ED679400033752E /* Resources */,
+				C9BEFFBF2ED679400033752E /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
