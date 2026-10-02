@@ -411,11 +411,29 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     token: token
                 )
                 print("✨ After relaxation: \(filteredCandidates.count) hidden gems")
-                
+
                 // Restore original thresholds for next discovery session
                 // (but keep relaxed for this filtering round)
             }
-            
+
+            // LAST RESORT: if the persistent seen-history ate the batch (same
+            // narrow genre discovered over and over), recycle older gems
+            // instead of serving one song or nothing. "There should always
+            // be music." The user's own library and this session's seen sets
+            // still apply — only the 7-day history is ignored.
+            if filteredCandidates.count < 10 {
+                print("♻️ Batch too small (\(filteredCandidates.count)) — refilling from previously-seen gems")
+                await updateProgress("Digging deeper...")
+                filteredCandidates = try await applyFastFilters(
+                    tracks: allCandidates,
+                    selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
+                    activeGenres: activeGenres,
+                    token: token,
+                    ignoringHistory: true
+                )
+                print("♻️ After history-ignoring refill: \(filteredCandidates.count) hidden gems")
+            }
+
             // Score first, THEN fetch preview URLs only for top candidates
             await updateProgress("Scoring tracks...")
             
@@ -639,9 +657,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🍏 Last.fm pipeline yielded \(candidates.count) — topping up \(shortfall) from the iTunes genre fallback")
             await updateProgress("Exploring fresh sounds...")
             // The fallback guarantees tracks whenever Apple's catalog answers
-            // (relaxing the obscurity band if needed). It throws honestly when
-            // the catalog is unreachable (fetchFailed) or the popularity
-            // service is down (popularityUnavailable) — both propagate as-is.
+            // (relaxing the obscurity band if needed, serving the tail
+            // unverified when popularity can't be checked). It throws honestly
+            // only when the catalog itself is unreachable (fetchFailed).
             let topUp = try await itunesGenreFallbackCandidates(
                 profile: profile,
                 seedTracks: seedTracks,
@@ -877,11 +895,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Last.fm listener counts ARE the popularity score for Apple Music
     /// users — on the same 0-100 scale the slider uses for Spotify.
     ///
-    /// Throws `AppleMusicError.popularityUnavailable` when Apple's catalog is
-    /// reachable but obscurity couldn't be verified for a single artist
-    /// (Last.fm unreachable) — serving unverified mainstream tracks as
-    /// "hidden gems" would be worse than an honest, retryable error.
-    /// Returns [] only when Apple's own catalog is unreachable.
+    /// When Apple's catalog answers but no artist's obscurity can be
+    /// verified (Last.fm unreachable, or artists unknown to it), the
+    /// genre-searched tail is served unverified rather than erroring —
+    /// "there should always be music."
+    /// Returns [] only when Apple's own catalog is unreachable, or when it
+    /// yielded no playable tracks at all.
     internal func itunesGenreFallbackCandidates(
         profile: ListeningProfile,
         seedTracks: [LibraryTrack],
@@ -991,16 +1010,20 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let failedChecks = outcomes.filter {
             if case .serviceError = $0.1 { return true }; return false
         }.count
-        let verified: [(ItunesPreviewService.ItunesTrack, VerifiedArtist)] = outcomes.compactMap {
+        var verified: [(ItunesPreviewService.ItunesTrack, VerifiedArtist)] = outcomes.compactMap {
             guard case .verified(let signal) = $0.1 else { return nil }
             return ($0.0, signal)
         }
-
-        if attemptedChecks > 0 && failedChecks == attemptedChecks {
-            // Apple's catalog answered, but not one artist's popularity could
-            // be verified — Last.fm is unreachable. Honest, retryable error.
-            print("🍏 iTunes fallback: catalog reachable, popularity service down")
-            throw AppleMusicError.popularityUnavailable
+        if verified.isEmpty && !gathered.isEmpty {
+            // Not one artist's popularity could be verified — Last.fm is
+            // unreachable (down or rate-limited), or the artists are unknown
+            // to it (common for truly obscure acts). Serve the genre-searched
+            // tail anyway instead of erroring: "there should always be
+            // music." These tracks were queried by genre with the mainstream
+            // head skipped and the tail shuffled, so they're reasonable
+            // hidden gems even unverified. LOUD in logs.
+            print("🍏 iTunes fallback: no artist verifiable — serving UNVERIFIED genre tail")
+            verified = gathered.map { ($0, VerifiedArtist(listeners: 0, tags: [])) }
         }
 
         // Phase 2b — genre verification: the iTunes `term` parameter is pure
@@ -1051,10 +1074,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
         }
 
-        // Catalog reached, popularity service up, but no picked artist could
-        // be verified at any band — nothing honest to serve.
-        print("🍏 iTunes fallback: catalog reachable, no artist verifiable at any band")
-        throw AppleMusicError.popularityUnavailable
+        // Catalog reached but nothing verifiable at any band and the tail
+        // above is empty too (no playable tracks gathered) — nothing to serve.
+        print("🍏 iTunes fallback: catalog reachable, but no playable tracks gathered")
+        return []
     }
 
     /// Progressive-relaxation ladder for the guaranteed fallback: the user's
@@ -1589,7 +1612,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // MARK: - Filtering
     
     // Fast filtering - NOW INCLUDES BATCH ARTIST CHECK & DEEP SCAN
-    private func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil) async throws -> [SpotifyTrack] {
+    /// - Parameter ignoringHistory: when true, the persistent 7-day seen
+    ///   track/artist history is ignored (the user's own library and this
+    ///   session's seen sets still apply). Used as a last resort so discovery
+    ///   recycles older gems instead of serving nothing.
+    internal func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil, ignoringHistory: Bool = false) async throws -> [SpotifyTrack] {
         // Strict Mode Flag - DISABLED for DnB mode!
         // In DnB mode, we want to allow tracks from neurofunk, liquid funk, etc without strict validation
         let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty) && !self.isDnBMode
@@ -1643,9 +1670,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
             
             // Filter 1c: Not seen in previous discovery sessions (Persistent Check)
-            guard !DiscoveryHistoryManager.shared.isSeen(trackId: track.id) else { 
-                rejectionStats["seen_track"] = (rejectionStats["seen_track"] ?? 0) + 1
-                return false 
+            if !ignoringHistory {
+                guard !DiscoveryHistoryManager.shared.isSeen(trackId: track.id) else {
+                    rejectionStats["seen_track"] = (rejectionStats["seen_track"] ?? 0) + 1
+                    return false
+                }
             }
             
             // Filter 1d: Artist not seen in THIS session (same session only - Fix #4)
@@ -1658,7 +1687,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             // Filter 1d: Artist not seen in persistent history (Re-enabled)
             // STRICT CHECK: Reject if ANY artist on the track has been seen
-            if track.artists.contains(where: { DiscoveryHistoryManager.shared.isArtistSeen(artistId: $0.id) }) {
+            if !ignoringHistory,
+               track.artists.contains(where: { DiscoveryHistoryManager.shared.isArtistSeen(artistId: $0.id) }) {
                 rejectionStats["seen_artist_history"] = (rejectionStats["seen_artist_history"] ?? 0) + 1
                 return false
             }

@@ -50,8 +50,14 @@ class ItunesPreviewService: ItunesCatalog {
         ///   - previewURL: playable preview (usually `previewUrl`)
         ///   - popularity: 0-100 pseudo-popularity mapped from Last.fm listeners
         func toSpotifyTrack(previewURL: String?, popularity: Int) -> SpotifyTrack {
+            // Stable namespaced artist ID (not nil): SpotifyArtist.id falls
+            // back to a random UUID when spotifyId is nil, which silently
+            // broke session artist dedup and DiscoveryHistoryManager artist
+            // tracking for every Apple Music track. A normalized-name ID is
+            // stable across discovers. (isSpotifyOrigin stays false — it
+            // checks for ":" — so enrichment still skips these correctly.)
             let artist = SpotifyArtist(
-                spotifyId: nil,
+                spotifyId: "itunesartist:\(artistName.lowercased().filter { $0.isLetter || $0.isNumber })",
                 name: artistName,
                 genres: primaryGenreName.map { [$0] },
                 popularity: nil,

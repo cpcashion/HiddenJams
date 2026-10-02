@@ -11,6 +11,7 @@ import UIKit
 struct PlaylistPlayerView: View {
     @EnvironmentObject var audioPlayer: AudioPreviewManager
     @Environment(\.dismiss) var dismiss
+    @ObservedObject private var watchBridge = WatchBridge.shared
     
     let recommendations: [RecommendedTrack]
     let onSave: (RecommendedTrack) -> Void
@@ -100,6 +101,27 @@ struct PlaylistPlayerView: View {
                 print("🔄 Recommendations changed, reloading queue...")
                 audioPlayer.loadQueue(recommendations)
             }
+        }
+        .onAppear { pushCurrentGemToWatch() }
+        .onChange(of: audioPlayer.currentTrack?.id) { _ in pushCurrentGemToWatch() }
+        .onChange(of: watchBridge.pendingCommand) { command in
+            guard let command else { return }
+            watchBridge.pendingCommand = nil
+            // Thumbs up = the exact same save as a swipe right (genre
+            // playlist routing included); thumbs down = skip.
+            swipeCardOff(direction: command == .thumbsUp ? .right : .left)
+        }
+    }
+
+    /// Keeps the watch showing the gem the user is actually hearing.
+    private func pushCurrentGemToWatch() {
+        if let track = audioPlayer.currentTrack {
+            WatchBridge.shared.pushNowPlaying(
+                title: track.track.name,
+                artist: track.track.artistNames,
+                id: track.id)
+        } else {
+            WatchBridge.shared.pushNowPlaying(title: nil, artist: nil, id: nil)
         }
     }
     

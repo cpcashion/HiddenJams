@@ -55,6 +55,8 @@ struct HiddenJamsApp: App {
                 .task {
                     // Fetch fresh music facts on app launch
                     await factsService.fetchMusicFacts()
+                    // Bring up the Apple Watch link (thumbs up/down remote).
+                    WatchBridge.shared.activate()
                 }
         }
     }

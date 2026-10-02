@@ -1,0 +1,85 @@
+{
+  "images": [
+    {
+      "size": "48x48",
+      "idiom": "watch",
+      "filename": "icon-48.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "55x55",
+      "idiom": "watch",
+      "filename": "icon-55.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "58x58",
+      "idiom": "watch",
+      "filename": "icon-58.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "80x80",
+      "idiom": "watch",
+      "filename": "icon-80.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "87x87",
+      "idiom": "watch",
+      "filename": "icon-87.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "88x88",
+      "idiom": "watch",
+      "filename": "icon-88.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "100x100",
+      "idiom": "watch",
+      "filename": "icon-100.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "172x172",
+      "idiom": "watch",
+      "filename": "icon-172.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "196x196",
+      "idiom": "watch",
+      "filename": "icon-196.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "216x216",
+      "idiom": "watch",
+      "filename": "icon-216.png",
+      "scale": "1x",
+      "role": "appLauncher"
+    },
+    {
+      "size": "1024x1024",
+      "idiom": "watch",
+      "filename": "icon-1024.png",
+      "scale": "1x",
+      "role": "appStore"
+    }
+  ],
+  "info": {
+    "version": 1,
+    "author": "xcode"
+  }
+}

@@ -27,6 +27,7 @@
 		C9BEFF5C2ED679400033752E /* HiddenJams.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HiddenJams.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C9BEFF692ED679420033752E /* HiddenJamsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HiddenJamsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C9BEFF732ED679420033752E /* HiddenJamsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HiddenJamsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9BEFFB62ED679400033752E /* HiddenJamsWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HiddenJamsWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -50,6 +51,13 @@
 				Info.plist,
 			);
 			target = C9BEFF5B2ED679400033752E /* HiddenJams */;
+		};
+		C9BEFFBB2ED679C00033752E /* Exceptions for "HiddenJamsWatch" folder in "HiddenJamsWatch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C9BEFFB22ED679400033752E /* HiddenJamsWatch */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -76,6 +84,14 @@
 			path = HiddenJamsUITests;
 			sourceTree = "<group>";
 		};
+		C9BEFFBA2ED679400033752E /* HiddenJamsWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C9BEFFBB2ED679C00033752E /* Exceptions for "HiddenJamsWatch" folder in "HiddenJamsWatch" target */,
+			);
+			path = HiddenJamsWatch;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +116,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C9BEFFB42ED679400033752E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -109,6 +132,7 @@
 				C9BEFF5E2ED679400033752E /* HiddenJams */,
 				C9BEFF6C2ED679420033752E /* HiddenJamsTests */,
 				C9BEFF762ED679420033752E /* HiddenJamsUITests */,
+				C9BEFFBA2ED679400033752E /* HiddenJamsWatch */,
 				C9BEFF5D2ED679400033752E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -119,6 +143,7 @@
 				C9BEFF5C2ED679400033752E /* HiddenJams.app */,
 				C9BEFF692ED679420033752E /* HiddenJamsTests.xctest */,
 				C9BEFF732ED679420033752E /* HiddenJamsUITests.xctest */,
+				C9BEFFB62ED679400033752E /* HiddenJamsWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -194,6 +219,28 @@
 			productReference = C9BEFF732ED679420033752E /* HiddenJamsUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		C9BEFFB22ED679400033752E /* HiddenJamsWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C9BEFFB72ED679420033752E /* Build configuration list for PBXNativeTarget "HiddenJamsWatch" */;
+			buildPhases = (
+				C9BEFFB32ED679400033752E /* Sources */,
+				C9BEFFB42ED679400033752E /* Frameworks */,
+				C9BEFFB52ED679400033752E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C9BEFFBA2ED679400033752E /* HiddenJamsWatch */,
+			);
+			name = HiddenJamsWatch;
+			packageProductDependencies = (
+			);
+			productName = HiddenJamsWatch;
+			productReference = C9BEFFB62ED679400033752E /* HiddenJamsWatch.app */;
+			productType = "com.apple.product-type.application.watchapp2";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -215,6 +262,9 @@
 						CreatedOnToolsVersion = 26.1.1;
 						TestTargetID = C9BEFF5B2ED679400033752E;
 					};
+					C9BEFFB22ED679400033752E = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
 				};
 			};
 			buildConfigurationList = C9BEFF572ED679400033752E /* Build configuration list for PBXProject "HiddenJams" */;
@@ -234,6 +284,7 @@
 				C9BEFF5B2ED679400033752E /* HiddenJams */,
 				C9BEFF682ED679420033752E /* HiddenJamsTests */,
 				C9BEFF722ED679420033752E /* HiddenJamsUITests */,
+				C9BEFFB22ED679400033752E /* HiddenJamsWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -260,6 +311,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C9BEFFB52ED679400033752E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -278,6 +336,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C9BEFF6F2ED679420033752E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C9BEFFB32ED679400033752E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -453,6 +518,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				PROVISIONING_PROFILE_SPECIFIER = 3272d898-23cb-4709-a157-2c8194652944;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Automatic;
@@ -562,6 +628,54 @@
 			};
 			name = Release;
 		};
+		C9BEFFB82ED679420033752E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 26;
+				DEVELOPMENT_TEAM = 3CQEKUP494;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = HiddenJamsWatch/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chris.GettingStarted.HiddenJams.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		C9BEFFB92ED679420033752E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				PROVISIONING_PROFILE_SPECIFIER = 02f51778-de43-4f74-843e-ca6b3bdf6c02;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 26;
+				DEVELOPMENT_TEAM = 3CQEKUP494;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = HiddenJamsWatch/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chris.GettingStarted.HiddenJams.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -597,6 +711,15 @@
 			buildConfigurations = (
 				C9BEFF842ED679420033752E /* Debug */,
 				C9BEFF852ED679420033752E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C9BEFFB72ED679420033752E /* Build configuration list for PBXNativeTarget "HiddenJamsWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C9BEFFB82ED679420033752E /* Debug */,
+				C9BEFFB92ED679420033752E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

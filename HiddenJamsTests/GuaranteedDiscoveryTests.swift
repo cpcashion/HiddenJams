@@ -527,5 +527,79 @@ struct GuaranteedDiscoveryTests {
         )
         #expect(tracks.count == EnhancedHiddenGemsDiscovery.appleMusicBatchTarget)
     }
+
+    // MARK: - Always-serve-music hardening (build 26)
+
+    /// When Last.fm is completely unreachable (down or rate-limited), the
+    /// fallback serves the genre-searched tail instead of throwing — "there
+    /// should always be music, even with one genre selected."
+    @Test func fallbackServesUnverifiedTailWhenPopularityServiceDown() async throws {
+        var stub = StubCatalog()
+        stub.resultsByGenre["alternative"] = genreResults(genre: "alternative", count: 30)
+
+        let alwaysFails: (String) async throws -> VerifiedArtist? = { _ in
+            throw NSError(domain: "LastFm", code: 429)
+        }
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let tracks = try await discovery.itunesGenreFallbackCandidates(
+            profile: ListeningProfile(),
+            seedTracks: [],
+            sessionGenres: ["alternative"],
+            maxCandidates: 20,
+            artistCheck: alwaysFails,
+            itunesService: stub
+        )
+
+        #expect(!tracks.isEmpty, "unverified genre tail must be served, not an error")
+        #expect(tracks.allSatisfy { $0.previewUrl != nil })
+    }
+
+    /// iTunes-sourced artists used to get a random UUID on every conversion
+    /// (spotifyId was nil), silently breaking session artist dedup and the
+    /// persistent seen-artist history. IDs must be stable per artist name.
+    @Test func itunesArtistIdsAreStableAcrossDiscovers() {
+        func itunesTrack(id: Int, artist: String) -> ItunesPreviewService.ItunesTrack {
+            ItunesPreviewService.ItunesTrack(
+                trackId: id, trackName: "Song \(id)", artistName: artist,
+                previewUrl: "https://example.com/\(id).m4a", trackViewUrl: nil,
+                artworkUrl100: nil, collectionName: "Album", primaryGenreName: "Rock",
+                releaseDate: nil, trackTimeMillis: 180_000)
+        }
+        let a = itunesTrack(id: 1, artist: "The Obscure Band")
+            .toSpotifyTrack(previewURL: "https://example.com/1.m4a", popularity: 5)
+        let b = itunesTrack(id: 2, artist: "The Obscure Band")
+            .toSpotifyTrack(previewURL: "https://example.com/2.m4a", popularity: 5)
+        let c = itunesTrack(id: 3, artist: "Someone Else Entirely")
+            .toSpotifyTrack(previewURL: "https://example.com/3.m4a", popularity: 5)
+
+        #expect(a.artists.first?.id == b.artists.first?.id, "same artist name must map to the same ID")
+        #expect(a.artists.first?.id != c.artists.first?.id, "different artists must map to different IDs")
+        #expect(!a.isSpotifyOrigin, "namespaced IDs must still count as non-Spotify origin")
+    }
+
+    /// The last-resort refill: when the 7-day seen-history eats a narrow
+    /// genre's batch, filtering with ignoringHistory recycles older gems
+    /// instead of serving one song or nothing.
+    @Test func historyIgnoringRefillRecyclesSeenTracks() async throws {
+        let discovery = EnhancedHiddenGemsDiscovery()
+        let track = ItunesPreviewService.ItunesTrack(
+            trackId: 424242, trackName: "Refill Test Song", artistName: "Refill Test Artist",
+            previewUrl: "https://example.com/refill.m4a", trackViewUrl: nil,
+            artworkUrl100: nil, collectionName: "Refill Album", primaryGenreName: "Alternative",
+            releaseDate: nil, trackTimeMillis: 180_000
+        ).toSpotifyTrack(previewURL: "https://example.com/refill.m4a", popularity: 5)
+
+        // Burn it into the persistent history (unique ID — no test pollution).
+        DiscoveryHistoryManager.shared.addToHistory(trackIds: [track.id])
+
+        let strict = try await discovery.applyFastFilters(
+            tracks: [track], selectedGenres: nil, activeGenres: [], token: nil)
+        #expect(strict.isEmpty, "seen track must be filtered under normal rules")
+
+        let refilled = try await discovery.applyFastFilters(
+            tracks: [track], selectedGenres: nil, activeGenres: [], token: nil,
+            ignoringHistory: true)
+        #expect(refilled.count == 1, "last-resort refill must recycle the seen gem")
+    }
 }
 
