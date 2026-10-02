@@ -11,8 +11,8 @@ struct MainTabView: View {
     
     @Binding var selectedTab: Tab
     
-    // Cache the Hidden Jams playlist ID
-    @State private var hiddenJamsPlaylistId: String?
+    // Cache Spotify playlist IDs by name ("HJ - Rock", ...)
+    @State private var playlistIdsByName: [String: String] = [:]
     
     // Toast for swipe-save outcomes (e.g. Apple Music playlist saves)
     @State private var toastMessage: String?
@@ -157,11 +157,15 @@ struct MainTabView: View {
     // MARK: - Save to Hidden Jams Playlist
     
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {
-        // Apple Music users get a real "Hidden Gems" playlist in their Apple
-        // Music library — the same swipe-right promise Spotify users get.
-        // Saved alongside any Spotify save, never instead of it. The result
-        // is shown as a toast so a swipe never "saves" silently.
-        if let (success, message) = await saveTrackToAppleMusicPlaylist(track) {
+        // Swipe-right routes into a per-genre playlist ("HJ - Rock",
+        // "HJ - Drum and Bass", ...) — the genre comes from the discovery
+        // session first, the artist's genres second, and falls back to the
+        // classic "Hidden Gems" playlist. Apple Music and Spotify each get
+        // their own same-named playlists; the toast names the destination so
+        // a swipe never "saves" silently.
+        let playlistName = GenrePlaylistRouter.playlistName(
+            for: track, sessionGenres: currentSessionGenres())
+        if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName) {
             await MainActor.run { showToast(message, isError: !success) }
         }
 
@@ -190,8 +194,8 @@ struct MainTabView: View {
         }
         
         do {
-            // Get or create the Hidden Jams playlist
-            let playlistId = try await getOrCreateHiddenJamsPlaylist(token: token)
+            // Get or create the genre playlist
+            let playlistId = try await getOrCreatePlaylist(named: playlistName, token: token)
             
             // Add the track to the playlist
             let trackUri = "spotify:track:\(track.id)"
@@ -201,7 +205,7 @@ struct MainTabView: View {
                 token: token
             )
             
-            print("✅ Successfully saved '\(track.track.name)' to Hidden Jams playlist")
+            print("✅ Successfully saved '\(track.track.name)' to '\(playlistName)' playlist")
         } catch APIError.httpError(let statusCode) where statusCode == 401 {
             print("⚠️ 401 Unauthorized, attempting to refresh token and retry...")
             let refreshed = await withCheckedContinuation { continuation in
@@ -213,33 +217,47 @@ struct MainTabView: View {
             if refreshed, let newToken = authManager.accessToken {
                 do {
                     // Retry with new token
-                    let playlistId = try await getOrCreateHiddenJamsPlaylist(token: newToken)
+                    let playlistId = try await getOrCreatePlaylist(named: playlistName, token: newToken)
                     let trackUri = "spotify:track:\(track.id)"
                     try await apiService.addTracksToPlaylist(
                         playlistId: playlistId,
                         uris: [trackUri],
                         token: newToken
                     )
-                    print("✅ Successfully saved '\(track.track.name)' to Hidden Jams playlist (after refresh)")
+                    print("✅ Successfully saved '\(track.track.name)' to '\(playlistName)' playlist (after refresh)")
                 } catch {
                     print("❌ Failed to save track after retry: \(error)")
                 }
             }
         } catch {
-            print("❌ Failed to save track to Hidden Jams: \(error)")
+            print("❌ Failed to save track to '\(playlistName)': \(error)")
+            await MainActor.run {
+                showToast("Couldn't save to \(playlistName): \(error.localizedDescription)", isError: true)
+            }
         }
+    }
+
+    /// The genres selected for the current discovery session (persisted by
+    /// the genre picker). Drives per-genre playlist routing.
+    private func currentSessionGenres() -> Set<String> {
+        guard let data = UserDefaults.standard.data(forKey: "selectedGenres"),
+              let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) else {
+            return []
+        }
+        return decoded
     }
     
     // MARK: - Save to Apple Music Playlist
 
     /// Swipe-right for Apple Music users: resolves the track to an Apple Music
-    /// catalog ID and adds it to the "Hidden Gems" playlist in their library.
+    /// catalog ID and adds it to the routed genre playlist ("HJ - Rock", ...,
+    /// falling back to "Hidden Gems") in their library.
     /// Returns a user-facing message describing the outcome — success or the
     /// real reason it failed. NEVER silent: a swipe that "saves" must tell
     /// the user where their track went.
     /// - Returns: `(true, message)` on success, `(false, reason)` on failure,
     ///   or `nil` when Apple Music isn't the active source (nothing to say).
-    private func saveTrackToAppleMusicPlaylist(_ track: RecommendedTrack) async -> (Bool, String)? {
+    private func saveTrackToAppleMusicPlaylist(_ track: RecommendedTrack, playlistName: String) async -> (Bool, String)? {
         guard appleMusicService.isConnected else { return nil }
         guard appleMusicService.isAuthorized else {
             return (false, "Apple Music isn't authorized — reconnect it on the Profile tab to save to your library.")
@@ -248,9 +266,9 @@ struct MainTabView: View {
             return (false, "Couldn't find '\(track.track.name)' in the Apple Music catalog — kept in your in-app gems only.")
         }
         do {
-            try await appleMusicService.saveTrackToHiddenGemsPlaylist(storeID: storeID)
-            print("✅ Saved '\(track.track.name)' to the Apple Music Hidden Gems playlist")
-            return (true, "Saved to your Apple Music Hidden Gems playlist ✓")
+            try await appleMusicService.saveTrackToPlaylist(named: playlistName, storeID: storeID)
+            print("✅ Saved '\(track.track.name)' to the Apple Music '\(playlistName)' playlist")
+            return (true, "Saved to \(playlistName) ✓")
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             print("❌ Apple Music playlist save failed for '\(track.track.name)': \(error)")
@@ -271,20 +289,22 @@ struct MainTabView: View {
         return found?.trackId
     }
 
-    private func getOrCreateHiddenJamsPlaylist(token: String) async throws -> String {
+    /// Finds or creates a Spotify playlist by name, caching IDs per name so
+    /// genre playlists ("HJ - Rock", ...) are resolved once per session.
+    private func getOrCreatePlaylist(named name: String, token: String) async throws -> String {
         // Return cached ID if available
-        if let cachedId = hiddenJamsPlaylistId {
+        if let cachedId = await MainActor.run(body: { playlistIdsByName[name] }) {
             return cachedId
         }
         
         // Search for existing Hidden Jams playlist
         let playlists = try await apiService.getUserPlaylists(token: token)
         
-        if let existingPlaylist = playlists.first(where: { $0.name == "Hidden Jams" }) {
+        if let existingPlaylist = playlists.first(where: { $0.name == name }) {
             await MainActor.run {
-                hiddenJamsPlaylistId = existingPlaylist.id
+                playlistIdsByName[name] = existingPlaylist.id
             }
-            print("📝 Found existing Hidden Jams playlist: \(existingPlaylist.id)")
+            print("📝 Found existing '\(name)' playlist: \(existingPlaylist.id)")
             return existingPlaylist.id
         }
         
@@ -295,16 +315,16 @@ struct MainTabView: View {
         
         let newPlaylist = try await apiService.createPlaylist(
             userId: userId,
-            name: "Hidden Jams",
+            name: name,
             description: "Underground gems discovered by Hidden Jams",
             token: token
         )
         
         await MainActor.run {
-            hiddenJamsPlaylistId = newPlaylist.id
+            playlistIdsByName[name] = newPlaylist.id
         }
         
-        print("🎵 Created new Hidden Jams playlist: \(newPlaylist.id)")
+        print("🎵 Created new '\(name)' playlist: \(newPlaylist.id)")
         return newPlaylist.id
     }
 }

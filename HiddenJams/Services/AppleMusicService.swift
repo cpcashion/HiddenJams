@@ -120,11 +120,12 @@ class AppleMusicService: ObservableObject {
     /// Spotify "Hidden Jams" playlist.
     static let hiddenGemsPlaylistName = "Hidden Gems"
 
-    /// Adds a catalog track (by iTunes Store ID) to the user's "Hidden Gems"
-    /// playlist, creating the playlist on first use. Uses the on-device media
-    /// library (MediaPlayer) — no developer token or web API needed.
+    /// Adds a catalog track (by iTunes Store ID) to the named playlist
+    /// ("HJ - Rock", ... or "Hidden Gems"), creating the playlist on first
+    /// use. Uses the on-device media library (MediaPlayer) — no developer
+    /// token or web API needed.
     /// Throws human-readable errors; callers must surface them (never silent).
-    func saveTrackToHiddenGemsPlaylist(storeID: Int) async throws {
+    func saveTrackToPlaylist(named name: String, storeID: Int) async throws {
         guard isAuthorized else {
             throw AppleMusicError.fetchFailed("Apple Music isn't connected. Connect it on the Profile tab to save to your library.")
         }
@@ -133,7 +134,7 @@ class AppleMusicService: ObservableObject {
                 "HiddenJams needs media-library access to save to Apple Music. Enable it in Settings → Privacy & Security → Media & Apple Music."
             )
         }
-        let playlist = try await hiddenGemsPlaylist()
+        let playlist = try await playlist(named: name)
         do {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 playlist.addItem(withProductID: String(storeID)) { error in
@@ -146,17 +147,22 @@ class AppleMusicService: ObservableObject {
             }
         } catch {
             throw AppleMusicError.fetchFailed(
-                "Couldn't add that track to your Apple Music Hidden Gems playlist (\(error.localizedDescription))."
+                "Couldn't add that track to your Apple Music \(name) playlist (\(error.localizedDescription))."
             )
         }
-        print("🍏 Added store ID \(storeID) to Apple Music '\(Self.hiddenGemsPlaylistName)' playlist")
+        print("🍏 Added store ID \(storeID) to Apple Music '\(name)' playlist")
     }
 
-    /// This app's stable identifier for the Hidden Gems playlist, persisted
-    /// across launches so MediaPlayer always resolves the SAME playlist
-    /// instead of minting duplicates.
-    private var hiddenGemsPlaylistUUID: UUID {
-        let key = "hiddenGemsPlaylistUUID"
+    /// Backwards-compatible wrapper: the classic "Hidden Gems" playlist.
+    func saveTrackToHiddenGemsPlaylist(storeID: Int) async throws {
+        try await saveTrackToPlaylist(named: Self.hiddenGemsPlaylistName, storeID: storeID)
+    }
+
+    /// This app's stable identifier per playlist name, persisted across
+    /// launches so MediaPlayer always resolves the SAME playlist instead of
+    /// minting duplicates.
+    private func playlistUUID(for name: String) -> UUID {
+        let key = "playlistUUID." + name
         if let saved = UserDefaults.standard.string(forKey: key),
            let uuid = UUID(uuidString: saved) {
             return uuid
@@ -166,32 +172,31 @@ class AppleMusicService: ObservableObject {
         return uuid
     }
 
-    /// Finds the existing "Hidden Gems" playlist or creates it.
-    private func hiddenGemsPlaylist() async throws -> MPMediaPlaylist {
+    /// Finds the existing named playlist or creates it.
+    private func playlist(named name: String) async throws -> MPMediaPlaylist {
         if let existing = MPMediaQuery.playlists().collections?
             .compactMap({ $0 as? MPMediaPlaylist })
             .first(where: {
-                ($0.value(forProperty: MPMediaPlaylistPropertyName) as? String)
-                    == Self.hiddenGemsPlaylistName
+                ($0.value(forProperty: MPMediaPlaylistPropertyName) as? String) == name
             }) {
             return existing
         }
-        let metadata = MPMediaPlaylistCreationMetadata(name: Self.hiddenGemsPlaylistName)
+        let metadata = MPMediaPlaylistCreationMetadata(name: name)
         do {
             return try await withCheckedThrowingContinuation { cont in
-                MPMediaLibrary.default().getPlaylist(with: hiddenGemsPlaylistUUID, creationMetadata: metadata) { playlist, error in
+                MPMediaLibrary.default().getPlaylist(with: playlistUUID(for: name), creationMetadata: metadata) { playlist, error in
                     if let playlist {
                         cont.resume(returning: playlist)
                     } else {
                         cont.resume(throwing: error ?? AppleMusicError.fetchFailed(
-                            "Couldn't create the Hidden Gems playlist in your library."
+                            "Couldn't create the \(name) playlist in your library."
                         ))
                     }
                 }
             }
         } catch {
             throw AppleMusicError.fetchFailed(
-                "Couldn't create the Hidden Gems playlist in your Apple Music library (\(error.localizedDescription))."
+                "Couldn't create the \(name) playlist in your Apple Music library (\(error.localizedDescription))."
             )
         }
     }
