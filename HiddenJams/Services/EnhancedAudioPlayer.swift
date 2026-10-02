@@ -41,6 +41,28 @@ class EnhancedAudioPlayer: ObservableObject {
         } catch {
             print("❌ Failed to configure audio session: \(error.localizedDescription)")
         }
+        // Re-assert the audio session and Now Playing info after
+        // interruptions (phone calls, Siri, etc.) so the watch keeps
+        // showing controls.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let userInfo = notification.userInfo,
+                  let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+            if type == .ended {
+                do {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    self.updateNowPlaying()
+                    if self.isPlaying { self.player?.play() }
+                } catch {
+                    print("⚠️ Failed to reactivate audio session: \(error.localizedDescription)")
+                }
+            }
+        }
     }
     
     // MARK: - Now Playing (Lock Screen / Apple Watch)

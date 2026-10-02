@@ -1011,8 +1011,17 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             if case .serviceError = $0.1 { return true }; return false
         }.count
         var verified: [(ItunesPreviewService.ItunesTrack, VerifiedArtist)] = outcomes.compactMap {
-            guard case .verified(let signal) = $0.1 else { return nil }
-            return ($0.0, signal)
+            switch $0.1 {
+            case .verified(let signal):
+                return ($0.0, signal)
+            case .unknownArtist:
+                // Last.fm doesn't know this artist — that's a STRONG signal
+                // of obscurity, not a reason to drop them. Treat as 0
+                // listeners (most obscure) so they survive the cap ladder.
+                return ($0.0, VerifiedArtist(listeners: 0, tags: []))
+            case .serviceError:
+                return nil
+            }
         }
         if verified.isEmpty && !gathered.isEmpty {
             // Not one artist's popularity could be verified — Last.fm is
@@ -1220,7 +1229,33 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
         // Only trust the genre filter when it leaves a healthy pool — a
         // catalog naming mismatch must never zero out the guarantee.
-        if genreMatched.count >= 8 { pool = genreMatched }
+        if genreMatched.count >= 8 {
+            pool = genreMatched
+        } else {
+            // Even in the fallback pool, exclude the "genre name in the
+            // title" false positives: tracks whose TITLE contains the genre
+            // string but whose genre metadata does NOT match. These are the
+            // "songs called Drum and Bass" that users explicitly reject.
+            // (A track titled "Rock You" with genre "Rock" is fine — the
+            // genre matches. We only exclude when the genre does NOT match.)
+            let deceptivelyTitled = pool.filter { track in
+                let titleMentionsGenre = norm(track.trackName).contains(genreNorm)
+                guard titleMentionsGenre else { return false }
+                guard let g = track.primaryGenreName else { return true }
+                let n = norm(g)
+                let genreMatches = n.contains(genreNorm) || genreNorm.contains(n)
+                return !genreMatches
+            }
+            if !deceptivelyTitled.isEmpty {
+                let excludedKeys = Set(deceptivelyTitled.map { $0.trackId })
+                let cleaned = pool.filter { !excludedKeys.contains($0.trackId) }
+                // Only apply if it leaves a healthy pool.
+                if cleaned.count >= 8 {
+                    pool = cleaned
+                    print("🎯 Excluded \(deceptivelyTitled.count) genre-name-in-title false positives for '\(genre)'")
+                }
+            }
+        }
 
         // Exclude the user's library (same key format as dedupeKey).
         pool = pool.filter { track in
