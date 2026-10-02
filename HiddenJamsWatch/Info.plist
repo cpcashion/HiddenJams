@@ -29,7 +29,5 @@
 	</array>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.chris.GettingStarted.HiddenJams</string>
-	<key>WKRunsIndependentlyOfCompanionApp</key>
-	<true/>
 </dict>
 </plist>
