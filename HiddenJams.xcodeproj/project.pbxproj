@@ -21,13 +21,6 @@
 			remoteGlobalIDString = C9BEFF5B2ED679400033752E;
 			remoteInfo = HiddenJams;
 		};
-		C9BEFFBC2ED679400033752E /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C9BEFF542ED679400033752E /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C9BEFFB22ED679400033752E;
-			remoteInfo = HiddenJamsWatch;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -169,7 +162,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				C9BEFFBD2ED679400033752E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C9BEFF5E2ED679400033752E /* HiddenJams */,
@@ -369,11 +361,6 @@
 			isa = PBXTargetDependency;
 			target = C9BEFF5B2ED679400033752E /* HiddenJams */;
 			targetProxy = C9BEFF742ED679420033752E /* PBXContainerItemProxy */;
-		};
-		C9BEFFBD2ED679400033752E /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C9BEFFB22ED679400033752E /* HiddenJamsWatch */;
-			targetProxy = C9BEFFBC2ED679400033752E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
