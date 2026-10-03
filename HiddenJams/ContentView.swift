@@ -28,15 +28,14 @@ struct ContentView: View {
                     .zIndex(1)
 
                 // Persistent mini-player shelf — visible on every tab
-                // EXCEPT the player tab (which has its own full controls).
-                // Tap to expand into the full Now Playing screen.
-                if selectedTab != .player {
-                    MiniPlayerView(onTapTrack: { showExpandedPlayer = true })
-                        .environmentObject(audioManager)
-                        .zIndex(2)
-                        .padding(.bottom, 92)
-                        .animation(.easeInOut, value: audioManager.currentTrack?.id)
-                }
+                // whenever audio is loaded. Tap to expand into the full
+                // Now Playing screen. This is the ONLY playback chrome;
+                // the swipe deck is pure discovery.
+                MiniPlayerView(onTapTrack: { showExpandedPlayer = true })
+                    .environmentObject(audioManager)
+                    .zIndex(2)
+                    .padding(.bottom, 92)
+                    .animation(.easeInOut, value: audioManager.currentTrack?.id)
             } else {
                 // Show Onboarding (which now includes Login/Connect) whenever no music source is connected
                 OnboardingView(isPresented: .constant(true))

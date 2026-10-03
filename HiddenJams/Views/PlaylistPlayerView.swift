@@ -21,8 +21,6 @@ struct PlaylistPlayerView: View {
     var refreshProgress: String = ""
     
     @State private var savedTracks: Set<String> = []
-    @State private var isDraggingTime = false
-    @State private var dragTime: Double = 0.0
     
     // Card swipe state
     @State private var cardOffset: CGSize = .zero
@@ -447,11 +445,9 @@ struct PlaylistPlayerView: View {
     
     private var controlsSection: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            // Progress Bar
-            progressBar
-                .padding(.horizontal, Theme.Spacing.md)
-            
-            // Swipe hints - subtle, not like buttons
+            // Swipe hints - subtle, not like buttons.
+            // Playback controls live in the persistent mini-player shelf
+            // (tap it to expand the full player) — not duplicated here.
             HStack {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: "arrow.left")
@@ -459,22 +455,6 @@ struct PlaylistPlayerView: View {
                 }
                 .font(Theme.Typography.caption)
                 .foregroundColor(Theme.Colors.textTertiary)
-                
-                Spacer()
-                
-                // Play/Pause
-                Button(action: { audioPlayer.togglePlayPause() }) {
-                    ZStack {
-                        Circle()
-                            .fill(audioPlayer.hasPreview ? Theme.Colors.spotifyGreen : Color.gray.opacity(0.5))
-                            .frame(width: 60, height: 60)
-                        
-                        Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .foregroundColor(Theme.Colors.buttonText)
-                    }
-                }
-                .disabled(!audioPlayer.hasPreview)
                 
                 Spacer()
                 
@@ -507,68 +487,6 @@ struct PlaylistPlayerView: View {
                 }
             }
             // Refresh button removed - shown in empty state only
-        }
-    }
-    
-    private var progressBar: some View {
-        VStack(spacing: Theme.Spacing.xs) {
-            if audioPlayer.hasPreview {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background Track
-                        Rectangle()
-                            .fill(Theme.Colors.textPrimary.opacity(0.2))
-                            .frame(height: 4)
-                        
-                        // Active Progress
-                        Rectangle()
-                            .fill(Theme.Colors.spotifyGreen)
-                            .frame(
-                                width: geometry.size.width * (CGFloat(isDraggingTime ? dragTime : audioPlayer.currentTime) / 30.0),
-                                height: 4
-                            )
-                        
-                        // Scrubber Knob
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 12, height: 12)
-                            .offset(x: (geometry.size.width * (CGFloat(isDraggingTime ? dragTime : audioPlayer.currentTime) / 30.0)) - 6)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                isDraggingTime = true
-                                let pct = min(max(0, value.location.x / geometry.size.width), 1)
-                                dragTime = Double(pct) * 30.0
-                            }
-                            .onEnded { value in
-                                let pct = min(max(0, value.location.x / geometry.size.width), 1)
-                                let finalTime = Double(pct) * 30.0
-                                audioPlayer.seek(to: finalTime)
-                                isDraggingTime = false
-                            }
-                    )
-                }
-                .frame(height: 12)
-                
-                HStack {
-                    Text(formatTime(isDraggingTime ? dragTime : audioPlayer.currentTime))
-                        .font(Theme.Typography.caption)
-                        .foregroundColor(Theme.Colors.textTertiary)
-                    
-                    Spacer()
-                    
-                    Text(formatTime(30.0))
-                        .font(Theme.Typography.caption)
-                        .foregroundColor(Theme.Colors.textTertiary)
-                }
-            } else {
-                Text("Preview Unavailable")
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.textSecondary)
-                    .padding(.top, Theme.Spacing.sm)
-            }
         }
     }
     
@@ -615,12 +533,6 @@ struct PlaylistPlayerView: View {
     }
     
     // MARK: - Helpers
-    
-    private func formatTime(_ seconds: Double) -> String {
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
     
     // MARK: - Spotify Deep Links
 
