@@ -16,10 +16,14 @@ struct ProfileView: View {
     @StateObject private var savedGems = SavedGemsStore.shared
     @EnvironmentObject var audioManager: AudioPreviewManager
     @EnvironmentObject var themeManager: ThemeManager
+    @StateObject private var userProfile = UserProfileManager.shared
+    @StateObject private var subscriptions = SubscriptionManager.shared
 
     @State private var selectedTimeRange: TimeRange = .longTerm
     @State private var hasLoadedData = false
     @State private var isConnectingAppleMusic = false
+    @State private var isLinkingAppleID = false
+    @State private var appleIDError: String?
     
     var body: some View {
         ZStack {
@@ -79,45 +83,122 @@ struct ProfileView: View {
     // MARK: - Header
     
     private var headerSection: some View {
-        HStack(spacing: 16) {
-            // Avatar
-            if let imageUrl = authManager.user?.images?.first?.url {
-                AsyncImage(url: imageUrl) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                }
-                .frame(width: 64, height: 64)
-                .clipShape(Circle())
-            } else if appleMusicService.isConnected {
-                // Apple Music provides no profile photo: show the user's monster.
-                Image(MonsterAvatar.assignedName)
-                    .resizable()
-                    .scaledToFill()
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                // Avatar: Spotify photo, else monster, else initial.
+                if let imageUrl = userProfile.profile.avatarURL {
+                    AsyncImage(url: imageUrl) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
+                    }
                     .frame(width: 64, height: 64)
                     .clipShape(Circle())
-            } else {
-                Circle()
-                    .fill(Theme.Colors.textPrimary.opacity(0.1))
-                    .frame(width: 64, height: 64)
-                    .overlay(
-                        Text(String(authManager.user?.displayName?.prefix(1) ?? "?"))
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                    )
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(authManager.user?.displayName ?? "")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(Theme.Colors.textPrimary)
+                } else if let monster = userProfile.profile.monsterAvatarName {
+                    Image(monster)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 64, height: 64)
+                        .clipShape(Circle())
+                } else if appleMusicService.isConnected {
+                    // Apple Music provides no profile photo: show the user's monster.
+                    Image(MonsterAvatar.assignedName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 64, height: 64)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(Theme.Colors.textPrimary.opacity(0.1))
+                        .frame(width: 64, height: 64)
+                        .overlay(
+                            Text(String(userProfile.profile.effectiveDisplayName.prefix(1)))
+                                .font(.system(size: 24, weight: .medium))
+                                .foregroundColor(Theme.Colors.textPrimary)
+                        )
+                }
                 
-                Text("Your listening profile")
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(userProfile.profile.effectiveDisplayName)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textPrimary)
+                        if userProfile.isPremium {
+                            Text("PREMIUM")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Theme.Colors.gemGold)
+                                .cornerRadius(4)
+                        }
+                    }
+                    
+                    Text("Your listening profile")
+                        .font(.system(size: 13))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                }
+                
+                Spacer()
             }
-            
-            Spacer()
+
+            // Apple Music users have no verified identity — offer Sign in
+            // with Apple to complete their profile (needed for Premium).
+            if !userProfile.profile.hasVerifiedIdentity {
+                appleIDLinkCard
+            }
+        }
+    }
+
+    // MARK: - Sign in with Apple
+
+    private var appleIDLinkCard: some View {
+        VStack(spacing: 8) {
+            if let err = appleIDError {
+                Text(err)
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.Colors.error)
+            }
+            Button(action: linkAppleID) {
+                HStack {
+                    Image(systemName: "apple.logo")
+                    Text(isLinkingAppleID ? "Connecting…" : "Complete your profile with Apple ID")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.black)
+                .cornerRadius(12)
+            }
+            .disabled(isLinkingAppleID)
+            Text("Unlocks Premium, sync, and support.")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.Colors.textSecondary)
+        }
+        .padding(12)
+        .background(Theme.Colors.cardGradient)
+        .cornerRadius(16)
+    }
+
+    private func linkAppleID() {
+        isLinkingAppleID = true
+        appleIDError = nil
+        Task {
+            do {
+                let credential = try await AppleSignInService.shared.signIn()
+                UserProfileManager.shared.linkAppleID(
+                    userIdentifier: credential.user,
+                    fullName: credential.fullName,
+                    email: credential.email
+                )
+            } catch let e as AppleSignInError {
+                if case .cancelled = e { /* silent */ }
+                else { appleIDError = e.localizedDescription }
+            } catch {
+                appleIDError = error.localizedDescription
+            }
+            isLinkingAppleID = false
         }
     }
     

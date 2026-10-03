@@ -23,6 +23,8 @@ class UserDataManager {
             UserDefaults.standard.set(encoded, forKey: userProfileKey)
             print("✅ Saved user profile for: \(user.displayName ?? "Unknown")")
         }
+        // Link to the unified app-level profile.
+        UserProfileManager.shared.linkSpotify(user: user)
     }
     
     func loadUserProfile() -> SpotifyUser? {

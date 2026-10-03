@@ -50,6 +50,8 @@ class AppleMusicService: ObservableObject {
             self.authorizationStatus = status
             if granted {
                 self.isConnected = true
+                // Link to the unified app-level profile.
+                UserProfileManager.shared.linkAppleMusic()
             }
         }
         if granted {
