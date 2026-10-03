@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AuthenticationServices
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
