@@ -13,6 +13,7 @@ struct ContentView: View {
 
     @StateObject private var audioManager = AudioPreviewManager()
     @State private var selectedTab: MainTabView.Tab = .home
+    @State private var showExpandedPlayer = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -27,13 +28,15 @@ struct ContentView: View {
                     .zIndex(1)
 
                 // Persistent mini-player shelf — visible on every tab
-                // whenever audio is loaded. Tap the track info to jump
-                // to the full player tab.
-                MiniPlayerView(onTapTrack: { selectedTab = .player })
-                    .environmentObject(audioManager)
-                    .zIndex(2)
-                    .padding(.bottom, 92)
-                    .animation(.easeInOut, value: audioManager.currentTrack?.id)
+                // EXCEPT the player tab (which has its own full controls).
+                // Tap to expand into the full Now Playing screen.
+                if selectedTab != .player {
+                    MiniPlayerView(onTapTrack: { showExpandedPlayer = true })
+                        .environmentObject(audioManager)
+                        .zIndex(2)
+                        .padding(.bottom, 92)
+                        .animation(.easeInOut, value: audioManager.currentTrack?.id)
+                }
             } else {
                 // Show Onboarding (which now includes Login/Connect) whenever no music source is connected
                 OnboardingView(isPresented: .constant(true))
@@ -42,6 +45,10 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut, value: sourceManager.hasConnectedSource)
+        .sheet(isPresented: $showExpandedPlayer) {
+            ExpandedPlayerView()
+                .environmentObject(audioManager)
+        }
         .onOpenURL { url in
             // Handle OAuth callback
             authManager.handleCallback(url: url)

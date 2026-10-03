@@ -31,21 +31,18 @@ struct MiniPlayerView: View {
                 .cornerRadius(8)
                 .clipped()
 
-                // Track info — tap to open full player
-                Button(action: onTapTrack) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.track.name)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                            .lineLimit(1)
-                        Text(track.track.artistNames)
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.Colors.textSecondary)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Track info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.track.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                        .lineLimit(1)
+                    Text(track.track.artistNames)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Playback controls
                 Button(action: { audioManager.togglePlayPause() }) {
@@ -72,6 +69,8 @@ struct MiniPlayerView: View {
                     .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
             )
             .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTapTrack)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
