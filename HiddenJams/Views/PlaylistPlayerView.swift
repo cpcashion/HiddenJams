@@ -445,27 +445,10 @@ struct PlaylistPlayerView: View {
     
     private var controlsSection: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            // Swipe hints - subtle, not like buttons.
             // Playback controls live in the persistent mini-player shelf
             // (tap it to expand the full player) — not duplicated here.
-            HStack {
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: "arrow.left")
-                    Text("Skip")
-                }
-                .font(Theme.Typography.caption)
-                .foregroundColor(Theme.Colors.textTertiary)
-                
-                Spacer()
-                
-                HStack(spacing: Theme.Spacing.xs) {
-                    Text("Like")
-                    Image(systemName: "arrow.right")
-                }
-                .font(Theme.Typography.caption)
-                .foregroundColor(Theme.Colors.textTertiary)
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
+            // Swipe hints were removed: they collided with the shelf and
+            // swipe gestures are universal.
             
             // Open in Spotify (if no preview)
             if !audioPlayer.hasPreview, let track = currentTrack {
