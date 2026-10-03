@@ -10,6 +10,8 @@
 import Foundation
 import AVFoundation
 import Combine
+import MediaPlayer
+import UIKit
 
 class AudioPreviewManager: ObservableObject {
     @Published var isPlaying = false
@@ -39,6 +41,80 @@ class AudioPreviewManager: ObservableObject {
     init() {
         configureAudioSession()
         setupInterruptionHandling()
+        setupRemoteCommands()
+    }
+
+    // MARK: - Now Playing (Lock Screen / Apple Watch)
+
+    /// Wires up the system transport controls (Control Center, lock screen,
+    /// and Apple Watch Now Playing). When these are active, raising the
+    /// wrist on a paired Apple Watch automatically shows playback controls
+    /// for Hidden Jams — same as Spotify.
+    private func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.addTarget { [weak self] _ in
+            self?.resume()
+            return .success
+        }
+        center.pauseCommand.addTarget { [weak self] _ in
+            self?.pause()
+            return .success
+        }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.togglePlayPause()
+            return .success
+        }
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            self?.playNext()
+            return .success
+        }
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            self?.playPrevious()
+            return .success
+        }
+    }
+
+    /// Pushes the current track into MPNowPlayingInfoCenter so iOS (and the
+    /// paired Apple Watch) shows it in Now Playing.
+    private func updateNowPlaying() {
+        guard let track = currentTrack else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            return
+        }
+        let info: [String: Any] = [
+            MPMediaItemPropertyTitle: track.track.name,
+            MPMediaItemPropertyArtist: track.track.artistNames,
+            MPMediaItemPropertyAlbumTitle: track.track.album.name,
+            MPMediaItemPropertyPlaybackDuration: duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+        ]
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+
+        // Load album artwork in the background for the Now Playing UI.
+        if let artURL = track.track.album.images.first?.url {
+            URLSession.shared.dataTask(with: artURL) { [weak self] data, _, _ in
+                guard let self, let data, let image = UIImage(data: data) else { return }
+                // Only apply if this is still the current track.
+                guard self.currentTrack?.id == track.id else { return }
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                DispatchQueue.main.async {
+                    var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                    updated[MPMediaItemPropertyArtwork] = artwork
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                }
+            }.resume()
+        }
+    }
+
+    /// Refreshes elapsed time / play state in Now Playing (cheap — text only).
+    private func refreshNowPlayingPlaybackState() {
+        guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo,
+              !info.isEmpty else { return }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     // MARK: - Audio Session Configuration
@@ -146,6 +222,7 @@ class AudioPreviewManager: ObservableObject {
         if currentTrackId == trackId, player?.currentItem != nil {
             player?.play()
             isPlaying = true
+            refreshNowPlayingPlaybackState()
             return
         }
 
@@ -206,6 +283,7 @@ class AudioPreviewManager: ObservableObject {
 
         player?.play()
         isPlaying = true
+        updateNowPlaying()
         print("▶️ Playing: \(currentTrack?.track.name ?? "?") (\(currentIndex + 1)/\(queue.count))")
     }
 
@@ -285,6 +363,7 @@ class AudioPreviewManager: ObservableObject {
     func pause() {
         player?.pause()
         isPlaying = false
+        refreshNowPlayingPlaybackState()
     }
 
     func resume() {
@@ -295,6 +374,7 @@ class AudioPreviewManager: ObservableObject {
         }
         player?.play()
         isPlaying = true
+        refreshNowPlayingPlaybackState()
     }
 
     func togglePlayPause() {
@@ -332,6 +412,7 @@ class AudioPreviewManager: ObservableObject {
         teardownPlayer()
         isPlaying = false
         currentTrackId = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         // NOTE: currentTrack/currentIndex are intentionally kept so the
         // player UI still shows the last card instead of vanishing.
     }

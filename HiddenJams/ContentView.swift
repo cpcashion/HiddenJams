@@ -25,6 +25,15 @@ struct ContentView: View {
                     .environmentObject(audioManager)
                     .transition(.opacity.combined(with: .scale))
                     .zIndex(1)
+
+                // Persistent mini-player shelf — visible on every tab
+                // whenever audio is loaded. Tap the track info to jump
+                // to the full player tab.
+                MiniPlayerView(onTapTrack: { selectedTab = .player })
+                    .environmentObject(audioManager)
+                    .zIndex(2)
+                    .padding(.bottom, 92)
+                    .animation(.easeInOut, value: audioManager.currentTrack?.id)
             } else {
                 // Show Onboarding (which now includes Login/Connect) whenever no music source is connected
                 OnboardingView(isPresented: .constant(true))

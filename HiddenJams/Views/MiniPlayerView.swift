@@ -1,70 +1,78 @@
+//
+//  MiniPlayerView.swift
+//  HiddenJams
+//
+//  Persistent bottom-shelf player card. Visible across the whole app
+//  whenever audio is loaded — tap a saved song on the profile page and
+//  this appears with controls, no more mystery audio.
+//
+
 import SwiftUI
 
 struct MiniPlayerView: View {
-    let track: RecommendedTrack
-    let isPlaying: Bool
-    let onPlayPause: () -> Void
-    let onNext: () -> Void
-    let onMaximize: () -> Void
-    
+    @EnvironmentObject var audioManager: AudioPreviewManager
+    var onTapTrack: () -> Void = {}
+
     var body: some View {
-        Button(action: onMaximize) {
-            HStack(spacing: Theme.Spacing.md) {
-                // Album Art
-                AsyncImage(url: track.track.album.albumArtURL) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+        if let track = audioManager.currentTrack {
+            HStack(spacing: 12) {
+                // Artwork
+                AsyncImage(url: track.track.album.images.first?.url) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    Rectangle()
+                    RoundedRectangle(cornerRadius: 8)
                         .fill(Theme.Colors.spotifyDarkGray)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .foregroundColor(Theme.Colors.textSecondary)
+                        )
                 }
-                .frame(width: 40, height: 40)
-                .cornerRadius(Theme.CornerRadius.sm)
-                
-                // Track Info
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.track.name)
-                        .font(Theme.Typography.headline)
+                .frame(width: 48, height: 48)
+                .cornerRadius(8)
+                .clipped()
+
+                // Track info — tap to open full player
+                Button(action: onTapTrack) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.track.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textPrimary)
+                            .lineLimit(1)
+                        Text(track.track.artistNames)
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.Colors.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                // Playback controls
+                Button(action: { audioManager.togglePlayPause() }) {
+                    Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 20))
                         .foregroundColor(Theme.Colors.textPrimary)
-                        .lineLimit(1)
-                    
-                    Text(track.track.artistNames)
-                        .font(Theme.Typography.caption)
-                        .foregroundColor(Theme.Colors.textSecondary)
-                        .lineLimit(1)
+                        .frame(width: 44, height: 44)
                 }
-                
-                Spacer()
-                
-                // Play/Pause Button
-                Button(action: onPlayPause) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .foregroundColor(Theme.Colors.textPrimary)
-                        .padding(8)
-                }
-                
-                // Next Button
-                Button(action: onNext) {
+                .buttonStyle(.plain)
+
+                Button(action: { audioManager.playNext() }) {
                     Image(systemName: "forward.fill")
-                        .font(.title3)
-                        .foregroundColor(Theme.Colors.textPrimary)
-                        .padding(8)
+                        .font(.system(size: 18))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .frame(width: 36, height: 44)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(Theme.Spacing.md)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(Theme.Colors.cardGradient)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                            .stroke(Theme.Colors.textPrimary.opacity(0.1), lineWidth: 1)
-                    )
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
             )
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.bottom, Theme.Spacing.lg) // Safe area padding
+            .padding(.horizontal, 12)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .buttonStyle(PlainButtonStyle())
     }
 }
