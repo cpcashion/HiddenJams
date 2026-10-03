@@ -145,9 +145,14 @@ struct ProfileView: View {
 
             // Apple Music users have no verified identity — offer Sign in
             // with Apple to complete their profile (needed for Premium).
+            // GATED: hidden until the Sign in with Apple capability is
+            // enabled on the App ID + provisioning profile (see
+            // HiddenJams.entitlements). The service code is ready.
+            #if ENABLE_APPLE_SIGN_IN
             if !userProfile.profile.hasVerifiedIdentity {
                 appleIDLinkCard
             }
+            #endif
         }
     }
 
