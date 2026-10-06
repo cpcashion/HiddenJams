@@ -242,15 +242,15 @@ struct ProfileView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(profileDataService.stats.recentlyPlayed.prefix(10)) { play in
-                        recentTrackCard(play.track)
+                        recentTrackCard(play.track, in: profileDataService.stats.recentlyPlayed.map(\.track))
                     }
                 }
             }
         }
     }
     
-    private func recentTrackCard(_ track: SpotifyTrack) -> some View {
-        Button(action: { playTrack(track) }) {
+    private func recentTrackCard(_ track: SpotifyTrack, in list: [SpotifyTrack]) -> some View {
+        Button(action: { playTrack(track, from: list) }) {
             VStack(alignment: .leading, spacing: 8) {
                 if let url = track.album.images.first?.url {
                     AsyncImage(url: url) { image in
@@ -289,7 +289,7 @@ struct ProfileView: View {
             
             VStack(spacing: 0) {
                 ForEach(Array(tracksForTimeRange.prefix(5).enumerated()), id: \.element.id) { index, track in
-                    trackRow(rank: index + 1, track: track)
+                    trackRow(rank: index + 1, track: track, in: Array(tracksForTimeRange.prefix(5)))
                     if index < 4 {
                         Divider().background(Theme.Colors.textPrimary.opacity(0.1))
                     }
@@ -337,8 +337,8 @@ struct ProfileView: View {
         }
     }
     
-    private func trackRow(rank: Int, track: SpotifyTrack) -> some View {
-        Button(action: { playTrack(track) }) {
+    private func trackRow(rank: Int, track: SpotifyTrack, in list: [SpotifyTrack]) -> some View {
+        Button(action: { playTrack(track, from: list) }) {
             HStack(spacing: 14) {
                 Text("\(rank)")
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
@@ -687,7 +687,7 @@ struct ProfileView: View {
                     .foregroundColor(Theme.Colors.textSecondary)
             }
             ForEach(savedGems.savedTracks.prefix(10)) { track in
-                trackRow(rank: 0, track: track)
+                trackRow(rank: 0, track: track, in: Array(savedGems.savedTracks.prefix(10)))
             }
         }
     }
@@ -737,9 +737,8 @@ struct ProfileView: View {
             .tracking(0.5)
     }
     
-    private func playTrack(_ track: SpotifyTrack) {
-        if let previewUrl = track.previewUrl {
-            audioManager.playPreview(url: previewUrl, trackId: track.id)
-        }
+    private func playTrack(_ track: SpotifyTrack, from list: [SpotifyTrack]) {
+        let index = list.firstIndex(where: { $0.id == track.id }) ?? 0
+        audioManager.playSpotifyTracks(list, startingAt: index)
     }
 }

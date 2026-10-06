@@ -15,6 +15,7 @@ struct MiniPlayerView: View {
 
     var body: some View {
         if let track = audioManager.currentTrack {
+            VStack(spacing: 0) {
             HStack(spacing: 12) {
                 // Artwork
                 AsyncImage(url: track.track.album.images.first?.url) { image in
@@ -63,15 +64,37 @@ struct MiniPlayerView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+
+                // Progress timeline — thin line with live progress
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Theme.Colors.textSecondary.opacity(0.25))
+                            .frame(height: 3)
+                        Rectangle()
+                            .fill(Theme.Colors.gemGold)
+                            .frame(width: geo.size.width * progress, height: 3)
+                    }
+                }
+                .frame(height: 3)
+            }
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Theme.Colors.cardGradient)
                     .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .onTapGesture(perform: onTapTrack)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+
+    /// 0–1 playback progress for the timeline.
+    private var progress: Double {
+        let duration = audioManager.duration
+        guard duration > 0 else { return 0 }
+        return min(max(audioManager.currentTime / duration, 0), 1)
     }
 }

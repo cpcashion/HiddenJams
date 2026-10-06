@@ -13,6 +13,11 @@ struct ExpandedPlayerView: View {
     @EnvironmentObject var audioManager: AudioPreviewManager
     @Environment(\.dismiss) private var dismiss
 
+    // Scrubbing state: while the user drags, hold the thumb locally so the
+    // 0.1s time observer doesn't fight the drag; seek once on release.
+    @State private var isScrubbing = false
+    @State private var scrubValue: Double = 0
+
     var body: some View {
         if let track = audioManager.currentTrack {
             VStack(spacing: 0) {
@@ -80,15 +85,24 @@ struct ExpandedPlayerView: View {
                 VStack(spacing: 4) {
                     Slider(
                         value: Binding(
-                            get: { audioManager.currentTime },
-                            set: { audioManager.seek(to: $0) }
+                            get: { isScrubbing ? scrubValue : audioManager.currentTime },
+                            set: { scrubValue = $0 }
                         ),
-                        in: 0...max(audioManager.duration, 0.1)
+                        in: 0...max(audioManager.duration, 0.1),
+                        onEditingChanged: { editing in
+                            if editing {
+                                isScrubbing = true
+                                scrubValue = audioManager.currentTime
+                            } else {
+                                isScrubbing = false
+                                audioManager.seek(to: scrubValue)
+                            }
+                        }
                     )
                     .tint(Theme.Colors.gemGold)
                     .padding(.horizontal, 32)
                     HStack {
-                        Text(formatTime(audioManager.currentTime))
+                        Text(formatTime(isScrubbing ? scrubValue : audioManager.currentTime))
                         Spacer()
                         Text(formatTime(audioManager.duration))
                     }
@@ -117,7 +131,27 @@ struct ExpandedPlayerView: View {
                             .foregroundColor(Theme.Colors.textPrimary)
                     }
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, 24)
+
+                // Play Full Song — jumps to the native app for the full track
+                if let service = FullSongOpener.service(for: track) {
+                    Button(action: { FullSongOpener.open(service) }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.up.right.circle.fill")
+                                .font(.system(size: 16))
+                            Text("Play Full Song on \(service.displayName)")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundColor(Theme.Colors.buttonText)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 14)
+                        .background(Theme.Colors.gemGold)
+                        .cornerRadius(24)
+                    }
+                    .padding(.bottom, 40)
+                } else {
+                    Spacer().frame(height: 40)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.Colors.backgroundGradient.ignoresSafeArea())

@@ -234,7 +234,7 @@ struct PlaylistPlayerView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
                         .onTapGesture {
-                            openTrackLink(track.track)
+                            FullSongOpener.openFullSong(for: track)
                         }
 
                     // Tappable artist name - opens first artist in Spotify
@@ -248,6 +248,25 @@ struct PlaylistPlayerView: View {
                                 openSpotifyArtist(id: firstArtist.id)
                             }
                         }
+
+                    // Play Full Song — explicit button to hear the whole
+                    // track in Spotify / Apple Music (not just the preview)
+                    if let service = FullSongOpener.service(for: track) {
+                        Button(action: { FullSongOpener.open(service) }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.up.right.circle.fill")
+                                    .font(.system(size: 14))
+                                Text("Play Full Song")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundColor(Theme.Colors.buttonText)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .background(Theme.Colors.gemGold)
+                            .cornerRadius(18)
+                        }
+                        .padding(.top, 6)
+                    }
                 }
                 .padding(.top, 32)
                 .padding(.horizontal, Theme.Spacing.md)
@@ -519,28 +538,8 @@ struct PlaylistPlayerView: View {
     
     // MARK: - Spotify Deep Links
 
-    private func openTrackLink(_ track: SpotifyTrack) {
-        if track.isSpotifyOrigin {
-            openSpotifyTrack(id: track.id)
-        } else if let url = URL(string: track.uri),
-                  url.scheme?.hasPrefix("http") == true {
-            // Apple Music / iTunes candidates link out to their store page
-            UIApplication.shared.open(url)
-        }
-    }
+    // (Track deep links now centralized in FullSongOpener.)
 
-    private func openSpotifyTrack(id: String) {
-        // Try Spotify app deep link first, falls back to web
-        let spotifyAppURL = URL(string: "spotify:track:\(id)")
-        let webURL = URL(string: "https://open.spotify.com/track/\(id)")
-        
-        if let appURL = spotifyAppURL, UIApplication.shared.canOpenURL(appURL) {
-            UIApplication.shared.open(appURL)
-        } else if let webURL = webURL {
-            UIApplication.shared.open(webURL)
-        }
-    }
-    
     private func openSpotifyArtist(id: String) {
         // Try Spotify app deep link first, falls back to web
         let spotifyAppURL = URL(string: "spotify:artist:\(id)")

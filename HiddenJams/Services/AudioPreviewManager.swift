@@ -218,12 +218,16 @@ class AudioPreviewManager: ObservableObject {
 
     /// Starts playback of a preview URL, or skips forward on failure.
     private func startPlayback(urlString: String, trackId: String) {
-        // Tapping the currently-loaded track just resumes (don't restart it).
-        if currentTrackId == trackId, player?.currentItem != nil {
-            player?.play()
-            isPlaying = true
-            refreshNowPlayingPlaybackState()
-            return
+        // Tapping the currently-loaded track just resumes (don't restart it)
+        // — unless the item failed to load, in which case restart it.
+        if currentTrackId == trackId, let item = player?.currentItem {
+            if item.status != .failed {
+                player?.play()
+                isPlaying = true
+                refreshNowPlayingPlaybackState()
+                return
+            }
+            // Failed item: fall through and rebuild the player.
         }
 
         teardownPlayer()
@@ -358,6 +362,33 @@ class AudioPreviewManager: ObservableObject {
             // current track, otherwise start it standalone.
             startPlayback(urlString: url, trackId: trackId)
         }
+    }
+
+    /// Plays raw SpotifyTracks (e.g. saved gems on the profile) with full
+    /// UI sync. Wraps them as RecommendedTracks and loads the whole list as
+    /// the queue starting at the tapped index — so the shelf, expanded
+    /// player, and Now Playing all show the right song, and Next advances
+    /// through the list instead of dead-ending.
+    func playSpotifyTracks(_ tracks: [SpotifyTrack], startingAt index: Int) {
+        guard !tracks.isEmpty else { return }
+        let wrapped = tracks.map { spotifyTrack in
+            RecommendedTrack(
+                id: spotifyTrack.id,
+                spotifyURI: spotifyTrack.uri,
+                track: spotifyTrack,
+                matchScore: 0,
+                obscurityScore: 0,
+                recencyScore: 0,
+                totalScore: 0,
+                obscurityReason: "",
+                matchExplanation: "",
+                similarToTrack: nil,
+                similarityReasons: []
+            )
+        }
+        let safeIndex = min(max(index, 0), wrapped.count - 1)
+        loadQueue(wrapped, autoPlay: false)
+        playTrackAtIndex(safeIndex)
     }
 
     func pause() {
