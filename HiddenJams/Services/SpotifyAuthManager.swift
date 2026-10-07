@@ -46,7 +46,7 @@ class SpotifyAuthManager: ObservableObject {
             return
         }
         
-        let scope = "user-read-private user-read-email user-library-read playlist-read-private user-top-read user-read-recently-played user-library-modify playlist-modify-public playlist-modify-private"
+        let scope = "user-read-private user-read-email user-library-read playlist-read-private user-top-read user-read-recently-played user-library-modify playlist-modify-public playlist-modify-private app-remote-control"
         
         var components = URLComponents(string: "https://accounts.spotify.com/authorize")!
         components.queryItems = [

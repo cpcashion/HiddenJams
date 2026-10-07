@@ -6,10 +6,14 @@
 //  iOS SDK App Remote. Plays the full track inside Hidden Jams — the user
 //  never leaves the app. Requires the Spotify app installed + Premium.
 //
+//  Auth reuses the app's existing PKCE access token (which now includes
+//  the `app-remote-control` scope), so there's no second login flow.
+//
 
 import Foundation
 import Combine
 import SpotifyiOS
+import UIKit
 
 @MainActor
 class SpotifyFullSongService: NSObject, ObservableObject {
@@ -34,30 +38,19 @@ class SpotifyFullSongService: NSObject, ObservableObject {
     }()
 
     private var pollTimer: Timer?
-    private var currentURI: String?
-    /// True while we're waiting for the Spotify app to call back from an
-    /// App Remote auth. Only then should onOpenURL route to the SDK —
-    /// otherwise the URL belongs to the web-API (PKCE) login flow.
-    /// Lock-protected so handleRedirect can stay nonisolated (onOpenURL
-    /// is synchronous and must not hop actors).
-    private let authFlagLock = NSLock()
-    private var _awaitingAuthCallback = false
-    private var awaitingAuthCallback: Bool {
-        get { authFlagLock.withLock { _awaitingAuthCallback } }
-        set { authFlagLock.withLock { _awaitingAuthCallback = newValue } }
-    }
+    private var pendingConnectContinuation: ((Bool) -> Void)?
 
     /// True when the Spotify app is installed (App Remote requires it).
     var isSpotifyAppInstalled: Bool {
-        guard let url = URL(string: "spotify:") else { return false }
-        return UIApplication.shared.canOpenURL(url)
+        UIApplication.shared.canOpenURL(URL(string: "spotify:")!)
     }
 
-    /// Connects the App Remote (authenticates through the Spotify app).
-    /// Calls completion with true when the connection is established.
-    func connect() async -> Bool {
+    /// Connects the App Remote using the app's Spotify access token.
+    /// The token must carry the `app-remote-control` scope.
+    func connect(accessToken: String) async -> Bool {
         if appRemote.isConnected { return true }
-        guard isSpotifyAppInstalled else { return false }
+        guard isSpotifyAppInstalled, !accessToken.isEmpty else { return false }
+        appRemote.connectionParameters.accessToken = accessToken
         return await withCheckedContinuation { continuation in
             var resumed = false
             self.pendingConnectContinuation = { success in
@@ -65,57 +58,19 @@ class SpotifyFullSongService: NSObject, ObservableObject {
                 resumed = true
                 continuation.resume(returning: success)
             }
-            self.awaitingAuthCallback = true
-            // Safety timeout — don't hang forever if the Spotify app
-            // never calls back.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            // Safety timeout — don't hang forever.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
                 guard let self, !resumed else { return }
                 resumed = true
                 self.pendingConnectContinuation = nil
-                self.awaitingAuthCallback = false
                 continuation.resume(returning: self.appRemote.isConnected)
             }
-            self.appRemote.authorizeAndPlayURI("", scope: [.appRemoteControl]) { [weak self] error in
-                if let error {
-                    print("⚠️ Spotify App Remote auth error: \(error)")
-                    self?.pendingConnectContinuation?(false)
-                    self?.pendingConnectContinuation = nil
-                }
-                // Success arrives via appRemoteDidEstablishConnection.
-            }
+            self.appRemote.connect()
         }
     }
 
-    private var pendingConnectContinuation: ((Bool) -> Void)?
-
-    /// Routes the OAuth callback URL to the SDK. Call from the app's
-    /// onOpenURL handler. Returns true only when we're actually waiting
-    /// for an App Remote auth callback — otherwise the URL belongs to
-    /// the web-API (PKCE) login flow and must pass through.
-    nonisolated func handleRedirect(url: URL) -> Bool {
-        guard awaitingAuthCallback,
-              url.scheme == "spotifyhiddengems" else { return false }
-        awaitingAuthCallback = false
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            // Per Spotify's docs: extract the access token from the
-            // callback and hand it to the remote; the delegate then
-            // reports the established connection.
-            if let params = self.appRemote.authorizationParameters(from: url),
-               let token = params[SPTAppRemoteAccessTokenKey] {
-                self.appRemote.connectionParameters.accessToken = token
-            } else {
-                // No token — auth failed or was cancelled.
-                self.pendingConnectContinuation?(false)
-                self.pendingConnectContinuation = nil
-            }
-        }
-        return true
-    }
-
-    func play(uri: String) async -> Bool {
-        guard await connect() else { return false }
-        currentURI = uri
+    func play(uri: String, accessToken: String) async -> Bool {
+        guard await connect(accessToken: accessToken) else { return false }
         return await withCheckedContinuation { continuation in
             appRemote.playerAPI?.play(uri) { [weak self] _, error in
                 Task { @MainActor in
@@ -158,7 +113,6 @@ class SpotifyFullSongService: NSObject, ObservableObject {
         isPlaying = false
         position = 0
         duration = 0
-        currentURI = nil
     }
 
     func disconnect() {
@@ -204,7 +158,6 @@ extension SpotifyFullSongService: SPTAppRemoteDelegate {
     nonisolated func appRemoteDidEstablishConnection(_ appRemote: SPTAppRemote) {
         Task { @MainActor in
             self.isConnected = true
-            self.awaitingAuthCallback = false
             self.pendingConnectContinuation?(true)
             self.pendingConnectContinuation = nil
         }
@@ -213,7 +166,6 @@ extension SpotifyFullSongService: SPTAppRemoteDelegate {
     nonisolated func appRemote(_ appRemote: SPTAppRemote, didFailConnectionAttemptWithError error: Error?) {
         Task { @MainActor in
             self.isConnected = false
-            self.awaitingAuthCallback = false
             print("⚠️ Spotify App Remote connection failed: \(error?.localizedDescription ?? "unknown")")
             self.pendingConnectContinuation?(false)
             self.pendingConnectContinuation = nil

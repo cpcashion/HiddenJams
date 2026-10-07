@@ -149,8 +149,14 @@ class AudioPreviewManager: ObservableObject {
            await isSpotifyPremium() {
             return .spotify
         }
-        if !spotifyFullSong.isSpotifyAppInstalled, track.track.isSpotifyOrigin {
-            return .unavailable("Full song needs the Spotify app + Premium, or Apple Music")
+        if track.track.isSpotifyOrigin {
+            if !spotifyFullSong.isSpotifyAppInstalled {
+                return .unavailable("Full song needs the Spotify app installed")
+            }
+            // Premium + app present but App Remote may still fail (e.g. the
+            // token predates the app-remote-control scope) — reconnecting
+            // Spotify in Profile fixes it.
+            return .unavailable("Full song needs Spotify Premium (reconnect Spotify in Profile if it doesn't start)")
         }
         return .unavailable("Full song needs Apple Music or Spotify Premium")
     }
@@ -184,10 +190,14 @@ class AudioPreviewManager: ObservableObject {
             }
             fullSongBackend = .appleMusic
         case .spotify:
+            guard let token = spotifyTokenProvider?(), !token.isEmpty else {
+                player?.play()
+                return false
+            }
             let uri = track.spotifyURI.hasPrefix("spotify:track:")
                 ? track.spotifyURI
                 : "spotify:track:\(track.track.id)"
-            guard await spotifyFullSong.play(uri: uri) else {
+            guard await spotifyFullSong.play(uri: uri, accessToken: token) else {
                 player?.play()
                 return false
             }
@@ -225,11 +235,6 @@ class AudioPreviewManager: ObservableObject {
         print("✅ Full song ended — back to previews")
         exitFullSong()
         playNext()
-    }
-
-    /// Routes Spotify SDK OAuth callbacks. Called from the app's onOpenURL.
-    func handleSpotifyRedirect(url: URL) -> Bool {
-        spotifyFullSong.handleRedirect(url: url)
     }
 
     // MARK: - Now Playing (Lock Screen / Apple Watch)
