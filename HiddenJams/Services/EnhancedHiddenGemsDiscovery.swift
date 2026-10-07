@@ -32,6 +32,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // Services
     private let spotifyAPI: SpotifyAPIService
     private let lastFmService: LastFmService
+    private let longTailDiscovery = LongTailDiscoveryService()
     private let musicBrainzService: MusicBrainzService
     private let everyNoiseService: EveryNoiseService
     private let crossReferenceService: SpotifyCrossReferenceService
@@ -288,9 +289,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             var allCandidates: [SpotifyTrack] = []
 
             if let spotifyToken = token {
-                // BRANCH A: Recommendations API (NEW - works for drum-and-bass!)
+                // BRANCH A: Taste-seeded recommendations (artist seeds sampled
+                // per-session from the user's profile — personal, not the old
+                // deterministic genre seeds).
                 await updateProgress("Fetching recommendations...")
                 let recommendationCandidates = try await discoverViaRecommendations(
+                    profile: profile,
                     activeGenres: activeGenres,
                     token: spotifyToken
                 )
@@ -345,6 +349,21 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 )
                 print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
                 allCandidates.append(contentsOf: microCandidates)
+
+                // BRANCH F: Long-tail graph walk. Spotify's search and
+                // recommendations only surface the popular head; Last.fm's
+                // similar-artist graph reaches the obscure depths. Seeds are
+                // sampled per-session from the user's taste, so two users
+                // walk different graphs and get different tracks.
+                let longTailCandidates = await longTailDiscovery.discover(
+                    profile: profile,
+                    sessionGenres: Array(selectedGenres ?? []),
+                    token: spotifyToken,
+                    popularityThreshold: Double(popularityThreshold),
+                    updateProgress: { msg in await self.updateProgress(msg) }
+                )
+                print("✅ Long-tail walk: Found \(longTailCandidates.count) candidates")
+                allCandidates.append(contentsOf: longTailCandidates)
             } else {
                 // BRANCH E: Apple Music discovery (no Spotify token).
                 // Last.fm finds similar tracks, Last.fm listener counts filter for
@@ -1449,26 +1468,52 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // MARK: - Recommendations API Discovery
     
     private func discoverViaRecommendations(
+        profile: ListeningProfile,
         activeGenres: [String],
         token: String
     ) async throws -> [SpotifyTrack] {
-        var allTracks: [SpotifyTrack] = []
-        
-        // Use up to 5 seed genres (Spotify limit)
-        let seedGenres = Array(activeGenres.prefix(5))
-        
+        // Taste-seeded ARTIST recommendations. The old genre-seed call was
+        // deterministic — identical genre seeds gave every user the same 50
+        // tracks, which is a direct cause of identical queues. Seeding with
+        // a per-session sample of the user's own artists makes results
+        // personal and non-repeatable.
+        let seedNames = DiscoveryRandomization.weightedSample(
+            profile.topArtists,
+            count: min(5, profile.topArtists.count),
+            weight: { max(0.2, $0.influence) }
+        ).map { $0.name }
+
+        var seedIds: [String] = []
+        for name in seedNames {
+            if let artist = try? await spotifyAPI.searchArtist(name: name, token: token).first {
+                seedIds.append(artist.id)
+            }
+            if seedIds.count >= 5 { break }
+        }
+
+        if !seedIds.isEmpty {
+            do {
+                return try await spotifyAPI.getRecommendations(
+                    seedArtists: seedIds,
+                    limit: 50,
+                    token: token
+                )
+            } catch {
+                print("⚠️ Artist-seeded recommendations failed: \(error)")
+            }
+        }
+
+        // Fallback: genre seeds (deterministic, but better than nothing).
         do {
-            let tracks = try await spotifyAPI.getRecommendations(
-                seedGenres: seedGenres,
+            return try await spotifyAPI.getRecommendations(
+                seedGenres: Array(activeGenres.prefix(5)),
                 limit: 50,
                 token: token
             )
-            allTracks.append(contentsOf: tracks)
         } catch {
             print("⚠️ Recommendations API error: \(error)")
+            return []
         }
-        
-        return allTracks
     }
     
     // MARK: - Artist-Based Discovery

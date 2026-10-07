@@ -212,29 +212,43 @@ class SpotifyAPIService: ObservableObject {
     /// Get track recommendations based on seed genres
     /// This API supports genres like "drum-and-bass" that don't work in search
     func getRecommendations(
-        seedGenres: [String],
+        seedGenres: [String] = [],
+        seedArtists: [String] = [],
+        seedTracks: [String] = [],
         limit: Int = 50,
         market: String? = nil,
         token: String
     ) async throws -> [SpotifyTrack] {
         var components = URLComponents(string: "\(baseURL)/recommendations")!
-        
+
         var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "seed_genres", value: seedGenres.joined(separator: ",")),
             URLQueryItem(name: "limit", value: "\(min(limit, 100))")  // Max 100
         ]
-        
+        // Spotify allows 1-5 seeds total across the three kinds. Any
+        // combination works; artist seeds are what make results personal
+        // instead of identical for every user picking the same genre.
+        if !seedGenres.isEmpty {
+            queryItems.append(URLQueryItem(name: "seed_genres", value: seedGenres.joined(separator: ",")))
+        }
+        if !seedArtists.isEmpty {
+            queryItems.append(URLQueryItem(name: "seed_artists", value: seedArtists.joined(separator: ",")))
+        }
+        if !seedTracks.isEmpty {
+            queryItems.append(URLQueryItem(name: "seed_tracks", value: seedTracks.joined(separator: ",")))
+        }
+
         if let market = market {
             queryItems.append(URLQueryItem(name: "market", value: market))
         }
-        
+
         components.queryItems = queryItems
-        
+
         guard let url = components.url else {
             throw APIError.invalidResponse
         }
-        
-        print("🎵 Fetching recommendations for genres: \(seedGenres.joined(separator: ", "))")
+
+        let seedDesc = "genres: \(seedGenres.joined(separator: ",")), artists: \(seedArtists.count), tracks: \(seedTracks.count)"
+        print("🎵 Fetching recommendations (\(seedDesc))")
         let response: RecommendationsResponse = try await makeRequest(url: url, token: token)
         print("✅ Got \(response.tracks.count) recommendations")
         return response.tracks
