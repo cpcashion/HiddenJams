@@ -531,6 +531,22 @@ class AIProfileAnalyzer: ObservableObject {
         UserDataManager.shared.daysSinceLastAnalysis
     }
 
+    /// Re-analyzes the connected libraries when the cached taste profile is
+    /// older than 7 days. Taste evolves — a one-time analysis goes stale.
+    /// Called from the dashboard on appear; no-ops while analyzing or when
+    /// no profile exists yet (first-run flow handles that).
+    func refreshIfStale(spotifyToken: String?) async {
+        let shouldRefresh: Bool = await MainActor.run {
+            guard !isAnalyzing, profile.totalTracksAnalyzed > 0 else { return false }
+            let weekAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            return profile.lastAnalyzed < weekAgo
+        }
+        if shouldRefresh {
+            print("🔄 Taste profile is stale — refreshing in background")
+            await analyzeAllConnectedSources(spotifyToken: spotifyToken)
+        }
+    }
+
     // MARK: - AI Helpers
 
     private func generateTasteVector(tracks: [LibraryTrack]) async throws -> [Double] {

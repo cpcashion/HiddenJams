@@ -8,8 +8,10 @@ class DiscoveryHistoryManager: ObservableObject {
     private let artistHistoryKey = "discovery_history_seen_artist_ids"
     private let timestampsKey = "discovery_history_timestamps"
     
-    // History expires after 7 days
-    private let expirationDays: TimeInterval = 7
+    // History expires after 90 days — a served song effectively never
+    // repeats. Narrow genres refill from the last-resort path rather than
+    // re-serving recent gems.
+    private let expirationDays: TimeInterval = 90
     
     @Published var seenTrackIds: Set<String> = []
     @Published var seenArtistIds: Set<String> = []

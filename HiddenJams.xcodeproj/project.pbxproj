@@ -195,7 +195,7 @@
 			);
 			name = HiddenJams;
 			packageProductDependencies = (
-			);
+				EB4D5E04880744A49365ACBE /* SpotifyiOS */,			);
 			productName = HiddenJams;
 			productReference = C9BEFF5C2ED679400033752E /* HiddenJams.app */;
 			productType = "com.apple.product-type.application";
@@ -306,6 +306,9 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C9BEFF5D2ED679400033752E /* Products */;
 			projectDirPath = "";
+			packageReferences = (
+				69FAE6DD6CAB496FB31CD149 /* XCRemoteSwiftPackageReference "SpotifyiOS" */,
+			);
 			projectRoot = "";
 			targets = (
 				C9BEFF5B2ED679400033752E /* HiddenJams */,
@@ -315,6 +318,25 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		69FAE6DD6CAB496FB31CD149 /* XCRemoteSwiftPackageReference "SpotifyiOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/spotify/ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.7;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EB4D5E04880744A49365ACBE /* SpotifyiOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 69FAE6DD6CAB496FB31CD149 /* XCRemoteSwiftPackageReference "SpotifyiOS" */;
+			productName = SpotifyiOS;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		C9BEFF5A2ED679400033752E /* Resources */ = {
@@ -524,7 +546,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = 3CQEKUP494;
 				ENABLE_PREVIEWS = YES;
 				CODE_SIGN_ENTITLEMENTS = HiddenJams/HiddenJams.entitlements;
@@ -555,7 +577,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = 3CQEKUP494;
 				ENABLE_PREVIEWS = YES;
 				CODE_SIGN_ENTITLEMENTS = HiddenJams/HiddenJams.entitlements;

@@ -27,7 +27,10 @@ struct HiddenJamsApp: App {
         _apiService = StateObject(wrappedValue: SpotifyAPIService())
         _profileAnalyzer = StateObject(wrappedValue: AIProfileAnalyzer(appleMusicService: apple))
         _factsService = StateObject(wrappedValue: MusicFactsService())
-        _audioManager = StateObject(wrappedValue: AudioPreviewManager())
+        let audio = AudioPreviewManager()
+        // Full-song mode needs the Spotify token for the Premium check.
+        audio.spotifyTokenProvider = { [weak auth] in auth?.accessToken }
+        _audioManager = StateObject(wrappedValue: audio)
     }
 
     var body: some Scene {

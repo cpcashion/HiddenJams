@@ -452,8 +452,16 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 profile: profile,
                 vectorScores: vectorScores
             )
+            // ANTI-DETERMINISM: weighted lottery instead of fixed top-N.
+            // Higher-scored tracks win more often, but every session draws
+            // a different set in a different order — no two users (and no
+            // two sessions) ever get the same queue.
             // Increased to 100 to account for artist deduplication reducing count
-            let topCandidates = Array(scored.prefix(100))  // Fetch preview URLs for top 100 (will dedupe artists)
+            let topCandidates = DiscoveryRandomization.weightedSampleByScore(
+                scored,
+                count: min(100, scored.count),
+                score: { $0.totalScore }
+            )
             
             print("🎯 Fetching preview URLs for top \(topCandidates.count) tracks...")
             await updateProgress("Checking which tracks are playable...")
@@ -490,7 +498,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 )
             }
             
-            let topRecommendations = Array(finalRecommendations.prefix(count))
+            let topRecommendations = Array(finalRecommendations.shuffled().prefix(count))
             
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
             
@@ -559,8 +567,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private func discoverViaLastFm(profile: ListeningProfile, token: String) async throws -> [SpotifyTrack] {
         var candidates: [SpotifyTrack] = []
         
-        // Get top artists from profile
-        let topArtists = Array(profile.topArtists.prefix(10))
+        // Per-session taste sampling: draw seed artists weighted by the
+        // user's own influence scores instead of the same fixed top 10.
+        // Two users (or two sessions) start from different seeds.
+        let topArtists = DiscoveryRandomization.weightedSample(
+            profile.topArtists,
+            count: min(10, profile.topArtists.count),
+            weight: { max($0.influence, 0.05) }
+        )
         
         for artist in topArtists {
             do {
@@ -727,7 +741,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         func genreSeedPairs() async -> [(track: String, artist: String)] {
             var seen = Set<String>()
             var pairs: [(track: String, artist: String)] = []
-            let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
+            // Per-session genre order: weighted lottery over the user's genre
+            // weights instead of a fixed ranking — same session genres,
+            // different draw order every time.
+            let ranked = DiscoveryRandomization.weightedSample(
+                Array(profile.genreWeights.keys),
+                count: profile.genreWeights.count,
+                weight: { max(profile.genreWeights[$0] ?? 0.05, 0.05) }
+            )
             // Respect the session's genre selection: when the user picked
             // specific genres (e.g. hip-hop), seeds must come from those, not
             // from unrelated profile favorites.
@@ -917,7 +938,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         // Genre selection: the SESSION's genres win (a hip-hop session must
         // query hip-hop, not the user's rock-heavy profile). Within the
         // session, profile-ranked genres come first for personalization.
-        let ranked = profile.genreWeights.sorted { $0.value > $1.value }.map { $0.key }
+        // Per-session genre order: weighted lottery over the user's genre
+        // weights instead of a fixed ranking.
+        let ranked = DiscoveryRandomization.weightedSample(
+            Array(profile.genreWeights.keys),
+            count: profile.genreWeights.count,
+            weight: { max(profile.genreWeights[$0] ?? 0.05, 0.05) }
+        )
         let session = sessionGenres.filter { !$0.isEmpty }
         let baseGenres: [String]
         if !session.isEmpty {
@@ -1379,16 +1406,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private func discoverViaMicroGenres(profile: ListeningProfile, activeGenres: [String], token: String, limit: Int = 50) async throws -> [SpotifyTrack] {
         var candidates: [SpotifyTrack] = []
         
-        // Use passed active genres (already strict filtered)
-        let seedGenres = activeGenres.prefix(5)
+        // Use passed active genres (already strict filtered) — shuffled per
+        // session so the same selection explores different corners
+        let seedGenres = activeGenres.shuffled().prefix(5)
         
         
         // Expand to micro-genres
         let microGenres = everyNoiseService.getMicroGenres(fromGenres: Array(seedGenres))
         print("🎵 Exploring \(microGenres.count) micro-genres from seed: \(seedGenres)")
         
-        // Search each micro-genre (limit 30 tracks per genre to ensure depth)
-        for genre in microGenres.prefix(5) {
+        // Search a per-session random subset of micro-genres (not the same
+        // fixed first 5) for cross-session variety
+        for genre in microGenres.shuffled().prefix(5) {
             // Skip if micro-genre is seasonal
             let lower = genre.lowercased()
             if seasonalGenres.contains(where: { lower.contains($0) }) {

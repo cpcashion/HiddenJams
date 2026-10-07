@@ -107,6 +107,11 @@ struct DashboardView: View {
                 if profileAnalyzer.profile.totalTracksAnalyzed == 0 {
                     profileAnalyzer.loadProfile()
                 }
+                // Keep the taste profile fresh: re-analyze in the background
+                // when it's older than a week (taste evolves).
+                Task {
+                    await profileAnalyzer.refreshIfStale(spotifyToken: authManager.accessToken)
+                }
             }
             .sheet(isPresented: $showGenreSelection) {
                 GenreSelectionView(topGenres: Array(profileAnalyzer.profile.genreWeights.keys))

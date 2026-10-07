@@ -49,8 +49,11 @@ struct ContentView: View {
                 .environmentObject(audioManager)
         }
         .onOpenURL { url in
-            // Handle OAuth callback
-            authManager.handleCallback(url: url)
+            // Spotify SDK (App Remote) callbacks take precedence when they
+            // claim the URL; otherwise it's the web-API OAuth callback.
+            if !audioManager.handleSpotifyRedirect(url: url) {
+                authManager.handleCallback(url: url)
+            }
         }
     }
 }

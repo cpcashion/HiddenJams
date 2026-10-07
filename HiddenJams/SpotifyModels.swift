@@ -13,13 +13,18 @@ struct SpotifyUser: Codable {
     let displayName: String?
     let email: String?
     let images: [SpotifyImage]?
+    /// "premium", "free", "open", etc. — gates in-app full-song playback.
+    let product: String?
     
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
         case email
         case images
+        case product
     }
+
+    var isPremium: Bool { product == "premium" }
 }
 
 // MARK: - Track
@@ -32,8 +37,14 @@ struct SpotifyTrack: Codable, Identifiable {
     let previewUrl: String?
     let uri: String
     let durationMs: Int
-    
+    /// Spotify's external_ids.isrc — the universal recording identifier.
+    /// Used to match Spotify tracks to Apple Music catalog songs for
+    /// in-app full-song playback.
+    let externalIds: ExternalIds? = nil
+
     var id: String { spotifyId ?? UUID().uuidString }
+
+    var isrc: String? { externalIds?.isrc }
     
     /// True when this track carries a real Spotify ID (not a namespaced
     /// internal ID like "itunes:..." or "applemusic:..."). Only Spotify-origin
@@ -48,6 +59,11 @@ struct SpotifyTrack: Codable, Identifiable {
         case name, artists, album, popularity, uri
         case previewUrl = "preview_url"
         case durationMs = "duration_ms"
+        case externalIds = "external_ids"
+    }
+
+    struct ExternalIds: Codable {
+        let isrc: String?
     }
     
     var artistNames: String {

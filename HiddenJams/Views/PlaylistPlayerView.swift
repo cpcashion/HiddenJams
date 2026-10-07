@@ -21,6 +21,7 @@ struct PlaylistPlayerView: View {
     var refreshProgress: String = ""
     
     @State private var savedTracks: Set<String> = []
+    @State private var fullSongLoadingTrackId: String?
     
     // Card swipe state
     @State private var cardOffset: CGSize = .zero
@@ -249,21 +250,44 @@ struct PlaylistPlayerView: View {
                             }
                         }
 
-                    // Play Full Song — explicit button to hear the whole
-                    // track in Spotify / Apple Music (not just the preview)
-                    if let service = FullSongOpener.service(for: track) {
-                        Button(action: { FullSongOpener.open(service) }) {
+                    // Full Song — plays the entire track IN the app (via
+                    // Apple Music or Spotify, whichever the user has).
+                    // Subtle by design; the expanded player has the big button.
+                    if audioPlayer.isFullSongActive,
+                       audioPlayer.currentTrack?.id == track.id {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13))
+                            Text("Playing Full Song")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(Theme.Colors.gemGold)
+                        .padding(.top, 6)
+                    } else if fullSongLoadingTrackId == track.id {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.Colors.gemGold))
+                                .scaleEffect(0.8)
+                            Text("Loading full song…")
+                                .font(.system(size: 13))
+                        }
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .padding(.top, 6)
+                    } else {
+                        Button(action: {
+                            fullSongLoadingTrackId = track.id
+                            Task {
+                                await audioPlayer.playFullSong()
+                                fullSongLoadingTrackId = nil
+                            }
+                        }) {
                             HStack(spacing: 6) {
-                                Image(systemName: "arrow.up.right.circle.fill")
+                                Image(systemName: "play.circle")
                                     .font(.system(size: 14))
-                                Text("Play Full Song")
+                                Text("Full Song")
                                     .font(.system(size: 13, weight: .semibold))
                             }
-                            .foregroundColor(Theme.Colors.buttonText)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .background(Theme.Colors.gemGold)
-                            .cornerRadius(18)
+                            .foregroundColor(Theme.Colors.gemGold)
                         }
                         .padding(.top, 6)
                     }
