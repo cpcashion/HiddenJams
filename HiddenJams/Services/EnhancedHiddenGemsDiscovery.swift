@@ -465,7 +465,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // so this finds NEW artists — never repeats, and almost never
             // empty while the graph has unexplored artists. Popularity is
             // relaxed (fresh beats obscure here); history is NOT.
-            if filteredCandidates.isEmpty {
+            // (Spotify only — the walk needs a token.)
+            if filteredCandidates.isEmpty, let spotifyToken = token {
                 print("🆘 Batch empty after relaxation — emergency deep walk")
                 await updateProgress("Digging deeper for fresh sounds...")
                 let emergencyCandidates = await longTailDiscovery.discover(
