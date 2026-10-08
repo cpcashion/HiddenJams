@@ -471,7 +471,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 let emergencyCandidates = await longTailDiscovery.discover(
                     profile: profile,
                     sessionGenres: Array(selectedGenres ?? []),
-                    token: token,
+                    token: spotifyToken,
                     popularityThreshold: 70,
                     maxArtists: 30,
                     maxTracks: 80,
