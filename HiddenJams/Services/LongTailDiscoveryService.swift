@@ -7,18 +7,22 @@
 //  surface (both are popularity-biased / deterministic for fixed seeds,
 //  which is why two users could get identical queues).
 //
-//  Strategy:
-//    1. Taste seeds — per-session weighted sample of the user's own
-//       artists, biased toward their deeper cuts, genre-filtered to the
-//       session's selection when one exists.
-//    2. Genre entry points — Last.fm tag-top artists for the session
-//       genres (popular head, used only as walk entry points).
-//    3. Graph walk — Last.fm `artist.getSimilar` on every seed. Similar
-//       artists skew obscure; similar artists of obscure artists live
-//       deep in the long tail.
-//    4. Spotify resolve — searchArtist + top-tracks for each discovered
-//       artist, pre-filtered by popularity. The main pipeline's
-//       filters/scoring/lottery then keep only the genuine hidden gems.
+//  FRONTIER CHAINING: the walk is stateful across sessions. Every artist
+//  name the walk has ever visited is persisted; each session starts from
+//  where the last one ended (the frontier) and only traverses UNEXPLORED
+//  territory. The Last.fm similar-artist graph is effectively infinite,
+//  so this guarantees fresh candidates every session, forever — the
+//  structural answer to "same songs over and over" AND to "couldn't find
+//  new music."
+//
+//  Strategy per session:
+//    1. Seeds — frontier artists (forward motion) + fresh taste seeds
+//       (taste anchoring, re-sampled every session).
+//    2. Graph walk — Last.fm `artist.getSimilar`, skipping every visited
+//       name. Similar artists of obscure artists live deep in the tail.
+//    3. Depth charge — if level 1 is thin, walk similar-of-similar.
+//    4. Spotify resolve — searchArtist + top-tracks, skipping served
+//       artists and pre-filtering by popularity.
 //
 
 import Foundation
@@ -27,69 +31,77 @@ final class LongTailDiscoveryService {
     private let lastFm = LastFmService()
     private let spotifyAPI = SpotifyAPIService()
 
+    // Persistent walk state — the walk never revisits.
+    private let exploredKey = "longtail_explored_artists"
+    private let frontierKey = "longtail_frontier"
+
     /// Generates long-tail Spotify track candidates.
-    /// - Returns: Tracks from obscure artists related to the user's taste
-    ///   and the session genres. Unfiltered beyond light popularity
-    ///   pre-checks — the caller applies the full filter pipeline.
+    /// - Returns: Tracks from obscure, never-before-visited artists related
+    ///   to the user's taste and the session genres.
     func discover(
         profile: ListeningProfile,
         sessionGenres: [String],
         token: String,
         popularityThreshold: Double,
-        maxArtists: Int = 36,
-        maxTracks: Int = 140,
+        maxArtists: Int = 40,
+        maxTracks: Int = 160,
         updateProgress: @escaping (String) async -> Void
     ) async -> [SpotifyTrack] {
-        // 1. Taste seeds: the user's own artists, per-session sample with
-        // a mild deep-cut bias (obscure seeds walk deeper into the tail).
-        let tasteSeeds = sampleTasteSeeds(profile: profile, sessionGenres: sessionGenres, count: 8)
-        print("🌊 Long-tail: taste seeds: \(tasteSeeds)")
+        var explored = loadExplored()
+        let genreKey = sessionGenres.sorted().joined(separator: "|")
 
-        // 2. Genre entry points via Last.fm tags.
-        var entryArtists = tasteSeeds
-        if !sessionGenres.isEmpty {
+        // 1. Seeds: frontier (forward motion) + fresh taste seeds (anchoring).
+        var seeds: [String] = []
+        let frontier = loadFrontier()[genreKey] ?? []
+        let frontierSeeds = Array(frontier.shuffled().prefix(6))
+        seeds.append(contentsOf: frontierSeeds)
+        let tasteSeeds = sampleTasteSeeds(profile: profile, sessionGenres: sessionGenres, count: 8)
+        for seed in tasteSeeds where !seeds.contains(where: { $0.caseInsensitiveCompare(seed) == .orderedSame }) {
+            seeds.append(seed)
+        }
+        // Genre entry points when there's no frontier yet.
+        if seeds.count < 6, !sessionGenres.isEmpty {
             await updateProgress("Mapping the \(sessionGenres.prefix(2).joined(separator: ", ")) underground...")
             for genre in sessionGenres.prefix(3) {
                 do {
                     let tops = try await lastFm.getTagTopTracks(tag: genre.lowercased(), limit: 6)
-                    for (_, artist) in tops where !entryArtists.contains(where: { $0.caseInsensitiveCompare(artist) == .orderedSame }) {
-                        entryArtists.append(artist)
+                    for (_, artist) in tops where !seeds.contains(where: { $0.caseInsensitiveCompare(artist) == .orderedSame }) {
+                        seeds.append(artist)
                     }
                 } catch {
                     print("⚠️ Long-tail: tag tops failed for '\(genre)': \(error)")
                 }
-                if entryArtists.count >= 14 { break }
+                if seeds.count >= 12 { break }
             }
         }
-        guard !entryArtists.isEmpty else {
-            print("⚠️ Long-tail: no entry artists — skipping")
+        guard !seeds.isEmpty else {
+            print("⚠️ Long-tail: no seeds — skipping")
             return []
         }
+        print("🌊 Long-tail: \(seeds.count) seeds (\(frontierSeeds.count) frontier, \(tasteSeeds.count) taste)")
 
-        // 3. Graph walk: similar artists for every entry point.
+        // 2. Graph walk — only unexplored territory.
         await updateProgress("Walking the long tail...")
         var discovered: [String] = []
-        var seen = Set<String>()
-        for entry in entryArtists {
-            for name in [entry] + discovered { seen.insert(name.lowercased()) }
+        for seed in seeds {
+            explored.insert(seed.lowercased())
             do {
-                let similar = try await lastFm.getSimilarArtists(artistName: entry, limit: 20)
+                let similar = try await lastFm.getSimilarArtists(artistName: seed, limit: 20)
                 for artist in similar {
                     let key = artist.name.lowercased()
-                    if seen.insert(key).inserted {
+                    if !explored.contains(key) {
+                        explored.insert(key)
                         discovered.append(artist.name)
                     }
                 }
             } catch {
-                print("⚠️ Long-tail: similar-artists failed for '\(entry)': \(error)")
+                print("⚠️ Long-tail: similar-artists failed for '\(seed)': \(error)")
             }
             if discovered.count >= maxArtists { break }
         }
-        print("🌊 Long-tail: discovered \(discovered.count) artists from \(entryArtists.count) entry points")
+        print("🌊 Long-tail: discovered \(discovered.count) NEW artists")
 
-        // 3b. Depth charge: if level 1 was thin, walk one level deeper from
-        // the first few discoveries — similar-of-similar lives deepest in
-        // the tail, where the freshest gems are.
+        // 3. Depth charge: if level 1 was thin, walk similar-of-similar.
         if discovered.count < 15 {
             await updateProgress("Going deeper underground...")
             let depthSeeds = Array(discovered.prefix(6))
@@ -98,7 +110,8 @@ final class LongTailDiscoveryService {
                     let similar = try await lastFm.getSimilarArtists(artistName: seed, limit: 15)
                     for artist in similar {
                         let key = artist.name.lowercased()
-                        if seen.insert(key).inserted {
+                        if !explored.contains(key) {
+                            explored.insert(key)
                             discovered.append(artist.name)
                         }
                     }
@@ -107,26 +120,28 @@ final class LongTailDiscoveryService {
                 }
                 if discovered.count >= maxArtists { break }
             }
-            print("🌊 Long-tail: after depth charge, \(discovered.count) artists")
+            print("🌊 Long-tail: after depth charge, \(discovered.count) new artists")
         }
 
+        // Persist walk state BEFORE resolving (even if resolution fails,
+        // we never walk here again).
+        saveExplored(explored)
+        var frontierMap = loadFrontier()
+        frontierMap[genreKey] = Array(discovered.shuffled().prefix(12))
+        saveFrontier(frontierMap)
+
         // 4. Resolve to Spotify tracks, preferring obscure artists.
-        // Per-session shuffle so two users walk the same graph differently.
-        // Served artists are skipped BEFORE the top-tracks call — no point
-        // resolving artists the user has already heard.
+        // Per-session shuffle so the same graph yields different tracks.
+        // Served artists are skipped BEFORE the top-tracks call.
         var candidates: [SpotifyTrack] = []
         var seenTrackIds = Set<String>()
         let history = DiscoveryHistoryManager.shared
-        let artistCap = min(discovered.count, maxArtists)
-        for artistName in discovered.prefix(artistCap).shuffled() {
+        for artistName in discovered.shuffled() {
             guard candidates.count < maxTracks else { break }
             do {
                 let artists = try await spotifyAPI.searchArtist(name: artistName, token: token)
                 guard let artist = artists.first else { continue }
-                // Skip artists already served (persistent history)
                 if history.isArtistSeen(artistId: artist.id) { continue }
-                // Latency optimization: an artist this popular won't yield
-                // tracks under the obscurity threshold — skip the top-tracks call.
                 let artistPop = Double(artist.popularity ?? 100)
                 guard artistPop < max(popularityThreshold + 25, 55) else { continue }
 
@@ -138,12 +153,38 @@ final class LongTailDiscoveryService {
                     if candidates.count >= maxTracks { break }
                 }
             } catch {
-                // Resolution failures are routine (name mismatches, etc.)
                 continue
             }
         }
-        print("🌊 Long-tail: resolved \(candidates.count) candidate tracks")
+        print("🌊 Long-tail: resolved \(candidates.count) candidate tracks from \(discovered.count) new artists")
         return candidates
+    }
+
+    // MARK: - Persistent walk state
+
+    private func loadExplored() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: exploredKey) ?? [])
+    }
+
+    private func saveExplored(_ explored: Set<String>) {
+        // Cap the stored set to keep UserDefaults lean (50k names max —
+        // effectively infinite for walk purposes).
+        let capped = Array(explored.suffix(50_000))
+        UserDefaults.standard.set(capped, forKey: exploredKey)
+    }
+
+    private func loadFrontier() -> [String: [String]] {
+        guard let data = UserDefaults.standard.data(forKey: frontierKey),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func saveFrontier(_ frontier: [String: [String]]) {
+        if let encoded = try? JSONEncoder().encode(frontier) {
+            UserDefaults.standard.set(encoded, forKey: frontierKey)
+        }
     }
 
     // MARK: - Taste seeds

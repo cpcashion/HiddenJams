@@ -287,6 +287,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🧠 AI Explanations: Comparing to \(userLibrary.count) tracks in your library")
             
             var allCandidates: [SpotifyTrack] = []
+            // Telemetry: per-branch candidate counts + filter outcomes.
+            // Surfaced in the empty-state error so a "no music" report
+            // carries its own diagnosis.
+            var telemetry: [String: Int] = [:]
 
             if let spotifyToken = token {
                 // BRANCH A: Taste-seeded recommendations (artist seeds sampled
@@ -299,6 +303,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     token: spotifyToken
                 )
                 print("✅ Recommendations API: Found \(recommendationCandidates.count) candidates")
+                telemetry["recommendations"] = recommendationCandidates.count
                 allCandidates.append(contentsOf: recommendationCandidates)
 
                 // BRANCH B: Search API (existing, with electronic fallback)
@@ -309,6 +314,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     token: spotifyToken
                 )
                 print("✅ Genre searches: Found \(genreCandidates.count) candidates")
+                telemetry["search"] = genreCandidates.count
                 allCandidates.append(contentsOf: genreCandidates)
 
                 // FALLBACK: If drum and bass or related genres return 0 results, search electronic instead
@@ -336,6 +342,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         token: spotifyToken
                     )
                     print("✅ Artist-based discovery: Found \(artistCandidates.count) candidates")
+                telemetry["artists"] = artistCandidates.count
                     allCandidates.append(contentsOf: artistCandidates)
                 }
 
@@ -348,6 +355,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     limit: 100 // Increased from default to ensure volume
                 )
                 print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
+                telemetry["microgenres"] = microCandidates.count
                 allCandidates.append(contentsOf: microCandidates)
 
                 // BRANCH F: Long-tail graph walk. Spotify's search and
@@ -363,6 +371,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     updateProgress: { msg in await self.updateProgress(msg) }
                 )
                 print("✅ Long-tail walk: Found \(longTailCandidates.count) candidates")
+                telemetry["longtail"] = longTailCandidates.count
                 allCandidates.append(contentsOf: longTailCandidates)
             } else {
                 // BRANCH E: Apple Music discovery (no Spotify token).
@@ -406,6 +415,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 token: token
             )
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
+            telemetry["filtered"] = filteredCandidates.count
+            telemetry["total_candidates"] = allCandidates.count
             
             // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds.
             // Uses LOCAL copies — the instance thresholds must not ratchet up
@@ -449,6 +460,36 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // batch of repeats. If the batch is truly empty, the honest
             // error message below explains why.
 
+            // TRUE LAST RESORT: if filters ate everything, walk FURTHER into
+            // the tail. The frontier chains forward into unexplored territory,
+            // so this finds NEW artists — never repeats, and almost never
+            // empty while the graph has unexplored artists. Popularity is
+            // relaxed (fresh beats obscure here); history is NOT.
+            if filteredCandidates.isEmpty {
+                print("🆘 Batch empty after relaxation — emergency deep walk")
+                await updateProgress("Digging deeper for fresh sounds...")
+                let emergencyCandidates = await longTailDiscovery.discover(
+                    profile: profile,
+                    sessionGenres: Array(selectedGenres ?? []),
+                    token: token,
+                    popularityThreshold: 70,
+                    maxArtists: 30,
+                    maxTracks: 80,
+                    updateProgress: { msg in await self.updateProgress(msg) }
+                )
+                print("🆘 Emergency walk: \(emergencyCandidates.count) candidates")
+                telemetry["emergency"] = emergencyCandidates.count
+                if !emergencyCandidates.isEmpty {
+                    filteredCandidates = try await applyFastFilters(
+                        tracks: emergencyCandidates,
+                        selectedGenres: nil,
+                        activeGenres: activeGenres,
+                        token: token
+                    )
+                    print("🆘 After emergency filter: \(filteredCandidates.count) hidden gems")
+                }
+            }
+
             // Score first, THEN fetch preview URLs only for top candidates
             await updateProgress("Scoring tracks...")
             
@@ -471,10 +512,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // Higher-scored tracks win more often, but every session draws
             // a different set in a different order — no two users (and no
             // two sessions) ever get the same queue.
-            // Increased to 100 to account for artist deduplication reducing count
+            // 150 to give the preview-enrichment stage more chances: tracks
+            // without playable previews are dropped, so a bigger pool means
+            // a bigger surviving queue.
             let topCandidates = DiscoveryRandomization.weightedSampleByScore(
                 scored,
-                count: min(100, scored.count),
+                count: min(150, scored.count),
                 score: { $0.totalScore }
             )
             
@@ -533,9 +576,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 // explanation — that silent return to the dashboard is what
                 // users reported as discovery "glitching".
                 if finalResults.isEmpty {
+                    // Telemetry rides along so a "no music" report carries
+                    // its own diagnosis (visible in screenshots too).
+                    let diag = telemetry.sorted { $0.key < $1.key }
+                        .map { "\($0.key)=\($0.value)" }
+                        .joined(separator: " ")
+                    print("🔍 Empty-result telemetry: \(diag)")
                     self.errorMessage = appendResults
-                        ? "No more new tracks found. Try widening the popularity slider."
-                        : "We couldn't find any new tracks this time. Try moving the popularity slider up or picking different genres."
+                        ? "No more new tracks found. Try widening the popularity slider. [\(diag)]"
+                        : "We couldn't find any new tracks this time. Try moving the popularity slider up or picking different genres. [\(diag)]"
                 }
                 
                 // Mark discovered tracks/artists as session-seen (prevents duplication in "Discover More")
