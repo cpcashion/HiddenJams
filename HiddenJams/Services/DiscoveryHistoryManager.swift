@@ -9,9 +9,13 @@ class DiscoveryHistoryManager: ObservableObject {
     private let timestampsKey = "discovery_history_timestamps"
     
     // History expires after 90 days — a served song effectively never
-    // repeats. Narrow genres refill from the last-resort path rather than
-    // re-serving recent gems.
-    private let expirationDays: TimeInterval = 90
+    // repeats. Artists expire after 21 days: long enough to prevent the
+    // same artist dominating consecutive sessions, short enough not to
+    // permanently poison the candidate pool (which starves discovery into
+    // repeats). There is NO history-ignoring refill anywhere in the
+    // pipeline — repeats are never the answer to a small batch.
+    private let trackExpirationDays: TimeInterval = 90
+    private let artistExpirationDays: TimeInterval = 21
     
     @Published var seenTrackIds: Set<String> = []
     @Published var seenArtistIds: Set<String> = []
@@ -54,25 +58,26 @@ class DiscoveryHistoryManager: ObservableObject {
         }
     }
     
-    /// Clean up entries older than expirationDays
+    /// Clean up entries older than their expiration
     private func cleanupExpiredHistory() {
         let now = Date()
-        let expirationInterval = expirationDays * 24 * 60 * 60  // days to seconds
-        
+        let trackExpirationInterval = trackExpirationDays * 24 * 60 * 60
+        let artistExpirationInterval = artistExpirationDays * 24 * 60 * 60
+
         // Remove expired tracks
         var expiredTrackCount = 0
         for (trackId, timestamp) in trackTimestamps {
-            if now.timeIntervalSince(timestamp) > expirationInterval {
+            if now.timeIntervalSince(timestamp) > trackExpirationInterval {
                 seenTrackIds.remove(trackId)
                 trackTimestamps.removeValue(forKey: trackId)
                 expiredTrackCount += 1
             }
         }
         
-        // Remove expired artists (Re-enabled)
+        // Remove expired artists (shorter window than tracks)
         var expiredArtistCount = 0
         for (artistId, timestamp) in artistTimestamps {
-            if now.timeIntervalSince(timestamp) > expirationInterval {
+            if now.timeIntervalSince(timestamp) > artistExpirationInterval {
                 seenArtistIds.remove(artistId)
                 artistTimestamps.removeValue(forKey: artistId)
                 expiredArtistCount += 1
@@ -106,10 +111,10 @@ class DiscoveryHistoryManager: ObservableObject {
     func isSeen(trackId: String) -> Bool {
         // Check if track exists and hasn't expired
         guard seenTrackIds.contains(trackId) else { return false }
-        
+
         // If we have a timestamp, check expiration
         if let timestamp = trackTimestamps[trackId] {
-            let expirationInterval = expirationDays * 24 * 60 * 60
+            let expirationInterval = trackExpirationDays * 24 * 60 * 60
             if Date().timeIntervalSince(timestamp) > expirationInterval {
                 // Expired - remove and return false
                 seenTrackIds.remove(trackId)
@@ -123,12 +128,12 @@ class DiscoveryHistoryManager: ObservableObject {
     }
     
     func isArtistSeen(artistId: String) -> Bool {
-        // Check if artist exists and hasn't expired
+        // Check if artist exists and hasn't expired (21-day window)
         guard seenArtistIds.contains(artistId) else { return false }
-        
+
         // If we have a timestamp, check expiration
         if let timestamp = artistTimestamps[artistId] {
-            let expirationInterval = expirationDays * 24 * 60 * 60
+            let expirationInterval = artistExpirationDays * 24 * 60 * 60
             if Date().timeIntervalSince(timestamp) > expirationInterval {
                 // Expired - remove and return false
                 seenArtistIds.remove(artistId)

@@ -407,51 +407,47 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             )
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
             
-            // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds
+            // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds.
+            // Uses LOCAL copies — the instance thresholds must not ratchet up
+            // permanently across sessions (that corrupted the slider).
             let minimumRequired = 25
             var relaxationAttempts = 0
             let maxRelaxationAttempts = 2
-            
+            var relaxedPopularity = popularityThreshold
+            var relaxedFollowers = followerThreshold
+
             while filteredCandidates.count < minimumRequired && relaxationAttempts < maxRelaxationAttempts {
                 relaxationAttempts += 1
-                
+
                 // Double the thresholds for each relaxation attempt
-                popularityThreshold = min(popularityThreshold * 2, 80)  // Cap at 80
-                followerThreshold = followerThreshold * 2               // Double followers
-                
+                relaxedPopularity = min(relaxedPopularity * 2, 80)  // Cap at 80
+                relaxedFollowers = relaxedFollowers * 2            // Double followers
+
                 print("⚠️ Only \(filteredCandidates.count) tracks passed filters (need \(minimumRequired))")
-                print("🔄 Relaxation attempt \(relaxationAttempts): popularity<\(popularityThreshold), followers<\(followerThreshold/1000)k")
-                
-                // Re-filter with relaxed thresholds
+                print("🔄 Relaxation attempt \(relaxationAttempts): popularity<\(relaxedPopularity), followers<\(relaxedFollowers/1000)k")
+
+                // Re-filter with relaxed thresholds (via temporary override)
+                let savedPopularity = popularityThreshold
+                let savedFollowers = followerThreshold
+                popularityThreshold = relaxedPopularity
+                followerThreshold = relaxedFollowers
                 filteredCandidates = try await applyFastFilters(
                     tracks: allCandidates,
                     selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                     activeGenres: activeGenres,
                     token: token
                 )
+                popularityThreshold = savedPopularity
+                followerThreshold = savedFollowers
                 print("✨ After relaxation: \(filteredCandidates.count) hidden gems")
-
-                // Restore original thresholds for next discovery session
-                // (but keep relaxed for this filtering round)
             }
 
-            // LAST RESORT: if the persistent seen-history ate the batch (same
-            // narrow genre discovered over and over), recycle older gems
-            // instead of serving one song or nothing. "There should always
-            // be music." The user's own library and this session's seen sets
-            // still apply — only the 7-day history is ignored.
-            if filteredCandidates.count < 10 {
-                print("♻️ Batch too small (\(filteredCandidates.count)) — refilling from previously-seen gems")
-                await updateProgress("Digging deeper...")
-                filteredCandidates = try await applyFastFilters(
-                    tracks: allCandidates,
-                    selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
-                    activeGenres: activeGenres,
-                    token: token,
-                    ignoringHistory: true
-                )
-                print("♻️ After history-ignoring refill: \(filteredCandidates.count) hidden gems")
-            }
+            // NO history-ignoring refill. A previous version refilled small
+            // batches from previously-served tracks ("there should always be
+            // music") — that is exactly what caused "the same songs over and
+            // over." A small batch of NEW tracks is always better than a big
+            // batch of repeats. If the batch is truly empty, the honest
+            // error message below explains why.
 
             // Score first, THEN fetch preview URLs only for top candidates
             await updateProgress("Scoring tracks...")
@@ -518,11 +514,19 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
             
             let topRecommendations = Array(finalRecommendations.shuffled().prefix(count))
-            
+
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
-            
+
             await MainActor.run {
-                let finalResults = appendResults ? discoveredGems + topRecommendations : topRecommendations
+                // FINAL NEWNESS GUARD (defense in depth): no track that is in
+                // the persistent served-history may reach the queue, no matter
+                // what slipped through upstream. Repeats end here.
+                let history = DiscoveryHistoryManager.shared
+                let freshRecommendations = topRecommendations.filter { !history.isSeen(trackId: $0.track.id) }
+                if freshRecommendations.count != topRecommendations.count {
+                    print("🛡️ Newness guard dropped \(topRecommendations.count - freshRecommendations.count) history matches")
+                }
+                let finalResults = appendResults ? discoveredGems + freshRecommendations : freshRecommendations
                 discoveredGems = finalResults
 
                 // Never finish "successfully" with zero tracks and zero

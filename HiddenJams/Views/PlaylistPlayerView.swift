@@ -21,7 +21,6 @@ struct PlaylistPlayerView: View {
     var refreshProgress: String = ""
     
     @State private var savedTracks: Set<String> = []
-    @State private var fullSongLoadingTrackId: String?
     
     // Card swipe state
     @State private var cardOffset: CGSize = .zero
@@ -103,12 +102,20 @@ struct PlaylistPlayerView: View {
         }
         .onAppear { pushCurrentGemToWatch() }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in pushCurrentGemToWatch() }
+        .onChange(of: audioPlayer.isPlaying) { _ in pushCurrentGemToWatch() }
         .onChange(of: watchBridge.pendingCommand) { command in
             guard let command else { return }
             watchBridge.pendingCommand = nil
-            // Thumbs up = the exact same save as a swipe right (genre
-            // playlist routing included); thumbs down = skip.
-            swipeCardOff(direction: command == .thumbsUp ? .right : .left)
+            switch command {
+            case .togglePlay:
+                audioPlayer.togglePlayPause()
+            case .thumbsUp:
+                // Thumbs up = the exact same save as a swipe right (genre
+                // playlist routing included); thumbs down = skip.
+                swipeCardOff(direction: .right)
+            case .thumbsDown:
+                swipeCardOff(direction: .left)
+            }
         }
     }
 
@@ -118,7 +125,8 @@ struct PlaylistPlayerView: View {
             WatchBridge.shared.pushNowPlaying(
                 title: track.track.name,
                 artist: track.track.artistNames,
-                id: track.id)
+                id: track.id,
+                isPlaying: audioPlayer.isPlaying)
         } else {
             WatchBridge.shared.pushNowPlaying(title: nil, artist: nil, id: nil)
         }
@@ -249,48 +257,6 @@ struct PlaylistPlayerView: View {
                                 openSpotifyArtist(id: firstArtist.id)
                             }
                         }
-
-                    // Full Song — plays the entire track IN the app (via
-                    // Apple Music or Spotify, whichever the user has).
-                    // Subtle by design; the expanded player has the big button.
-                    if audioPlayer.isFullSongActive,
-                       audioPlayer.currentTrack?.id == track.id {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 13))
-                            Text("Playing Full Song")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .foregroundColor(Theme.Colors.gemGold)
-                        .padding(.top, 6)
-                    } else if fullSongLoadingTrackId == track.id {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: Theme.Colors.gemGold))
-                                .scaleEffect(0.8)
-                            Text("Loading full song…")
-                                .font(.system(size: 13))
-                        }
-                        .foregroundColor(Theme.Colors.textSecondary)
-                        .padding(.top, 6)
-                    } else {
-                        Button(action: {
-                            fullSongLoadingTrackId = track.id
-                            Task {
-                                await audioPlayer.playFullSong()
-                                fullSongLoadingTrackId = nil
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "play.circle")
-                                    .font(.system(size: 14))
-                                Text("Full Song")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundColor(Theme.Colors.gemGold)
-                        }
-                        .padding(.top, 6)
-                    }
                 }
                 .padding(.top, 32)
                 .padding(.horizontal, Theme.Spacing.md)

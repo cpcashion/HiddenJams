@@ -15,12 +15,16 @@ import Combine
 enum WatchAction: String {
     case thumbsUp
     case thumbsDown
+    case togglePlay
 }
 
 final class WatchBridge: NSObject, ObservableObject {
     @Published var trackTitle: String = ""
     @Published var trackArtist: String = ""
     @Published var hasTrack = false
+    @Published var isPlaying = false
+    /// "light" or "dark" — mirrors the iOS app's theme.
+    @Published var theme: String = "dark"
     /// Briefly shows a confirmation after a tap ("Saved ✓" / "Skipped").
     @Published var lastSentAction: WatchAction?
 
@@ -46,12 +50,24 @@ final class WatchBridge: NSObject, ObservableObject {
     }
 
     private func applyTrackPayload(_ payload: Any?) {
-        guard let dict = payload as? [String: String],
-              let title = dict["title"], !title.isEmpty else {
+        guard let dict = payload as? [String: String] else {
             DispatchQueue.main.async { self.hasTrack = false }
             return
         }
+        // Theme and playback state ride along even when the track is cleared.
+        let theme = dict["theme"]
+        let isPlaying = dict["isPlaying"] == "1"
+        guard let title = dict["title"], !title.isEmpty else {
+            DispatchQueue.main.async {
+                if let theme { self.theme = theme }
+                self.isPlaying = isPlaying
+                self.hasTrack = false
+            }
+            return
+        }
         DispatchQueue.main.async {
+            if let theme { self.theme = theme }
+            self.isPlaying = isPlaying
             self.trackTitle = title
             self.trackArtist = dict["artist"] ?? ""
             self.hasTrack = true

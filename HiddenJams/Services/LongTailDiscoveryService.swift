@@ -87,16 +87,44 @@ final class LongTailDiscoveryService {
         }
         print("🌊 Long-tail: discovered \(discovered.count) artists from \(entryArtists.count) entry points")
 
+        // 3b. Depth charge: if level 1 was thin, walk one level deeper from
+        // the first few discoveries — similar-of-similar lives deepest in
+        // the tail, where the freshest gems are.
+        if discovered.count < 15 {
+            await updateProgress("Going deeper underground...")
+            let depthSeeds = Array(discovered.prefix(6))
+            for seed in depthSeeds {
+                do {
+                    let similar = try await lastFm.getSimilarArtists(artistName: seed, limit: 15)
+                    for artist in similar {
+                        let key = artist.name.lowercased()
+                        if seen.insert(key).inserted {
+                            discovered.append(artist.name)
+                        }
+                    }
+                } catch {
+                    print("⚠️ Long-tail: level-2 walk failed for '\(seed)': \(error)")
+                }
+                if discovered.count >= maxArtists { break }
+            }
+            print("🌊 Long-tail: after depth charge, \(discovered.count) artists")
+        }
+
         // 4. Resolve to Spotify tracks, preferring obscure artists.
         // Per-session shuffle so two users walk the same graph differently.
+        // Served artists are skipped BEFORE the top-tracks call — no point
+        // resolving artists the user has already heard.
         var candidates: [SpotifyTrack] = []
         var seenTrackIds = Set<String>()
+        let history = DiscoveryHistoryManager.shared
         let artistCap = min(discovered.count, maxArtists)
         for artistName in discovered.prefix(artistCap).shuffled() {
             guard candidates.count < maxTracks else { break }
             do {
                 let artists = try await spotifyAPI.searchArtist(name: artistName, token: token)
                 guard let artist = artists.first else { continue }
+                // Skip artists already served (persistent history)
+                if history.isArtistSeen(artistId: artist.id) { continue }
                 // Latency optimization: an artist this popular won't yield
                 // tracks under the obscurity threshold — skip the top-tracks call.
                 let artistPop = Double(artist.popularity ?? 100)

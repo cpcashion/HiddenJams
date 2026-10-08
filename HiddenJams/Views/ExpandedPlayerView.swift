@@ -132,12 +132,6 @@ struct ExpandedPlayerView: View {
                     }
                 }
                 .padding(.bottom, 24)
-
-                // Full Song — plays the entire track IN the app (not a
-                // deep link out). Swaps the 30s preview for the full song
-                // via Apple Music or Spotify; the player UI stays put.
-                fullSongControl(track: track)
-                    .padding(.bottom, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.Colors.backgroundGradient.ignoresSafeArea())
@@ -147,76 +141,5 @@ struct ExpandedPlayerView: View {
     private func formatTime(_ seconds: Double) -> String {
         let total = Int(max(0, seconds))
         return "\(total / 60):\(String(format: "%02d", total % 60))"
-    }
-
-    // MARK: - Full Song Control
-
-    @State private var isCheckingFullSong = false
-    @State private var fullSongAvailability: AudioPreviewManager.FullSongAvailability?
-
-    @ViewBuilder
-    private func fullSongControl(track: RecommendedTrack) -> some View {
-        if audioManager.isFullSongActive {
-            // Currently playing the full song — tap to drop back to preview.
-            Button(action: {
-                audioManager.exitFullSong()
-                audioManager.resume()
-            }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
-                    Text("Playing Full Song — tap for preview")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundColor(Theme.Colors.buttonText)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
-                .background(Theme.Colors.gemGold.opacity(0.85))
-                .cornerRadius(24)
-            }
-        } else if isCheckingFullSong {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: Theme.Colors.textSecondary))
-                Text("Finding full song…")
-                    .font(.system(size: 14))
-                    .foregroundColor(Theme.Colors.textSecondary)
-            }
-            .padding(.vertical, 14)
-        } else {
-            Button(action: {
-                Task {
-                    isCheckingFullSong = true
-                    let ok = await audioManager.playFullSong()
-                    isCheckingFullSong = false
-                    if !ok {
-                        fullSongAvailability = await audioManager.checkFullSongAvailability()
-                    } else {
-                        fullSongAvailability = nil
-                    }
-                }
-            }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 16))
-                    Text("Play Full Song")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundColor(Theme.Colors.buttonText)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
-                .background(Theme.Colors.gemGold)
-                .cornerRadius(24)
-            }
-
-            if case .unavailable(let reason) = fullSongAvailability {
-                Text(reason)
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 8)
-            }
-        }
     }
 }

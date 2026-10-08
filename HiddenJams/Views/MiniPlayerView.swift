@@ -34,21 +34,10 @@ struct MiniPlayerView: View {
 
                 // Track info
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(track.track.name)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                            .lineLimit(1)
-                        if audioManager.isFullSongActive {
-                            Text("FULL")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(Theme.Colors.buttonText)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Theme.Colors.gemGold)
-                                .cornerRadius(6)
-                        }
-                    }
+                    Text(track.track.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                        .lineLimit(1)
                     Text(track.track.artistNames)
                         .font(.system(size: 12))
                         .foregroundColor(Theme.Colors.textSecondary)

@@ -17,6 +17,7 @@ import Combine
 enum WatchPlayerAction: String {
     case thumbsUp
     case thumbsDown
+    case togglePlay
 }
 
 final class WatchBridge: NSObject, ObservableObject {
@@ -28,24 +29,65 @@ final class WatchBridge: NSObject, ObservableObject {
 
     private override init() { super.init() }
 
+    private var cancellables = Set<AnyCancellable>()
+
     func activate() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .notActivated else { return }
         session.delegate = self
         session.activate()
+        // Mirror iOS theme changes to the watch.
+        ThemeManager.shared.$mode
+            .dropFirst()
+            .sink { [weak self] _ in self?.pushTheme() }
+            .store(in: &cancellables)
     }
 
     /// Pushes the deck's current gem to the watch. Pass nil fields to clear.
-    func pushNowPlaying(title: String?, artist: String?, id: String?) {
+    /// Also carries playback state and the iOS app's theme so the watch
+    /// mirrors both.
+    func pushNowPlaying(title: String?, artist: String?, id: String?, isPlaying: Bool = false) {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.isPaired else { return }
-        var payload: [String: String] = [:]
+        // Remember for theme re-pushes.
+        lastTitle = title
+        lastArtist = artist
+        lastId = id
+        lastIsPlaying = isPlaying
+        var payload: [String: String] = [
+            "theme": ThemeManager.shared.isLight ? "light" : "dark",
+            "isPlaying": isPlaying ? "1" : "0",
+        ]
         if let title, !title.isEmpty, let artist, let id {
-            payload = ["title": title, "artist": artist, "id": id]
+            payload["title"] = title
+            payload["artist"] = artist
+            payload["id"] = id
         }
-        let message: [String: Any] = ["nowPlaying": payload]
+        sendContext(["nowPlaying": payload])
+    }
+
+    /// Pushes just the theme (called when the iOS theme changes) —
+    /// re-sends the last track state so nothing is cleared.
+    func pushTheme() {
+        pushNowPlaying(
+            title: lastTitle,
+            artist: lastArtist,
+            id: lastId,
+            isPlaying: lastIsPlaying
+        )
+    }
+
+    private var lastTitle: String?
+    private var lastArtist: String?
+    private var lastId: String?
+    private var lastIsPlaying: Bool = false
+
+    private func sendContext(_ message: [String: Any]) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.isPaired else { return }
         // Application context: always delivered, even if the watch app is
         // in the background.
         do {
