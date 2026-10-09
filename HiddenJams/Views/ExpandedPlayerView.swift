@@ -64,7 +64,7 @@ struct ExpandedPlayerView: View {
 
                 Spacer(minLength: 20)
 
-                // Title + artist
+                // Title + artist — tapping opens the music source.
                 VStack(spacing: 6) {
                     Text(track.track.name)
                         .font(.system(size: 22, weight: .bold))
@@ -72,11 +72,13 @@ struct ExpandedPlayerView: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .padding(.horizontal, 32)
+                        .onTapGesture { _ = FullSongOpener.openFullSong(for: track) }
                     Text(track.track.artistNames)
                         .font(.system(size: 16))
                         .foregroundColor(Theme.Colors.textSecondary)
                         .lineLimit(1)
                         .padding(.horizontal, 32)
+                        .onTapGesture { _ = FullSongOpener.openFullSong(for: track) }
                 }
 
                 Spacer(minLength: 16)

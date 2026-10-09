@@ -178,17 +178,19 @@ struct TrackCard: View {
             .frame(width: 70, height: 70)
             .cornerRadius(Theme.CornerRadius.md)
             
-            // Track Info
+            // Track Info — tapping title/artist opens the music source.
             VStack(alignment: .leading, spacing: 4) {
                 Text(gem.track.name)
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.textPrimary)
                     .lineLimit(1)
+                    .onTapGesture { _ = FullSongOpener.openFullSong(for: gem) }
                 
                 Text(gem.track.artistNames)
                     .font(Theme.Typography.body2)
                     .foregroundColor(Theme.Colors.textSecondary)
                     .lineLimit(1)
+                    .onTapGesture { _ = FullSongOpener.openFullSong(for: gem) }
                 
                 // Match Score
                 HStack(spacing: 4) {

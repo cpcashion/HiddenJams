@@ -32,7 +32,8 @@ struct MiniPlayerView: View {
                 .cornerRadius(8)
                 .clipped()
 
-                // Track info
+                // Track info — tapping title/artist opens the music source
+                // (background tap still expands the player).
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.track.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -44,6 +45,8 @@ struct MiniPlayerView: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { _ = FullSongOpener.openFullSong(for: track) }
 
                 // Playback controls
                 Button(action: { audioManager.togglePlayPause() }) {

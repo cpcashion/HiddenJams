@@ -430,8 +430,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             while filteredCandidates.count < minimumRequired && relaxationAttempts < maxRelaxationAttempts {
                 relaxationAttempts += 1
 
-                // Double the thresholds for each relaxation attempt
-                relaxedPopularity = min(relaxedPopularity * 2, 80)  // Cap at 80
+                // Double the thresholds for each relaxation attempt.
+                // ADDITIVE floor (+15) ensures progress even when the slider
+                // is all the way left (0 * 2 = 0 would never relax).
+                relaxedPopularity = min(max(relaxedPopularity * 2, relaxedPopularity + 15), 80)
                 relaxedFollowers = relaxedFollowers * 2            // Double followers
 
                 print("⚠️ Only \(filteredCandidates.count) tracks passed filters (need \(minimumRequired))")
@@ -490,6 +492,57 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     print("🆘 After emergency filter: \(filteredCandidates.count) hidden gems")
                 }
             }
+
+            // ABSOLUTE LAST RESORT — the 100% music guarantee.
+            // If we reach here, all branches + relaxation + emergency walk
+            // came back empty. This MUST NOT happen while the Spotify API
+            // is reachable: do plain genre searches with NO popularity
+            // filter and NO strict genre validation — only "not in history".
+            // Spotify search essentially always returns results, so this
+            // cannot come back empty unless the API itself is down (a true
+            // error, not an empty result).
+            if filteredCandidates.isEmpty, let spotifyToken2 = token {
+                print("🆘🆘 ABSOLUTE LAST RESORT: unfiltered search")
+                await updateProgress("Finding you something fresh...")
+                let searchGenres = activeGenres.isEmpty ? ["pop"] : activeGenres
+                var lastResortPool: [SpotifyTrack] = []
+                // Try up to 3 genre searches, broadening as we go.
+                for genre in searchGenres.shuffled().prefix(3) {
+                    do {
+                        let tracks = try await spotifyAPI.searchTracks(
+                            query: "genre:\"\(genre)\"",
+                            token: spotifyToken2,
+                            limit: 50
+                        )
+                        lastResortPool.append(contentsOf: tracks)
+                    } catch {
+                        print("⚠️ Last-resort search failed for '\(genre)': \(error)")
+                        continue
+                    }
+                    if lastResortPool.count >= 50 { break }
+                }
+                // If genre searches failed, one broad search with no genre.
+                if lastResortPool.isEmpty {
+                    do {
+                        let tracks = try await spotifyAPI.searchTracks(
+                            query: "year:2020-2026",
+                            token: spotifyToken2,
+                            limit: 50
+                        )
+                        lastResortPool.append(contentsOf: tracks)
+                    } catch {
+                        print("⚠️ Last-resort broad search failed: \(error)")
+                    }
+                }
+                let history2 = DiscoveryHistoryManager.shared
+                var seen2 = Set<String>()
+                filteredCandidates = lastResortPool.filter {
+                    !history2.isSeen(trackId: $0.id) && seen2.insert($0.id).inserted
+                }
+                print("🆘🆘 Last resort yielded \(filteredCandidates.count) tracks")
+                telemetry["last_resort"] = filteredCandidates.count
+            }
+
 
             // Score first, THEN fetch preview URLs only for top candidates
             await updateProgress("Scoring tracks...")
@@ -2140,6 +2193,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let allScored = tracks.map { track in
             let scores = calculateDetailedScores(track: track, profile: profile)
             
+            // DIVERSITY MODE: when the user selected many genres (e.g. "Select
+            // All"), they're asking for breadth, not a deep dive into their
+            // dominant taste. De-emphasize taste-match so the lottery doesn't
+            // collapse into one genre (e.g. all Christian because the profile
+            // leans that way); emphasize obscurity for true variety.
+            let diversityMode = (selectedGenres?.count ?? 0) > 5
+            
             // Weighted total score
             // If vector score exists, give it high weight (0.6)
             var totalScore = 0.0
@@ -2147,11 +2207,19 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             if let vectorScore = vectorScores[track.id] {
                 // Vector score is usually 0.7-0.9 for good matches
-                totalScore = (vectorScore * 0.6) + (scores.obscurity * 0.2) + (scores.recency * 0.2)
+                if diversityMode {
+                    totalScore = (vectorScore * 0.25) + (scores.obscurity * 0.5) + (scores.recency * 0.25)
+                } else {
+                    totalScore = (vectorScore * 0.6) + (scores.obscurity * 0.2) + (scores.recency * 0.2)
+                }
                 matchScore = vectorScore // Use vector score as the displayed match score
             } else {
                 // Fallback to heuristic score
-                totalScore = (scores.tasteMatch * 0.5) + (scores.obscurity * 0.3) + (scores.recency * 0.2)
+                if diversityMode {
+                    totalScore = (scores.tasteMatch * 0.2) + (scores.obscurity * 0.5) + (scores.recency * 0.3)
+                } else {
+                    totalScore = (scores.tasteMatch * 0.5) + (scores.obscurity * 0.3) + (scores.recency * 0.2)
+                }
             }
             
             let reason = generateObscurityReason(track: track, scores: scores)
