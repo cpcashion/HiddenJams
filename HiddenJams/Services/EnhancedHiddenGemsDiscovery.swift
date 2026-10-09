@@ -630,7 +630,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
 
-            await MainActor.run {
+            await Task { @MainActor in
                 // FINAL NEWNESS GUARD (defense in depth): no track that is in
                 // the persistent served-history may reach the queue, no matter
                 // what slipped through upstream. Repeats end here.
@@ -678,7 +678,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                                 diversityMode: (selectedGenres?.count ?? 0) > 5,
                                 selectedGenres: selectedGenres
                             )
-                            guaranteedResults = scored.map { $0.track }
+                            guaranteedResults = scored
                             discoveredGems = guaranteedResults
                         }
                     } catch {
@@ -718,7 +718,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 
                 isDiscovering = false
                 discoveryProgress = "Complete!"
-            }
+            }.value
             
         } catch {
             print("❌ Discovery error: \(error)")
