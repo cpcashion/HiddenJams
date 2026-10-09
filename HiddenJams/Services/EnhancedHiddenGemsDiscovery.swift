@@ -511,8 +511,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     do {
                         let tracks = try await spotifyAPI.searchTracks(
                             query: "genre:\"\(genre)\"",
-                            token: spotifyToken2,
-                            limit: 50
+                            limit: 50,
+                            token: spotifyToken2
                         )
                         lastResortPool.append(contentsOf: tracks)
                     } catch {
@@ -526,8 +526,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     do {
                         let tracks = try await spotifyAPI.searchTracks(
                             query: "year:2020-2026",
-                            token: spotifyToken2,
-                            limit: 50
+                            limit: 50,
+                            token: spotifyToken2
                         )
                         lastResortPool.append(contentsOf: tracks)
                     } catch {
@@ -560,7 +560,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             let scored = scoreAndRankWithExplanations(
                 tracks: filteredCandidates,
                 profile: profile,
-                vectorScores: vectorScores
+                vectorScores: vectorScores,
+                diversityMode: (selectedGenres?.count ?? 0) > 5
             )
             // ANTI-DETERMINISM: weighted lottery instead of fixed top-N.
             // Higher-scored tracks win more often, but every session draws
@@ -2188,7 +2189,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private func scoreAndRankWithExplanations(
         tracks: [SpotifyTrack],
         profile: ListeningProfile,
-        vectorScores: [String: Double] = [:]
+        vectorScores: [String: Double] = [:],
+        diversityMode: Bool = false
     ) -> [RecommendedTrack] {
         let allScored = tracks.map { track in
             let scores = calculateDetailedScores(track: track, profile: profile)
@@ -2198,7 +2200,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // dominant taste. De-emphasize taste-match so the lottery doesn't
             // collapse into one genre (e.g. all Christian because the profile
             // leans that way); emphasize obscurity for true variety.
-            let diversityMode = (selectedGenres?.count ?? 0) > 5
             
             // Weighted total score
             // If vector score exists, give it high weight (0.6)
