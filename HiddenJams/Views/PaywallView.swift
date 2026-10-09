@@ -109,7 +109,7 @@ struct PaywallView: View {
             }
             .padding(.bottom, 32)
         }
-        .background(Theme.Colors.background.ignoresSafeArea())
+        .background(Theme.Colors.spotifyBlack.ignoresSafeArea())
         .task {
             await subscriptionManager.loadProducts()
         }
