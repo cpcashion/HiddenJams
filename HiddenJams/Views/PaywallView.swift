@@ -96,7 +96,12 @@ struct PaywallView: View {
                     Button("Restore") {
                         Task { await subscriptionManager.restore() }
                     }
-                    Button("Not now") { dismiss() }
+                    Button("Not now") {
+                        // Snooze the paywall for this session so the user can
+                        // keep testing/using the app. Resets on next launch.
+                        DiscoveryQuotaManager.shared.paywallSnoozed = true
+                        dismiss()
+                    }
                 }
                 .font(.system(size: 15))
                 .foregroundColor(Theme.Colors.textSecondary)

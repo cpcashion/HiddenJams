@@ -21,6 +21,11 @@ final class DiscoveryQuotaManager: ObservableObject {
 
     @Published private(set) var usedToday: Int = 0
 
+    /// Session-scoped snooze: "Not now" on the paywall lets the user keep
+    /// discovering until the app restarts. Not persisted — the paywall
+    /// returns on next launch.
+    var paywallSnoozed = false
+
     private init() {
         resetIfNewDay()
         usedToday = UserDefaults.standard.integer(forKey: countKey)
@@ -31,6 +36,7 @@ final class DiscoveryQuotaManager: ObservableObject {
     /// True if the user may discover more tracks right now.
     var canDiscover: Bool {
         if UserProfileManager.shared.isPremium { return true }
+        if paywallSnoozed { return true }
         resetIfNewDay()
         return usedToday < Self.freeDailyLimit
     }
