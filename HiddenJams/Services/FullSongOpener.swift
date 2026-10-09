@@ -44,6 +44,24 @@ enum FullSongOpener {
         return nil
     }
 
+    /// Resolves the full-song destination for a raw SpotifyTrack.
+    static func service(for track: SpotifyTrack) -> Service? {
+        if track.isSpotifyOrigin {
+            let id = track.id
+            if !id.isEmpty { return .spotify(trackId: id) }
+        }
+        if let url = URL(string: track.uri),
+           url.scheme?.hasPrefix("http") == true {
+            return .appleMusic(url: url)
+        }
+        return nil
+    }
+
+    /// Resolves the full-song destination for a HiddenGem (swipe card).
+    static func service(for gem: HiddenGem) -> Service? {
+        service(for: gem.track)
+    }
+
     /// Opens the full song. Tries the native app first, falls back to web.
     static func open(_ service: Service) {
         switch service {
@@ -65,6 +83,22 @@ enum FullSongOpener {
     @discardableResult
     static func openFullSong(for track: RecommendedTrack) -> Bool {
         guard let service = service(for: track) else { return false }
+        open(service)
+        return true
+    }
+
+    /// Convenience overload for raw SpotifyTrack.
+    @discardableResult
+    static func openFullSong(for track: SpotifyTrack) -> Bool {
+        guard let service = service(for: track) else { return false }
+        open(service)
+        return true
+    }
+
+    /// Convenience overload for HiddenGem (swipe card).
+    @discardableResult
+    static func openFullSong(for gem: HiddenGem) -> Bool {
+        guard let service = service(for: gem) else { return false }
         open(service)
         return true
     }
