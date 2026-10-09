@@ -135,6 +135,10 @@ struct MainTabView: View {
             }
         }
         .ignoresSafeArea()
+        .sheet(isPresented: $discoveryEngine.showPaywall) {
+            PaywallView()
+                .environmentObject(SubscriptionManager.shared)
+        }
     }
     
     // MARK: - Toast

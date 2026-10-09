@@ -27,6 +27,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     @Published var discoveredGems: [RecommendedTrack] = []
     @Published var isDiscovering = false
     @Published var errorMessage: String?
+    /// Set when a free user hits the daily discovery limit — UI presents the paywall.
+    @Published var showPaywall = false
     @Published var discoveryProgress: String = ""
     
     // Services
@@ -215,6 +217,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         popularityOverride: Int? = nil,  // User-controlled popularity threshold from slider
         followerOverride: Int? = nil     // User-controlled follower threshold from slider
     ) async {
+        // QUOTA: free tier gets 20 discoveries/day. Pro is unlimited.
+        // Check before doing any work — hitting the limit opens the paywall.
+        let quota = await MainActor.run { DiscoveryQuotaManager.shared }
+        guard await MainActor.run(body: { quota.canDiscover }) else {
+            print("📊 Quota exhausted — presenting paywall")
+            await MainActor.run {
+                self.showPaywall = true
+                self.isDiscovering = false
+            }
+            return
+        }
+
         // Apply user's overrides if provided (from slider)
         if let override = popularityOverride {
             popularityThreshold = override
@@ -626,6 +640,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 }
                 let finalResults = appendResults ? discoveredGems + freshRecommendations : freshRecommendations
                 discoveredGems = finalResults
+
+                // QUOTA: record newly served tracks against the daily free limit.
+                // Only count tracks actually added this run (not pre-existing).
+                let newCount = appendResults ? freshRecommendations.count : finalResults.count
+                DiscoveryQuotaManager.shared.recordDiscovered(count: newCount)
 
                 // Never finish "successfully" with zero tracks and zero
                 // explanation — that silent return to the dashboard is what
