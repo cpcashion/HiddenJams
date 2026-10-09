@@ -575,7 +575,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 tracks: filteredCandidates,
                 profile: profile,
                 vectorScores: vectorScores,
-                diversityMode: (selectedGenres?.count ?? 0) > 5
+                diversityMode: (selectedGenres?.count ?? 0) > 5,
+                selectedGenres: selectedGenres
             )
             // ANTI-DETERMINISM: weighted lottery instead of fixed top-N.
             // Higher-scored tracks win more often, but every session draws
@@ -646,10 +647,49 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 let newCount = appendResults ? freshRecommendations.count : finalResults.count
                 DiscoveryQuotaManager.shared.recordDiscovered(count: newCount)
 
+                // APPLE MUSIC UNCONDITIONAL FALLBACK: if the pipeline produced
+                // nothing and there's no Spotify token, hit the iTunes Search
+                // API directly for the selected genres. iTunes needs no auth.
+                // Only the history filter applies — popularity/genre gates are
+                // bypassed. This is the "no excuses" guarantee for Apple users.
+                var guaranteedResults = finalResults
+                if guaranteedResults.isEmpty && token == nil {
+                    print("🆘 APPLE MUSIC FALLBACK: pipeline empty, querying iTunes directly")
+                    do {
+                        let itunesTracks = try await itunesGenreFallbackCandidates(
+                            profile: profile,
+                            seedTracks: appleMusicSeeds,
+                            maxCandidates: 50,
+                            sessionGenres: activeGenres
+                        )
+                        // Only filter: not in history, not already seen.
+                        let history = DiscoveryHistoryManager.shared
+                        let fresh = itunesTracks.filter { track in
+                            !history.isSeen(trackId: track.id)
+                                && !sessionSeenTracks.contains(track.id)
+                                && !knownTrackIds.contains(track.id)
+                        }
+                        if !fresh.isEmpty {
+                            print("✅ Apple Music fallback: serving \(fresh.count) tracks")
+                            // Score them (genre boost applies) and use directly.
+                            let scored = scoreAndRankWithExplanations(
+                                tracks: Array(fresh.prefix(30)),
+                                profile: profile,
+                                diversityMode: (selectedGenres?.count ?? 0) > 5,
+                                selectedGenres: selectedGenres
+                            )
+                            guaranteedResults = scored.map { $0.track }
+                            discoveredGems = guaranteedResults
+                        }
+                    } catch {
+                        print("⚠️ Apple Music fallback failed: \(error)")
+                    }
+                }
+
                 // Never finish "successfully" with zero tracks and zero
                 // explanation — that silent return to the dashboard is what
                 // users reported as discovery "glitching".
-                if finalResults.isEmpty {
+                if guaranteedResults.isEmpty {
                     // Telemetry rides along so a "no music" report carries
                     // its own diagnosis (visible in screenshots too).
                     let diag = telemetry.sorted { $0.key < $1.key }
@@ -950,12 +990,23 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
 
         // 1. Gather similar tracks from Last.fm, cascading seed sets as needed.
-        var seedPairs = librarySeedPairs()
-        var usingGenreFallback = false
-        if seedPairs.isEmpty {
-            await updateProgress("Exploring your taste...")
+        // When the user selected specific genres, ALWAYS use genre seeds —
+        // library seeds would pull in off-genre tracks (e.g. rock when only
+        // electronic is selected) that the filters can't reliably catch.
+        let sessionActive = !sessionGenres.filter({ !$0.isEmpty }).isEmpty
+        var seedPairs: [(track: String, artist: String)]
+        var usingGenreFallback: Bool
+        if sessionActive {
             seedPairs = await genreSeedPairs()
             usingGenreFallback = true
+        } else {
+            seedPairs = librarySeedPairs()
+            usingGenreFallback = false
+            if seedPairs.isEmpty {
+                await updateProgress("Exploring your taste...")
+                seedPairs = await genreSeedPairs()
+                usingGenreFallback = true
+            }
         }
         var similar = await gatherSimilar(from: seedPairs)
         if similar.isEmpty && !usingGenreFallback {
@@ -2209,10 +2260,36 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         tracks: [SpotifyTrack],
         profile: ListeningProfile,
         vectorScores: [String: Double] = [:],
-        diversityMode: Bool = false
+        diversityMode: Bool = false,
+        selectedGenres: Set<String>? = nil
     ) -> [RecommendedTrack] {
+        // SELECTED-GENRE BOOST: when the user picked specific genres, tracks
+        // whose artist genres match get a massive boost; non-matching tracks
+        // are heavily penalized. This is what makes "electronic only" actually
+        // mean electronic — the listening profile alone can't override it.
+        let selectedLower = Set((selectedGenres ?? []).map { $0.lowercased() })
+        let hasSelection = !selectedLower.isEmpty
+
+        func genreBoost(for track: SpotifyTrack) -> Double {
+            guard hasSelection else { return 1.0 }
+            guard let artistGenres = track.artists.first?.genres, !artistGenres.isEmpty else {
+                // No genre data — neutral, don't punish (came from genre search)
+                return 1.0
+            }
+            let lower = artistGenres.map { $0.lowercased() }
+            let matches = lower.contains { ag in
+                selectedLower.contains { sel in
+                    ag.contains(sel) || sel.contains(ag)
+                }
+            }
+            // Match: 3x boost. No match: 0.15x (buried, but not eliminated —
+            // better than an empty deck).
+            return matches ? 3.0 : 0.15
+        }
+
         let allScored = tracks.map { track in
             let scores = calculateDetailedScores(track: track, profile: profile)
+            let gBoost = genreBoost(for: track)
             
             // DIVERSITY MODE: when the user selected many genres (e.g. "Select
             // All"), they're asking for breadth, not a deep dive into their
@@ -2241,6 +2318,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     totalScore = (scores.tasteMatch * 0.5) + (scores.obscurity * 0.3) + (scores.recency * 0.2)
                 }
             }
+
+            // Apply selected-genre boost: matching tracks dominate, non-matching
+            // sink to the bottom (but stay in the deck — no empty results).
+            totalScore *= gBoost
             
             let reason = generateObscurityReason(track: track, scores: scores)
             
