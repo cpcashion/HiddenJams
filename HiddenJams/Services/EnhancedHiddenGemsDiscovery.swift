@@ -426,8 +426,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 tracks: allCandidates,
                 selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                 activeGenres: activeGenres,
-                token: token
+                token: token,
+                ignoringHistory: true
             )
+            // RANK: unseen tracks first. History is a ranking signal, not a filter.
+            // Showing a repeat beats showing 13 tracks.
+            let _history = DiscoveryHistoryManager.shared
+            filteredCandidates.sort { a, b in
+                let aSeen = _history.isSeen(trackId: a.id)
+                let bSeen = _history.isSeen(trackId: b.id)
+                if aSeen != bSeen { return bSeen }
+                return false
+            }
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
             telemetry["filtered"] = filteredCandidates.count
             telemetry["total_candidates"] = allCandidates.count
@@ -481,7 +491,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     tracks: allCandidates,
                     selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                     activeGenres: activeGenres,
-                    token: token
+                    token: token,
+                    ignoringHistory: true
                 )
                 popularityThreshold = savedPopularity
                 followerThreshold = savedFollowers
@@ -520,7 +531,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         tracks: emergencyCandidates,
                         selectedGenres: nil,
                         activeGenres: activeGenres,
-                        token: token
+                        token: token,
+                    ignoringHistory: true
                     )
                     print("🆘 After emergency filter: \(filteredCandidates.count) hidden gems")
                 }
@@ -650,26 +662,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
 
             await Task { @MainActor in
-                // FINAL NEWNESS GUARD (defense in depth): no track that is in
-                // the persistent served-history may reach the queue, no matter
-                // what slipped through upstream. Repeats end here.
-                let history = DiscoveryHistoryManager.shared
-                let freshRecommendations = topRecommendations.filter { !history.isSeen(trackId: $0.track.id) }
-                if freshRecommendations.count != topRecommendations.count {
-                    print("🛡️ Newness guard dropped \(topRecommendations.count - freshRecommendations.count) history matches")
+                // NO HISTORY FILTER: History is a ranking signal (unseen first),
+                // not a gate. Every candidate reaches the queue. Repeats are
+                // acceptable — an empty deck is not.
+                // Sort unseen first for freshness.
+                let _h = DiscoveryHistoryManager.shared
+                let sorted = topRecommendations.sorted { a, b in
+                    let aSeen = _h.isSeen(trackId: a.track.id)
+                    let bSeen = _h.isSeen(trackId: b.track.id)
+                    if aSeen != bSeen { return bSeen }
+                    return false
                 }
-                // 50-TRACK FLOOR: If history filtering starved us below 50,
-                // backfill with previously-seen tracks (fresh first). Showing
-                // a repeat beats showing 2 tracks.
-                var finalNew = freshRecommendations
-                if finalNew.count < 50 {
-                    let seenIds = Set(finalNew.map { $0.track.id })
-                    let backfill = topRecommendations.filter { !seenIds.contains($0.track.id) }
-                    let needed = 50 - finalNew.count
-                    finalNew.append(contentsOf: backfill.prefix(needed))
-                    print("🔄 History backfill: +\(min(needed, backfill.count)) repeats (total \(finalNew.count))")
-                }
-                let finalResults = appendResults ? discoveredGems + finalNew : finalNew
+                let finalResults = appendResults ? discoveredGems + sorted : sorted
                 discoveredGems = finalResults
 
                 // QUOTA: record newly served tracks against the daily free limit.
@@ -1511,26 +1515,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
         }
 
-        // Exclude the user's library (same key format as dedupeKey).
-        pool = pool.filter { track in
-            let key = LibraryTrack.normalize(track.trackName)
-                + " " + LibraryTrack.normalize(track.artistName)
-            return !knownKeys.contains(key)
-        }
-
-        // One track per artist; skip artists already picked for other genres.
-        var seen = seenArtists
-        pool = pool.filter { track in
-            let key = track.artistName.lowercased()
-            guard !seen.contains(key) else { return false }
-            seen.insert(key)
-            return true
-        }
-
-        // Skip the mainstream head, shuffle the tail.
-        let skip = pool.count > 8 ? pool.count / 4 : 0
-        let tail = Array(pool.dropFirst(skip)).shuffled()
-        return Array(tail.prefix(max(limit, 0)))
+        // MINIMAL FILTERING: The user picked this genre. iTunes returned
+        // tracks for it. If it has a preview, it goes in the deck.
+        // NO library exclusion, NO one-per-artist, NO mainstream-skip.
+        // Volume beats curation — "millions of songs" means we show them.
+        // History is a RANKING signal (unseen first), not a filter.
+        let shuffled = pool.shuffled()
+        return Array(shuffled.prefix(max(limit, 0)))
     }
 
     // MARK: - Simple Genre-Based Discovery (WORKS!)
