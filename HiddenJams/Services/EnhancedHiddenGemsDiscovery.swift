@@ -780,15 +780,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     // Filter: obscure artists only
                     guard spotifyMatch.isObscure else { continue }
                     
-                    // Get TOP TRACK for the artist
+                    // Get a track for the artist — randomized, not always #1
                     do {
                         let topTracks = try await spotifyAPI.getArtistTopTracks(
                             artistId: spotifyMatch.spotifyID,
                             token: token
                         )
-                        
-                        if let topTrack = topTracks.first {
-                            candidates.append(topTrack)
+
+                        if let track = topTracks.prefix(5).randomElement() {
+                            candidates.append(track)
                         }
                     } catch {
                         print("⚠️ Failed to get top tracks for \(artist.name): \(error)")
@@ -1556,43 +1556,66 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
         
         // Standard genre search for non-DnB
-        // Search multiple pages per genre to ensure enough candidates
+        // YEAR-SLICED QUERY PLANNING: Spotify caps search offset at 1000, so
+        // one query string can only ever reach ~1,000 results. Slicing each
+        // genre by release year gives every slice its own 1,000-result window —
+        // reach goes from ~1,000 to ~4,000 per genre. Year ranges are
+        // randomized per run (weighted toward recent uploads where the
+        // untouched long tail lives), so no two runs search the same windows.
         let searchGenres = activeGenres.prefix(10)
         print("🎯 Using genres: \(Array(searchGenres))")
-        
+
+        // Build year slices: single recent years + short ranges, shuffled.
+        // Bias toward recent uploads (2020+) where obscure new music lives.
+        func yearSlices(count: Int) -> [String] {
+            let currentYear = Calendar.current.component(.year, from: Date())
+            var slices: [String] = []
+            // Recent single years (highest weight)
+            for year in (max(currentYear - 3, 2000)...currentYear).reversed() {
+                slices.append("year:\(year)")
+                slices.append("year:\(year)")  // double weight
+            }
+            // Short ranges going back
+            var start = currentYear - 4
+            while start >= 1990 {
+                let end = start + 2
+                slices.append("year:\(start)-\(end)")
+                start -= 3
+            }
+            // Older catalog
+            slices.append("year:1980-1989")
+            slices.append("year:1970-1979")
+            return Array(slices.shuffled().prefix(count))
+        }
+
         for genre in searchGenres {
-            // Search 3 different offset ranges per genre for more candidates
-            let offsets = [
-                Int.random(in: 0...200),
-                Int.random(in: 200...400),
-                Int.random(in: 400...600)
-            ]
-            
-            for (index, offset) in offsets.enumerated() {
+            let slices = yearSlices(count: 4)
+            for (index, slice) in slices.enumerated() {
                 do {
-                    let query = "genre:\"\(genre)\""
-                    
-                    print("   🎲 Searching '\(genre)' page \(index + 1)/3 with offset \(offset)")
-                    
+                    let query = "genre:\"\(genre)\" \(slice)"
+                    let randomOffset = Int.random(in: 0...200)
+
+                    print("   🎲 Searching '\(genre)' \(slice) (slice \(index + 1)/4, offset \(randomOffset))")
+
                     let tracks = try await spotifyAPI.searchTracks(
                         query: query,
                         limit: 50,
-                        offset: offset,
+                        offset: randomOffset,
                         market: "from_token",
                         token: token
                     )
-                    
+
                     candidates.append(contentsOf: tracks)
                     try await Task.sleep(nanoseconds: 150_000_000) // 0.15s
-                    
+
                 } catch {
-                    print("⚠️ Search error for \(genre) offset \(offset): \(error)")
+                    print("⚠️ Search error for \(genre) \(slice): \(error)")
                     continue
                 }
             }
         }
-        
-        print("✅ Found \(candidates.count) candidates from genre searches")
+
+        print("✅ Found \(candidates.count) candidates from year-sliced genre searches")
         return candidates
     }
     
@@ -1756,20 +1779,41 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 
                 print("🔍 Found \(obscureArtists.count) obscure artists related to \(artistName)")
                 
-                // 4. Get TOP TRACK for obscure artists (limit to 10 artists to ensure volume)
-                // We pick the #1 most popular song to ensure quality even for obscure artists
+                // 4. Get tracks for obscure artists (limit to 10 artists to ensure volume)
+                // ALBUM-DIG VARIETY: ~35% of the time, dig into a random album
+                // instead of top tracks. Top tracks are the same every run;
+                // album digs surface different songs from the same artist.
                 for obscureArtist in obscureArtists.prefix(10) {
                     do {
-                        let topTracks = try await spotifyAPI.getArtistTopTracks(
-                            artistId: obscureArtist.id,
-                            token: token
-                        )
-                        
-                        if let topTrack = topTracks.first {
-                            allTracks.append(topTrack)
+                        if Double.random(in: 0...1) < 0.35 {
+                            // Album dig: random album → random track
+                            let albums = try await spotifyAPI.getArtistAlbums(
+                                artistId: obscureArtist.id,
+                                limit: 20,
+                                token: token
+                            )
+                            if let album = albums.randomElement() {
+                                let albumTracks = try await spotifyAPI.getAlbumTracks(
+                                    albumId: album.id,
+                                    token: token
+                                )
+                                if let track = albumTracks.randomElement() {
+                                    allTracks.append(track)
+                                    print("   💿 Album dig: '\(track.name)' from '\(album.name)'")
+                                }
+                            }
+                        } else {
+                            // Top tracks, but randomized which one (not always #1)
+                            let topTracks = try await spotifyAPI.getArtistTopTracks(
+                                artistId: obscureArtist.id,
+                                token: token
+                            )
+                            if let track = topTracks.prefix(5).randomElement() {
+                                allTracks.append(track)
+                            }
                         }
                     } catch {
-                        print("⚠️ Failed to get top tracks for \(obscureArtist.name): \(error)")
+                        print("⚠️ Failed to get tracks for \(obscureArtist.name): \(error)")
                         continue
                     }
                 }
