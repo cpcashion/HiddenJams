@@ -437,7 +437,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // not compilation). Popularity, followers, and genre validation
             // become scoring signals, not hard gates. This guarantees volume —
             // "different track every time" beats "perfectly filtered."
-            if filteredCandidates.count < 10 && !allCandidates.isEmpty {
+            if filteredCandidates.count < 50 && !allCandidates.isEmpty {
                 print("🆘 Pool rescue: only \(filteredCandidates.count) survived filters, re-running lenient")
                 let rescued = await applyLenientFilters(
                     tracks: allCandidates,
@@ -454,7 +454,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds.
             // Uses LOCAL copies — the instance thresholds must not ratchet up
             // permanently across sessions (that corrupted the slider).
-            let minimumRequired = 25
+            let minimumRequired = 50
             var relaxationAttempts = 0
             let maxRelaxationAttempts = 2
             var relaxedPopularity = popularityThreshold
@@ -844,7 +844,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// songs), not the handful the personalized pipeline often yields on its
     /// own. The Last.fm similar-tracks path is the personal part; the iTunes
     /// genre fallback tops it up to the batch target.
-    static let appleMusicBatchTarget = 30
+    static let appleMusicBatchTarget = 120
 
     /// - Parameters:
     ///   - pipelineTracks: test seam — when provided, the real Last.fm
