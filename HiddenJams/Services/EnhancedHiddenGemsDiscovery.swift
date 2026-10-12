@@ -1209,7 +1209,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 genre: genre,
                 knownKeys: knownKeys,
                 seenArtists: pickedArtists,
-                limit: 60
+                limit: 120
             )
             for track in picked { pickedArtists.insert(track.artistName.lowercased()) }
             gathered.append(contentsOf: picked)
