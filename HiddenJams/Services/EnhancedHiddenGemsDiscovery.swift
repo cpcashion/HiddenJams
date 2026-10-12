@@ -678,7 +678,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
                 // QUOTA: record newly served tracks against the daily free limit.
                 // Only count tracks actually added this run (not pre-existing).
-                let newCount = appendResults ? freshRecommendations.count : finalResults.count
+                let newCount = appendResults ? sorted.count : finalResults.count
                 DiscoveryQuotaManager.shared.recordDiscovered(count: newCount)
 
                 // APPLE MUSIC UNCONDITIONAL FALLBACK: if the pipeline produced
