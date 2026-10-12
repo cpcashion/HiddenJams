@@ -479,9 +479,9 @@ struct GuaranteedDiscoveryTests {
             makeTrack(id: 9000 + i, name: "Pipeline Song \(i)", artist: "Pipeline Artist \(i)", genre: "Rock")
                 .toSpotifyTrack(previewURL: "https://example.com/p\(i).m4a", popularity: 5)
         }
-        // The fallback catalog holds 40 fresh rock tracks.
+        // The fallback catalog holds 115 fresh rock tracks.
         var stub = StubCatalog()
-        stub.resultsByGenre["rock"] = (0..<40).map { i in
+        stub.resultsByGenre["rock"] = (0..<115).map { i in
             makeTrack(id: i, name: "TopUp Song \(i)", artist: "TopUp Artist \(i)", genre: "Rock")
         }
 
@@ -511,7 +511,7 @@ struct GuaranteedDiscoveryTests {
     @Test func appleMusicBatchSkipsTopUpWhenFull() async throws {
         // Pipeline already meets the target — the fallback must not run.
         // (The stub catalog is empty, so any fallback call would throw.)
-        let pipeline = (0..<30).map { i in
+        let pipeline = (0..<EnhancedHiddenGemsDiscovery.appleMusicBatchTarget).map { i in
             makeTrack(id: 9000 + i, name: "Pipeline Song \(i)", artist: "Pipeline Artist \(i)", genre: "Rock")
                 .toSpotifyTrack(previewURL: "https://example.com/p\(i).m4a", popularity: 5)
         }
