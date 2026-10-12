@@ -97,20 +97,19 @@ struct GuaranteedDiscoveryTests {
     }
 
     @Test func fallbackExcludesLibraryTracks() {
+        // MINIMAL FILTERING (build 49): library tracks are now INCLUDED.
+        // Volume beats curation — if it has a preview, it's in the deck.
         let results = genreResults(genre: "alternative", count: 10)
-        // First result mirrors a track the user already has.
         let owned = libraryTrack(title: "Alternative Song 0", artist: "Alternative Artist 0")
         let picked = EnhancedHiddenGemsDiscovery.selectFallbackTracks(
             from: results, genre: "alternative",
             knownKeys: [owned.dedupeKey], seenArtists: [], limit: 10
         )
-        #expect(!picked.contains { $0.trackId == 0 })
-        // 9 survive the library exclusion; the mainstream-head skip (9/4 = 2)
-        // then drops the first two, leaving 7 hidden-jam candidates.
-        #expect(picked.count == 7)
+        #expect(picked.count == 10)
     }
 
     @Test func fallbackOneTrackPerArtist() {
+        // MINIMAL FILTERING (build 49): multiple tracks per artist allowed.
         let results = [
             makeTrack(id: 1, name: "Song A1", artist: "Same Artist", genre: "Alternative"),
             makeTrack(id: 2, name: "Song A2", artist: "Same Artist", genre: "Alternative"),
@@ -120,22 +119,17 @@ struct GuaranteedDiscoveryTests {
             from: results, genre: "alternative",
             knownKeys: [], seenArtists: [], limit: 10
         )
-        #expect(picked.count == 2)
-        #expect(Set(picked.map { $0.artistName }).count == 2)
+        #expect(picked.count == 3)
     }
 
     @Test func fallbackPrefersTailOverMainstreamHead() {
-        // 12 results: the head (first 3 = 25%) is the mainstream the genre
-        // search ranks first. With a limit that fits the tail, no head track
-        // may be selected.
+        // MINIMAL FILTERING (build 49): no head-skip. All tracks eligible.
         let results = genreResults(genre: "indie", count: 12)
         let picked = EnhancedHiddenGemsDiscovery.selectFallbackTracks(
             from: results, genre: "indie",
             knownKeys: [], seenArtists: [], limit: 9
         )
         #expect(picked.count == 9)
-        let pickedIds = Set(picked.map { $0.trackId })
-        #expect(pickedIds.isDisjoint(with: [0, 1, 2]))
     }
 
     @Test func fallbackGenreMismatchNeverZeroesOut() {
@@ -220,8 +214,10 @@ struct GuaranteedDiscoveryTests {
         )
 
         #expect(!tracks.isEmpty)
-        // Jazz (strongest genre) is queried first and fills the quota.
-        #expect(tracks.allSatisfy { $0.name.hasPrefix("Jazz Song") })
+        // Jazz (strongest genre, 0.9 weight) should dominate the results.
+        // Weighted sampling is random, so we check majority not exclusivity.
+        let jazzCount = tracks.filter { $0.name.hasPrefix("Jazz Song") }.count
+        #expect(jazzCount > tracks.count / 2, "jazz should dominate with 0.9 weight")
     }
 
     @Test func itunesFallbackUsesSessionGenresOverProfile() async throws {
@@ -448,9 +444,9 @@ struct GuaranteedDiscoveryTests {
             itunesService: stub
         )
 
-        // 14 picked, head-skip drops 3, tag gate drops the 2 name-baits.
+        // 14 picked, no head-skip (build 49), tag gate drops the 2 name-baits.
         let artists = Set(tracks.compactMap { $0.artists.first?.name })
-        #expect(tracks.count == 9, "expected 9 genuine DnB tracks, got \(tracks.count)")
+        #expect(tracks.count == 12, "expected 12 genuine DnB tracks, got \(tracks.count)")
         #expect(!artists.contains("Name Bait A") && !artists.contains("Name Bait B"),
                 "name-bait artists must not survive genre-tag verification")
         #expect(!tracks.contains { $0.name.lowercased().contains("jungle") },
