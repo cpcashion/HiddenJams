@@ -156,6 +156,7 @@ class ItunesPreviewService: ItunesCatalog {
             "reggae": ["reggae music", "dub", "dancehall"],
             "latin": ["latin music", "reggaeton", "salsa music"],
             "k-pop": ["kpop", "k-pop music", "korean pop"],
+            "dance": ["dance music", "club dance", "dance pop", "edm dance", "house dance"],
         ]
 
         if let syns = synonyms[lower] {

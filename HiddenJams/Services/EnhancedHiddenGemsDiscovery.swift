@@ -658,7 +658,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 if freshRecommendations.count != topRecommendations.count {
                     print("🛡️ Newness guard dropped \(topRecommendations.count - freshRecommendations.count) history matches")
                 }
-                let finalResults = appendResults ? discoveredGems + freshRecommendations : freshRecommendations
+                // 50-TRACK FLOOR: If history filtering starved us below 50,
+                // backfill with previously-seen tracks (fresh first). Showing
+                // a repeat beats showing 2 tracks.
+                var finalNew = freshRecommendations
+                if finalNew.count < 50 {
+                    let seenIds = Set(finalNew.map { $0.track.id })
+                    let backfill = topRecommendations.filter { !seenIds.contains($0.track.id) }
+                    let needed = 50 - finalNew.count
+                    finalNew.append(contentsOf: backfill.prefix(needed))
+                    print("🔄 History backfill: +\(min(needed, backfill.count)) repeats (total \(finalNew.count))")
+                }
+                let finalResults = appendResults ? discoveredGems + finalNew : finalNew
                 discoveredGems = finalResults
 
                 // QUOTA: record newly served tracks against the daily free limit.
