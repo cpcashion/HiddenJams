@@ -98,24 +98,71 @@ class ItunesPreviewService: ItunesCatalog {
     /// Results arrive newest-relevance-first with preview URLs, artwork, and
     /// genre metadata inline — no second lookup needed.
     func searchGenreTracks(genre: String, limit: Int = 200) async -> [ItunesTrack] {
-        var components = URLComponents(string: baseURL)!
-        components.queryItems = [
-            URLQueryItem(name: "term", value: genre),
-            URLQueryItem(name: "media", value: "music"),
-            URLQueryItem(name: "entity", value: "song"),
-            URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 200))")
+        // VARIED QUERIES: iTunes Search has no offset parameter, so we vary
+        // the search terms to get different result sets each run. Each variation
+        // hits a different slice of the catalog.
+        let variations = Self.queryVariations(for: genre).shuffled()
+        var allResults: [ItunesTrack] = []
+        var seenIds = Set<Int>()
+
+        for term in variations.prefix(3) {
+            var components = URLComponents(string: baseURL)!
+            components.queryItems = [
+                URLQueryItem(name: "term", value: term),
+                URLQueryItem(name: "media", value: "music"),
+                URLQueryItem(name: "entity", value: "song"),
+                URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 200))")
+            ]
+
+            guard let url = components.url else { continue }
+
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let response = try JSONDecoder().decode(ItunesResponse.self, from: data)
+                // Deduplicate by track ID, shuffle for variety
+                for track in response.results.shuffled() {
+                    if seenIds.insert(track.trackId).inserted {
+                        allResults.append(track)
+                    }
+                }
+            } catch {
+                print("⚠️ iTunes genre search failed for '\(term)': \(error.localizedDescription)")
+                continue
+            }
+        }
+
+        return Array(allResults.shuffled().prefix(limit))
+    }
+
+    /// Generate varied search terms for a genre to hit different catalog slices.
+    private static func queryVariations(for genre: String) -> [String] {
+        let lower = genre.lowercased()
+        var variations = [genre, "\(genre) music"]
+
+        // Genre synonyms to expand reach
+        let synonyms: [String: [String]] = [
+            "electronic": ["electronica", "edm", "techno", "house music", "dance electronic"],
+            "rock": ["rock music", "alternative rock", "indie rock", "hard rock"],
+            "hip-hop": ["hip hop", "rap", "hip-hop music", "rap music"],
+            "pop": ["pop music", "dance pop", "indie pop"],
+            "jazz": ["jazz music", "smooth jazz", "bebop"],
+            "classical": ["classical music", "orchestral", "symphony"],
+            "country": ["country music", "americana", "folk country"],
+            "r&b": ["r&b music", "soul music", "neo soul"],
+            "metal": ["heavy metal", "metal music", "thrash metal"],
+            "punk": ["punk rock", "punk music", "hardcore punk"],
+            "folk": ["folk music", "indie folk", "acoustic folk"],
+            "blues": ["blues music", "electric blues"],
+            "reggae": ["reggae music", "dub", "dancehall"],
+            "latin": ["latin music", "reggaeton", "salsa music"],
+            "k-pop": ["kpop", "k-pop music", "korean pop"],
         ]
 
-        guard let url = components.url else { return [] }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(ItunesResponse.self, from: data)
-            return response.results
-        } catch {
-            print("⚠️ iTunes genre search failed for '\(genre)': \(error.localizedDescription)")
-            return []
+        if let syns = synonyms[lower] {
+            variations.append(contentsOf: syns)
         }
+
+        return variations
     }
 
     /// Full iTunes Search API lookup for a track. Returns the best fuzzy match

@@ -431,6 +431,25 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
             telemetry["filtered"] = filteredCandidates.count
             telemetry["total_candidates"] = allCandidates.count
+
+            // POOL RESCUE: If filters starved the pool (< 10 tracks), do a
+            // second pass with ONLY history + basic hygiene (has preview,
+            // not compilation). Popularity, followers, and genre validation
+            // become scoring signals, not hard gates. This guarantees volume —
+            // "different track every time" beats "perfectly filtered."
+            if filteredCandidates.count < 10 && !allCandidates.isEmpty {
+                print("🆘 Pool rescue: only \(filteredCandidates.count) survived filters, re-running lenient")
+                let rescued = await applyLenientFilters(
+                    tracks: allCandidates,
+                    selectedGenres: validationGenres.isEmpty ? nil : validationGenres
+                )
+                // Only use rescued tracks that aren't already in the filtered set
+                let existingIds = Set(filteredCandidates.map { $0.id })
+                let fresh = rescued.filter { !existingIds.contains($0.id) }
+                filteredCandidates.append(contentsOf: fresh)
+                print("🆘 Pool rescue: +\(fresh.count) tracks (total \(filteredCandidates.count))")
+                telemetry["rescued"] = fresh.count
+            }
             
             // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds.
             // Uses LOCAL copies — the instance thresholds must not ratchet up
@@ -1529,14 +1548,25 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             ]
             
             print("🎵 DnB Mode: Using pure genre: operators (no name-matching keywords)")
-            
+
+            // Year-sliced for the 1,000-result ceiling — same as standard search
+            let dnbYear = Calendar.current.component(.year, from: Date())
+            var dnbSlices: [String] = []
+            for year in (max(dnbYear - 3, 2000)...dnbYear).reversed() {
+                dnbSlices.append("year:\(year)")
+            }
+            dnbSlices.append("year:2020-2022")
+            dnbSlices.append("year:2015-2019")
+
             for term in dnbSearchTerms.shuffled().prefix(6) {
+                let slice = dnbSlices.randomElement() ?? ""
                 do {
                     let randomOffset = Int.random(in: 0...200)
-                    print("   🎲 DnB Searching '\(term)' with offset \(randomOffset)")
+                    let dnbQuery = "\(term) \(slice)"
+                    print("   🎲 DnB Searching '\(dnbQuery)' with offset \(randomOffset)")
                     
                     let tracks = try await spotifyAPI.searchTracks(
-                        query: term,
+                        query: dnbQuery,
                         limit: 50,
                         offset: randomOffset,
                         market: "from_token",
@@ -1943,6 +1973,33 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // MARK: - Filtering
     
     // Fast filtering - NOW INCLUDES BATCH ARTIST CHECK & DEEP SCAN
+    /// Lenient filters for pool rescue: ONLY history + basic hygiene.
+    /// No popularity, follower, or genre hard gates — those become scoring
+    /// signals. This guarantees volume when the strict filters starve the pool.
+    internal func applyLenientFilters(
+        tracks: [SpotifyTrack],
+        selectedGenres: Set<String>?
+    ) async -> [SpotifyTrack] {
+        let history = DiscoveryHistoryManager.shared
+        return tracks.filter { track in
+            // Not in user's library
+            guard !knownTrackIds.contains(track.id) else { return false }
+            // Not seen this session
+            guard !sessionSeenTracks.contains(track.id) else { return false }
+            // Not in 7-day history
+            guard !history.isSeen(trackId: track.id) else { return false }
+            // Artist not seen this session
+            if let artistId = track.artists.first?.id {
+                guard !sessionSeenArtists.contains(artistId) else { return false }
+            }
+            // Not a compilation
+            guard !isCompilationAlbum(track.album.name) else { return false }
+            // Must have (or be able to get) a preview — without audio it's not a discovery
+            // Note: iTunes tracks already carry previews; Spotify tracks get them in enrichment
+            return true
+        }.shuffled()  // Shuffle so rescue picks are varied, not ordered
+    }
+
     /// - Parameter ignoringHistory: when true, the persistent 7-day seen
     ///   track/artist history is ignored (the user's own library and this
     ///   session's seen sets still apply). Used as a last resort so discovery
