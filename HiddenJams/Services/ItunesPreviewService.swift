@@ -98,40 +98,83 @@ class ItunesPreviewService: ItunesCatalog {
     /// Results arrive newest-relevance-first with preview URLs, artwork, and
     /// genre metadata inline — no second lookup needed.
     func searchGenreTracks(genre: String, limit: Int = 200) async -> [ItunesTrack] {
-        // VARIED QUERIES: iTunes Search has no offset parameter, so we vary
-        // the search terms to get different result sets each run. Each variation
-        // hits a different slice of the catalog.
-        let variations = Self.queryVariations(for: genre).shuffled()
-        var allResults: [ItunesTrack] = []
-        var seenIds = Set<Int>()
+        // AGGRESSIVE CATALOG MINING: iTunes Search has no offset parameter and
+        // returns popularity-biased results. To find HIDDEN gems (obscure tracks),
+        // we fire 20+ varied queries in PARALLEL — synonyms, year slices, and
+        // descriptive combinations. Each hits a different catalog slice.
+        // Target: thousands of candidates, not hundreds.
+        let variations = Self.aggressiveQueryVariations(for: genre).shuffled()
+        let queryLimit = min(max(limit, 1), 200)
+        let base = baseURL
 
-        for term in variations.prefix(3) {
-            var components = URLComponents(string: baseURL)!
-            components.queryItems = [
-                URLQueryItem(name: "term", value: term),
-                URLQueryItem(name: "media", value: "music"),
-                URLQueryItem(name: "entity", value: "song"),
-                URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 200))")
-            ]
-
-            guard let url = components.url else { continue }
-
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let response = try JSONDecoder().decode(ItunesResponse.self, from: data)
-                // Deduplicate by track ID, shuffle for variety
-                for track in response.results.shuffled() {
-                    if seenIds.insert(track.trackId).inserted {
-                        allResults.append(track)
+        // Run all queries in parallel for speed
+        let results = await withTaskGroup(of: [ItunesTrack].self) { group in
+            for term in variations.prefix(25) {
+                group.addTask {
+                    var components = URLComponents(string: base)!
+                    components.queryItems = [
+                        URLQueryItem(name: "term", value: term),
+                        URLQueryItem(name: "media", value: "music"),
+                        URLQueryItem(name: "entity", value: "song"),
+                        URLQueryItem(name: "limit", value: "\(queryLimit)")
+                    ]
+                    guard let url = components.url else { return [] }
+                    do {
+                        let (data, _) = try await URLSession.shared.data(from: url)
+                        let response = try JSONDecoder().decode(ItunesResponse.self, from: data)
+                        return response.results
+                    } catch {
+                        return []
                     }
                 }
-            } catch {
-                print("⚠️ iTunes genre search failed for '\(term)': \(error.localizedDescription)")
-                continue
+            }
+            var combined: [ItunesTrack] = []
+            for await tracks in group {
+                combined.append(contentsOf: tracks)
+            }
+            return combined
+        }
+
+        // Deduplicate by track ID, shuffle for variety
+        var seenIds = Set<Int>()
+        var allResults: [ItunesTrack] = []
+        for track in results.shuffled() {
+            if seenIds.insert(track.trackId).inserted {
+                allResults.append(track)
+            }
+        }
+        print("🎯 iTunes aggressive search for '\(genre)': \(allResults.count) unique tracks from \(min(25, variations.count)) queries")
+        return Array(allResults.shuffled().prefix(max(limit * 3, 600)))
+    }
+
+    /// Generate 25+ varied query terms to mine different catalog slices.
+    /// Combines synonyms, year slices, and descriptive modifiers.
+    private static func aggressiveQueryVariations(for genre: String) -> [String] {
+        var variations = queryVariations(for: genre)
+
+        // Year slices: obscure tracks from every era
+        let years = [1975, 1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020]
+        for year in years.shuffled().prefix(6) {
+            variations.append("\(genre) \(year)")
+        }
+
+        // Descriptive modifiers that surface obscure/niche results
+        let modifiers = ["underground", "indie", "rare", "deep", "ambient",
+                        "experimental", "lost", "forgotten", "obscure", "demo"]
+        for mod in modifiers.shuffled().prefix(5) {
+            variations.append("\(mod) \(genre)")
+        }
+
+        // Random common words + genre (catches long-tail catalog)
+        let words = ["night", "love", "dream", "fire", "water", "heart",
+                    "light", "dark", "summer", "winter", "dance", "song"]
+        for word in words.shuffled().prefix(4) {
+            if word.lowercased() != genre.lowercased() {
+                variations.append("\(word) \(genre)")
             }
         }
 
-        return Array(allResults.shuffled().prefix(limit))
+        return variations
     }
 
     /// Generate varied search terms for a genre to hit different catalog slices.
