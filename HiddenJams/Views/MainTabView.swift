@@ -170,7 +170,11 @@ struct MainTabView: View {
         let playlistName = GenrePlaylistRouter.playlistName(
             for: track, sessionGenres: currentSessionGenres())
         if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName) {
-            await MainActor.run { showToast(message, isError: !success) }
+            // Success toast removed (build 50) — it was hidden behind the
+            // mini player and ugly. Only show errors.
+            if !success {
+                await MainActor.run { showToast(message, isError: true) }
+            }
         }
 
         // Without Spotify there's no Spotify playlist — save to the in-app collection
