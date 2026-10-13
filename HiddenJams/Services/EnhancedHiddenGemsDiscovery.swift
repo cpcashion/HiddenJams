@@ -217,7 +217,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         popularityOverride: Int? = nil,  // User-controlled popularity threshold from slider
         followerOverride: Int? = nil     // User-controlled follower threshold from slider
     ) async {
-        // QUOTA: free tier gets 20 discoveries/day. Pro is unlimited.
+        // QUOTA: free tier gets 50 discoveries/day. Pro is unlimited.
         // Check before doing any work — hitting the limit opens the paywall.
         let quota = await MainActor.run { DiscoveryQuotaManager.shared }
         guard await MainActor.run(body: { quota.canDiscover }) else {

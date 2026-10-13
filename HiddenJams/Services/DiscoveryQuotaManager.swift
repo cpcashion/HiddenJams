@@ -2,7 +2,7 @@
 //  DiscoveryQuotaManager.swift
 //  HiddenJams
 //
-//  Free tier: 20 discovered tracks per day (resets at local midnight).
+//  Free tier: 50 discovered tracks per day (resets at local midnight).
 //  Pro (paid subscription): unlimited.
 //
 
@@ -14,7 +14,7 @@ final class DiscoveryQuotaManager: ObservableObject {
     static let shared = DiscoveryQuotaManager()
 
     /// Free tracks per day.
-    static let freeDailyLimit = 20
+    static let freeDailyLimit = 50
 
     private let countKey = "hj.dailyDiscoveryCount"
     private let dateKey = "hj.dailyDiscoveryDate"

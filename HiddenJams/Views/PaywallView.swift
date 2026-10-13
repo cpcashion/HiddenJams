@@ -2,8 +2,8 @@
 //  PaywallView.swift
 //  HiddenJams
 //
-//  Presented when a free user hits the 20 discoveries/day limit.
-//  Hidden Jams Pro: $4.99/month, unlimited discoveries.
+//  Presented when a free user hits the 50 discoveries/day limit.
+//  Hidden Jams Pro: $1.99/month, unlimited discoveries.
 //
 
 import SwiftUI
@@ -23,29 +23,27 @@ struct PaywallView: View {
         VStack(spacing: 24) {
             Spacer(minLength: 20)
 
-            // Gem icon
-            Image(systemName: "sparkles")
-                .font(.system(size: 64))
-                .foregroundColor(Theme.Colors.gemGold)
+            // Animated gem: slow rotation + twinkling sparkles
+            AnimatedGemView()
 
             VStack(spacing: 8) {
-                Text("You've found 20 gems today!")
+                Text("You've found 50 gems today!")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(Theme.Colors.textPrimary)
                     .multilineTextAlignment(.center)
 
-                Text("Hidden Jams Pro unlocks unlimited discoveries — dig as deep as you want, every day.")
+                Text("Free discovery stops here — but the music doesn't have to. Go Pro and keep digging, all day, every day.")
                     .font(.system(size: 16))
                     .foregroundColor(Theme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
 
-            // Benefits
+            // Benefits — why unlimited is so much better
             VStack(alignment: .leading, spacing: 12) {
-                benefitRow(icon: "infinity", text: "Unlimited discoveries, every day")
-                benefitRow(icon: "music.note.list", text: "Every genre & subgenre unlocked")
-                benefitRow(icon: "slider.horizontal.3", text: "Full Deep Cuts slider range")
+                benefitRow(icon: "infinity", text: "Never hit the wall — free stops at 50 songs a day, Pro never stops")
+                benefitRow(icon: "arrow.triangle.2.circlepath", text: "Fresh decks on every tap — 50+ new hidden jams, as many times as you want")
+                benefitRow(icon: "music.note.list", text: "The catalog is millions deep — Pro lets you explore all of it")
             }
             .padding(.horizontal, 40)
 
@@ -58,7 +56,7 @@ struct PaywallView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(Theme.Colors.textPrimary)
                 } else {
-                    Text("$4.99 / month")
+                    Text("$1.99 / month")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(Theme.Colors.textPrimary)
                 }
@@ -106,7 +104,7 @@ struct PaywallView: View {
                 .font(.system(size: 15))
                 .foregroundColor(Theme.Colors.textSecondary)
 
-                Text("Cancel anytime in Settings. 20 free discoveries refresh daily.")
+                Text("Cancel anytime in Settings. 50 free discoveries refresh daily.")
                     .font(.caption2)
                     .foregroundColor(Theme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -146,6 +144,60 @@ struct PaywallView: View {
             try await subscriptionManager.purchase(product)
         } catch {
             // Error surfaced via subscriptionManager.lastError
+        }
+    }
+}
+
+// MARK: - Animated Gem
+
+/// Slowly rotating diamond with twinkling sparkles for the paywall.
+private struct AnimatedGemView: View {
+    @State private var rotating = false
+    @State private var sparkleOn = false
+
+    private let sparkleOffsets: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
+        (38, -30, 14), (-34, -18, 10), (20, 34, 16), (-24, 30, 8)
+    ]
+
+    var body: some View {
+        ZStack {
+            // Soft glow
+            Circle()
+                .fill(Theme.Colors.gemGold.opacity(0.15))
+                .frame(width: 150, height: 150)
+                .blur(radius: 20)
+
+            // Diamond, rotating slowly
+            Image(systemName: "diamond.fill")
+                .font(.system(size: 64))
+                .foregroundColor(Theme.Colors.gemGold)
+                .rotationEffect(.degrees(rotating ? 360 : 0))
+                .animation(
+                    .linear(duration: 14).repeatForever(autoreverses: false),
+                    value: rotating
+                )
+
+            // Twinkling sparkles, staggered
+            ForEach(0..<sparkleOffsets.count, id: \.self) { i in
+                let sp = sparkleOffsets[i]
+                Image(systemName: "sparkle")
+                    .font(.system(size: sp.size))
+                    .foregroundColor(.white)
+                    .offset(x: sp.x, y: sp.y)
+                    .opacity(sparkleOn ? 1 : 0.1)
+                    .scaleEffect(sparkleOn ? 1.25 : 0.7)
+                    .animation(
+                        .easeInOut(duration: 1.1)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.35),
+                        value: sparkleOn
+                    )
+            }
+        }
+        .frame(width: 170, height: 170)
+        .onAppear {
+            rotating = true
+            sparkleOn = true
         }
     }
 }
