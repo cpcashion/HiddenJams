@@ -170,16 +170,11 @@ private struct AnimatedGemView: View {
                 .frame(width: 130, height: 130)
                 .blur(radius: 24)
 
-            // Diamond, spinning around the vertical axis
-            Image(systemName: "diamond.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Theme.Colors.gemGold, Theme.Colors.gemGold.opacity(0.75)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            // Diamond gem image, spinning around the vertical axis (coin-spin)
+            Image("DiamondGem")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 120, height: 120)
                 .rotation3DEffect(
                     .degrees(spin ? 360 : 0),
                     axis: (x: 0, y: 1, z: 0)
