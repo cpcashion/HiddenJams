@@ -150,53 +150,65 @@ struct PaywallView: View {
 
 // MARK: - Animated Gem
 
-/// Slowly rotating diamond with twinkling sparkles for the paywall.
+/// Diamond with a slow 3D spin around its vertical axis (like a coin turning)
+/// and very subtle twinkling sparkles. (Build 52: the flat 2D rotation looked
+/// cheap — this is the coin-spin Chris asked for.)
 private struct AnimatedGemView: View {
-    @State private var rotating = false
+    @State private var spin = false
     @State private var sparkleOn = false
 
-    private let sparkleOffsets: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-        (38, -30, 14), (-34, -18, 10), (20, 34, 16), (-24, 30, 8)
+    // Few, small, gentle sparkles
+    private let sparkles: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
+        (30, -26, 9), (-28, -14, 7), (16, 28, 8)
     ]
 
     var body: some View {
         ZStack {
-            // Soft glow
+            // Faint glow
             Circle()
-                .fill(Theme.Colors.gemGold.opacity(0.15))
-                .frame(width: 150, height: 150)
-                .blur(radius: 20)
+                .fill(Theme.Colors.gemGold.opacity(0.10))
+                .frame(width: 130, height: 130)
+                .blur(radius: 24)
 
-            // Diamond, rotating slowly
+            // Diamond, spinning around the vertical axis
             Image(systemName: "diamond.fill")
                 .font(.system(size: 64))
-                .foregroundColor(Theme.Colors.gemGold)
-                .rotationEffect(.degrees(rotating ? 360 : 0))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Theme.Colors.gemGold, Theme.Colors.gemGold.opacity(0.75)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .rotation3DEffect(
+                    .degrees(spin ? 360 : 0),
+                    axis: (x: 0, y: 1, z: 0)
+                )
                 .animation(
-                    .linear(duration: 14).repeatForever(autoreverses: false),
-                    value: rotating
+                    .linear(duration: 9).repeatForever(autoreverses: false),
+                    value: spin
                 )
 
-            // Twinkling sparkles, staggered
-            ForEach(0..<sparkleOffsets.count, id: \.self) { i in
-                let sp = sparkleOffsets[i]
+            // Very subtle sparkles
+            ForEach(0..<sparkles.count, id: \.self) { i in
+                let sp = sparkles[i]
                 Image(systemName: "sparkle")
                     .font(.system(size: sp.size))
-                    .foregroundColor(.white)
+                    .foregroundColor(.white.opacity(0.85))
                     .offset(x: sp.x, y: sp.y)
-                    .opacity(sparkleOn ? 1 : 0.1)
-                    .scaleEffect(sparkleOn ? 1.25 : 0.7)
+                    .opacity(sparkleOn ? 0.9 : 0.15)
+                    .scaleEffect(sparkleOn ? 1.1 : 0.85)
                     .animation(
-                        .easeInOut(duration: 1.1)
+                        .easeInOut(duration: 1.6)
                             .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.35),
+                            .delay(Double(i) * 0.5),
                         value: sparkleOn
                     )
             }
         }
-        .frame(width: 170, height: 170)
+        .frame(width: 160, height: 160)
         .onAppear {
-            rotating = true
+            spin = true
             sparkleOn = true
         }
     }
