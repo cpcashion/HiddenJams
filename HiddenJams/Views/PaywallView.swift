@@ -150,11 +150,14 @@ struct PaywallView: View {
 
 // MARK: - Animated Gem
 
-/// Rock-hand charm with a slow 3D spin around its vertical axis (like a coin
-/// turning) and very subtle twinkling sparkles. (Build 54: replaced the diamond
-/// with a real 3D rock-hand — Noto 🤘 extruded in Blender — per Chris.)
+/// Rock-hand charm spinning slowly around its vertical axis, with very subtle
+/// twinkling sparkles.
+///
+/// Build 55: the hand is now a real 3D model rendered live (`RockHand3DView`)
+/// instead of the build-54 PNG spun with `rotation3DEffect`, which looked like
+/// a flat card turning — edge-on it vanished to a sliver, and from behind it
+/// showed the same picture mirrored.
 private struct AnimatedRockHandView: View {
-    @State private var spin = false
     @State private var sparkleOn = false
 
     // Few, small, gentle sparkles
@@ -170,21 +173,11 @@ private struct AnimatedRockHandView: View {
                 .frame(width: 130, height: 130)
                 .blur(radius: 24)
 
-            // Rock hand: the Noto Emoji 🤘 (U+1F918, Apache 2.0) silhouette,
-            // extruded to 3D in Blender and rendered glossy orange.
-            // Attribution: "Noto Emoji" by Google, Apache License 2.0.
-            Image("RockHand")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 120, height: 120)
-                .rotation3DEffect(
-                    .degrees(spin ? 360 : 0),
-                    axis: (x: 0, y: 1, z: 0)
-                )
-                .animation(
-                    .linear(duration: 9).repeatForever(autoreverses: false),
-                    value: spin
-                )
+            // Rock hand: an original 3D model, rendered live so it turns with
+            // real depth and lighting. Falls back to the previous artwork if
+            // the model can't load.
+            RockHand3DView()
+                .frame(width: 140, height: 140)
 
             // Very subtle sparkles
             ForEach(0..<sparkles.count, id: \.self) { i in
@@ -205,7 +198,6 @@ private struct AnimatedRockHandView: View {
         }
         .frame(width: 160, height: 160)
         .onAppear {
-            spin = true
             sparkleOn = true
         }
     }
