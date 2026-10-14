@@ -24,7 +24,7 @@ struct PaywallView: View {
             Spacer(minLength: 20)
 
             // Animated gem: slow rotation + twinkling sparkles
-            AnimatedGemView()
+            AnimatedRockHandView()
 
             VStack(spacing: 8) {
                 Text("You've found 50 gems today!")
@@ -150,10 +150,10 @@ struct PaywallView: View {
 
 // MARK: - Animated Gem
 
-/// Diamond with a slow 3D spin around its vertical axis (like a coin turning)
-/// and very subtle twinkling sparkles. (Build 52: the flat 2D rotation looked
-/// cheap — this is the coin-spin Chris asked for.)
-private struct AnimatedGemView: View {
+/// Rock-hand charm with a slow 3D spin around its vertical axis (like a coin
+/// turning) and very subtle twinkling sparkles. (Build 54: replaced the diamond
+/// with a real 3D rock-hand — Noto 🤘 extruded in Blender — per Chris.)
+private struct AnimatedRockHandView: View {
     @State private var spin = false
     @State private var sparkleOn = false
 
@@ -170,8 +170,10 @@ private struct AnimatedGemView: View {
                 .frame(width: 130, height: 130)
                 .blur(radius: 24)
 
-            // Diamond gem image, spinning around the vertical axis (coin-spin)
-            Image("DiamondGem")
+            // Rock hand: the Noto Emoji 🤘 (U+1F918, Apache 2.0) silhouette,
+            // extruded to 3D in Blender and rendered glossy orange.
+            // Attribution: "Noto Emoji" by Google, Apache License 2.0.
+            Image("RockHand")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 120, height: 120)
