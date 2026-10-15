@@ -20,134 +20,119 @@ struct PaywallView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Rock hand — Chris's own emoji PNG, static, subtle sparkles
-                AnimatedRockHandView()
-                    .padding(.top, 24)
+        // No scrolling: the whole paywall fits the screen height.
+        VStack(spacing: 0) {
+            Spacer(minLength: 8)
 
-                Text("RARE SONGS. REAL DISCOVERY.")
-                    .font(.system(size: 12, weight: .medium))
-                    .tracking(3)
-                    .foregroundColor(Theme.Colors.textSecondary)
+            // Rock hand — Chris's own emoji PNG, static, subtle sparkles
+            AnimatedRockHandView()
 
-                // Premium card
-                VStack(spacing: 16) {
-                    // PREMIUM pill
-                    Text("PREMIUM")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(2)
-                        .foregroundColor(Theme.Colors.gemGold)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .overlay(
-                            Capsule()
-                                .stroke(Theme.Colors.gemGold.opacity(0.5), lineWidth: 1)
-                        )
-                        .background(Theme.Colors.gemGold.opacity(0.12))
-                        .cornerRadius(20)
-
-                    VStack(spacing: 8) {
-                        Text("Unlock Premium")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(Theme.Colors.textPrimary)
-
-                        Text("Go beyond the mainstream and discover music the world hasn't heard yet.")
-                            .font(.system(size: 16))
-                            .foregroundColor(Theme.Colors.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-                    }
-
-                    if let product = monthlyProduct {
-                        Text("\(product.displayPrice) / month")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                    } else {
-                        Text("$1.99 / month")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                    }
-
-                    // Benefits
-                    VStack(alignment: .leading, spacing: 20) {
-                        benefitRow(icon: "infinity", title: "Unlimited songs",
-                                   text: "Get unlimited access to fresh, obscure tracks from Spotify and Apple Music.")
-                        benefitRow(icon: "sparkles", title: "Discover rare songs",
-                                   text: "Find hidden gems before anyone else.")
-                        benefitRow(icon: "music.note", title: "Spotify + Apple Music",
-                                   text: "Explore curated tracks from the most undiscovered artists.")
-                    }
-                    .padding(.top, 4)
-
-                    Button {
-                        Task { await buyPro() }
-                    } label: {
-                        if isPurchasing {
-                            ProgressView()
-                                .tint(.black)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                        } else {
-                            HStack(spacing: 8) {
-                                Text("Start Premium")
-                                    .font(.system(size: 18, weight: .bold))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 16, weight: .bold))
-                            }
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                        }
-                    }
-                    .background(
-                        LinearGradient(
-                            colors: [Theme.Colors.gemGoldLight, Theme.Colors.gemGold],
-                            startPoint: .top, endPoint: .bottom
-                        )
+            // Premium card
+            VStack(spacing: 14) {
+                // PREMIUM pill
+                Text("PREMIUM")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(2)
+                    .foregroundColor(Theme.Colors.gemGold)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .overlay(
+                        Capsule()
+                            .stroke(Theme.Colors.gemGold.opacity(0.5), lineWidth: 1)
                     )
-                    .cornerRadius(16)
-                    .disabled(isPurchasing)
+                    .background(Theme.Colors.gemGold.opacity(0.12))
+                    .cornerRadius(20)
 
-                    if let error = subscriptionManager.lastError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                .padding(24)
-                .background(Color.white.opacity(0.03))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-                .cornerRadius(24)
-                .padding(.horizontal, 20)
+                VStack(spacing: 8) {
+                    Text("Unlock Premium")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundColor(Theme.Colors.textPrimary)
 
-                VStack(spacing: 12) {
-                    Button("Maybe later") {
-                        // Snooze the paywall for this session so the user can
-                        // keep testing/using the app. Resets on next launch.
-                        DiscoveryQuotaManager.shared.paywallSnoozed = true
-                        dismiss()
-                    }
-                    .font(.system(size: 16))
-                    .foregroundColor(Theme.Colors.textSecondary)
-
-                    Button("Restore purchases") {
-                        Task { await subscriptionManager.restore() }
-                    }
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.Colors.textSecondary.opacity(0.7))
-
-                    Text("Cancel anytime in Settings. 50 free discoveries refresh daily.")
-                        .font(.caption2)
-                        .foregroundColor(Theme.Colors.textSecondary.opacity(0.7))
+                    Text("Go beyond the mainstream and discover music the world hasn't heard.")
+                        .font(.system(size: 16))
+                        .foregroundColor(Theme.Colors.textSecondary)
                         .multilineTextAlignment(.center)
                 }
-                .padding(.bottom, 32)
+
+                if let product = monthlyProduct {
+                    Text("\(product.displayPrice) / month")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                } else {
+                    Text("$1.99 / month")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                }
+
+                // Benefits
+                VStack(alignment: .leading, spacing: 18) {
+                    benefitRow(icon: "infinity", title: "Unlimited songs",
+                               text: "Get unlimited access to fresh, obscure tracks from Spotify and Apple Music.")
+                    benefitRow(icon: "sparkles", title: "Discover rare songs",
+                               text: "Find hidden gems before anyone else.")
+                    benefitRow(icon: "music.note", title: "Spotify + Apple Music",
+                               text: "Explore curated tracks from the most undiscovered artists.")
+                }
+                .padding(.top, 2)
+
+                Button {
+                    Task { await buyPro() }
+                } label: {
+                    if isPurchasing {
+                        ProgressView()
+                            .tint(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                    } else {
+                        HStack(spacing: 8) {
+                            Text("Start Premium")
+                                .font(.system(size: 18, weight: .bold))
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 16, weight: .bold))
+                        }
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                    }
+                }
+                .background(
+                    LinearGradient(
+                        colors: [Theme.Colors.gemGoldLight, Theme.Colors.gemGold],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .cornerRadius(16)
+                .disabled(isPurchasing)
+                .padding(.top, 14)
+
+                if let error = subscriptionManager.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                }
             }
+            .padding(20)
+            .background(Color.white.opacity(0.03))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .cornerRadius(24)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+
+            Spacer(minLength: 8)
+
+            Button("Maybe later") {
+                // Snooze the paywall for this session so the user can
+                // keep testing/using the app. Resets on next launch.
+                DiscoveryQuotaManager.shared.paywallSnoozed = true
+                dismiss()
+            }
+            .font(.system(size: 16))
+            .foregroundColor(Theme.Colors.textSecondary)
+            .padding(.bottom, 20)
         }
         .background(Theme.Colors.spotifyBlack.ignoresSafeArea())
         .task {
