@@ -20,97 +20,134 @@ struct PaywallView: View {
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer(minLength: 20)
+        ScrollView {
+            VStack(spacing: 20) {
+                // Rock hand — Chris's own emoji PNG, static, subtle sparkles
+                AnimatedRockHandView()
+                    .padding(.top, 24)
 
-            // Animated gem: slow rotation + twinkling sparkles
-            AnimatedRockHandView()
-
-            VStack(spacing: 8) {
-                Text("You've found 50 gems today!")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(Theme.Colors.textPrimary)
-                    .multilineTextAlignment(.center)
-
-                Text("Free discovery stops here — but the music doesn't have to. Go Pro and keep digging, all day, every day.")
-                    .font(.system(size: 16))
+                Text("RARE SONGS. REAL DISCOVERY.")
+                    .font(.system(size: 12, weight: .medium))
+                    .tracking(3)
                     .foregroundColor(Theme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
 
-            // Benefits — why unlimited is so much better
-            VStack(alignment: .leading, spacing: 12) {
-                benefitRow(icon: "infinity", text: "Never hit the wall — free stops at 50 songs a day, Pro never stops")
-                benefitRow(icon: "arrow.triangle.2.circlepath", text: "Fresh decks on every tap — 50+ new hidden jams, as many times as you want")
-                benefitRow(icon: "music.note.list", text: "The catalog is millions deep — Pro lets you explore all of it")
-            }
-            .padding(.horizontal, 40)
+                // Premium card
+                VStack(spacing: 16) {
+                    // PREMIUM pill
+                    Text("PREMIUM")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(2)
+                        .foregroundColor(Theme.Colors.gemGold)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(
+                            Capsule()
+                                .stroke(Theme.Colors.gemGold.opacity(0.5), lineWidth: 1)
+                        )
+                        .background(Theme.Colors.gemGold.opacity(0.12))
+                        .cornerRadius(20)
 
-            Spacer()
+                    VStack(spacing: 8) {
+                        Text("Unlock Premium")
+                            .font(.system(size: 30, weight: .bold))
+                            .foregroundColor(Theme.Colors.textPrimary)
 
-            // Price + CTA
-            VStack(spacing: 12) {
-                if let product = monthlyProduct {
-                    Text("\(product.displayPrice) / month")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(Theme.Colors.textPrimary)
-                } else {
-                    Text("$1.99 / month")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(Theme.Colors.textPrimary)
-                }
+                        Text("Go beyond the mainstream and discover music the world hasn't heard yet.")
+                            .font(.system(size: 16))
+                            .foregroundColor(Theme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+                    }
 
-                Button {
-                    Task { await buyPro() }
-                } label: {
-                    if isPurchasing {
-                        ProgressView()
-                            .tint(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
+                    if let product = monthlyProduct {
+                        Text("\(product.displayPrice) / month")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Theme.Colors.textPrimary)
                     } else {
-                        Text("Go Pro")
-                            .font(.system(size: 18, weight: .bold))
+                        Text("$1.99 / month")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Theme.Colors.textPrimary)
+                    }
+
+                    // Benefits
+                    VStack(alignment: .leading, spacing: 20) {
+                        benefitRow(icon: "infinity", title: "Unlimited songs",
+                                   text: "Get unlimited access to fresh, obscure tracks from Spotify and Apple Music.")
+                        benefitRow(icon: "sparkles", title: "Discover rare songs",
+                                   text: "Find hidden gems before anyone else.")
+                        benefitRow(icon: "music.note", title: "Spotify + Apple Music",
+                                   text: "Explore curated tracks from the most undiscovered artists.")
+                    }
+                    .padding(.top, 4)
+
+                    Button {
+                        Task { await buyPro() }
+                    } label: {
+                        if isPurchasing {
+                            ProgressView()
+                                .tint(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text("Start Premium")
+                                    .font(.system(size: 18, weight: .bold))
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 16, weight: .bold))
+                            }
                             .foregroundColor(.black)
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
+                        }
+                    }
+                    .background(
+                        LinearGradient(
+                            colors: [Theme.Colors.gemGoldLight, Theme.Colors.gemGold],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .cornerRadius(16)
+                    .disabled(isPurchasing)
+
+                    if let error = subscriptionManager.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
                     }
                 }
-                .background(Theme.Colors.gemGold)
-                .cornerRadius(16)
-                .disabled(isPurchasing)
-                .padding(.horizontal, 24)
+                .padding(24)
+                .background(Color.white.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .cornerRadius(24)
+                .padding(.horizontal, 20)
 
-                if let error = subscriptionManager.lastError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-
-                HStack(spacing: 24) {
-                    Button("Restore") {
-                        Task { await subscriptionManager.restore() }
-                    }
-                    Button("Not now") {
+                VStack(spacing: 12) {
+                    Button("Maybe later") {
                         // Snooze the paywall for this session so the user can
                         // keep testing/using the app. Resets on next launch.
                         DiscoveryQuotaManager.shared.paywallSnoozed = true
                         dismiss()
                     }
-                }
-                .font(.system(size: 15))
-                .foregroundColor(Theme.Colors.textSecondary)
-
-                Text("Cancel anytime in Settings. 50 free discoveries refresh daily.")
-                    .font(.caption2)
+                    .font(.system(size: 16))
                     .foregroundColor(Theme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+
+                    Button("Restore purchases") {
+                        Task { await subscriptionManager.restore() }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.Colors.textSecondary.opacity(0.7))
+
+                    Text("Cancel anytime in Settings. 50 free discoveries refresh daily.")
+                        .font(.caption2)
+                        .foregroundColor(Theme.Colors.textSecondary.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
         }
         .background(Theme.Colors.spotifyBlack.ignoresSafeArea())
         .task {
@@ -121,15 +158,24 @@ struct PaywallView: View {
         }
     }
 
-    private func benefitRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 18))
-                .foregroundColor(Theme.Colors.gemGold)
-                .frame(width: 28)
-            Text(text)
-                .font(.system(size: 16))
-                .foregroundColor(Theme.Colors.textPrimary)
+    private func benefitRow(icon: String, title: String, text: String) -> some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 52, height: 52)
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(Theme.Colors.gemGold)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textPrimary)
+                Text(text)
+                    .font(.system(size: 14))
+                    .foregroundColor(Theme.Colors.textSecondary)
+            }
         }
     }
 
