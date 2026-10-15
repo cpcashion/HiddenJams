@@ -150,13 +150,8 @@ struct PaywallView: View {
 
 // MARK: - Animated Gem
 
-/// Rock-hand charm spinning slowly around its vertical axis, with very subtle
-/// twinkling sparkles.
-///
-/// Build 55: the hand is now a real 3D model rendered live (`RockHand3DView`)
-/// instead of the build-54 PNG spun with `rotation3DEffect`, which looked like
-/// a flat card turning — edge-on it vanished to a sliver, and from behind it
-/// showed the same picture mirrored.
+/// Rock-hand emoji (Chris's own PNG), static, with very subtle twinkling
+/// sparkles. Build 56: Chris asked for the plain emoji with no rotation.
 private struct AnimatedRockHandView: View {
     @State private var sparkleOn = false
 
@@ -173,11 +168,13 @@ private struct AnimatedRockHandView: View {
                 .frame(width: 130, height: 130)
                 .blur(radius: 24)
 
-            // Rock hand: an original 3D model, rendered live so it turns with
-            // real depth and lighting. Falls back to the previous artwork if
-            // the model can't load.
-            RockHand3DView()
-                .frame(width: 140, height: 140)
+            // Rock-hand emoji — Chris's own PNG (the checkerboard baked into
+            // the JPEG he sent was stripped to transparency; the hand is his
+            // pixels, byte-for-byte). Static, no rotation, per Chris.
+            Image("RockHand")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 120, height: 120)
 
             // Very subtle sparkles
             ForEach(0..<sparkles.count, id: \.self) { i in
