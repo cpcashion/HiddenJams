@@ -157,7 +157,7 @@ private struct AnimatedRockHandView: View {
 
     // Few, small, gentle sparkles
     private let sparkles: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-        (30, -26, 9), (-28, -14, 7), (16, 28, 8)
+        (18, -16, 5), (-17, -8, 4), (10, 17, 5)
     ]
 
     var body: some View {
@@ -165,7 +165,7 @@ private struct AnimatedRockHandView: View {
             // Faint glow
             Circle()
                 .fill(Theme.Colors.gemGold.opacity(0.10))
-                .frame(width: 130, height: 130)
+                .frame(width: 78, height: 78)
                 .blur(radius: 24)
 
             // Rock-hand emoji — Chris's own PNG (the checkerboard baked into
@@ -174,7 +174,7 @@ private struct AnimatedRockHandView: View {
             Image("RockHand")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 120, height: 120)
+                .frame(width: 72, height: 72)
 
             // Very subtle sparkles
             ForEach(0..<sparkles.count, id: \.self) { i in
@@ -193,7 +193,7 @@ private struct AnimatedRockHandView: View {
                     )
             }
         }
-        .frame(width: 160, height: 160)
+        .frame(width: 110, height: 110)
         .onAppear {
             sparkleOn = true
         }
