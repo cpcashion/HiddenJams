@@ -157,7 +157,7 @@ private struct AnimatedRockHandView: View {
 
     // Few, small, gentle sparkles
     private let sparkles: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-        (18, -16, 5), (-17, -8, 4), (10, 17, 5)
+        (46, -32, 8), (-44, -20, 7), (22, 42, 8)
     ]
 
     var body: some View {
