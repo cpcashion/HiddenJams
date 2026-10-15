@@ -14,10 +14,6 @@ struct MainTabView: View {
     // Cache Spotify playlist IDs by name ("HJ - Rock", ...)
     @State private var playlistIdsByName: [String: String] = [:]
     
-    // Toast for swipe-save outcomes (e.g. Apple Music playlist saves)
-    @State private var toastMessage: String?
-    @State private var toastIsError: Bool = false
-    @State private var toastWorkItem: DispatchWorkItem?
     
     enum Tab {
         case home, player, profile
@@ -112,27 +108,6 @@ struct MainTabView: View {
                 .padding(.horizontal, Theme.Spacing.lg)
                 .padding(.bottom, 20)
             
-            // Toast overlay for swipe-save outcomes
-            if let toastMessage {
-                VStack {
-                    Spacer()
-                    Text(toastMessage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(
-                            (toastIsError ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
-                            .cornerRadius(12)
-                            .applyShadow(Theme.Shadows.medium)
-                        )
-                        .padding(.horizontal, 32)
-                        .padding(.bottom, 110)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                .zIndex(100)
-            }
         }
         .ignoresSafeArea()
         .sheet(isPresented: $discoveryEngine.showPaywall) {
@@ -141,43 +116,30 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - Toast
-    
-    /// Shows a transient toast. Success toasts confirm where the swiped track
-    /// went; error toasts give the real reason a save failed.
-    private func showToast(_ message: String, isError: Bool) {
-        toastWorkItem?.cancel()
-        withAnimation(.spring()) {
-            toastMessage = message
-            toastIsError = isError
-        }
-        let workItem = DispatchWorkItem {
-            withAnimation(.easeOut) { toastMessage = nil }
-        }
-        toastWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: workItem)
-    }
-    
     // MARK: - Save to Hidden Jams Playlist
     
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {
-        // Swipe-right routes into a per-genre playlist ("HJ - Rock",
-        // "HJ - Drum and Bass", ...) — the genre comes from the discovery
-        // session first, the artist's genres second, and falls back to the
-        // classic "Hidden Gems" playlist. Apple Music and Spotify each get
-        // their own same-named playlists; the toast names the destination so
-        // a swipe never "saves" silently.
+        // Swipe-right saves to the service the track was discovered from —
+        // and only that service. The deck is always single-source (a Spotify
+        // token means a Spotify deck, otherwise Apple Music), and the track
+        // is guaranteed to exist on its source service, so there is no
+        // cross-service track lookup to fail. (Build 57: stopped saving to
+        // both services when both are connected — the dual-save produced
+        // spurious red "not available" error toasts, now removed entirely.)
         let playlistName = GenrePlaylistRouter.playlistName(
             for: track, sessionGenres: currentSessionGenres())
-        if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName) {
-            // Success toast removed (build 50) — it was hidden behind the
-            // mini player and ugly. Only show errors.
-            if !success {
-                await MainActor.run { showToast(message, isError: true) }
+        let isAppleMusicTrack = track.track.spotifyId?.hasPrefix("itunes:") ?? false
+
+        if isAppleMusicTrack {
+            if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName),
+               !success {
+                print("⚠️ Apple Music save failed for '\(track.track.name)': \(message)")
             }
+            return
         }
 
-        // Without Spotify there's no Spotify playlist — save to the in-app collection
+        // Spotify-branch track -> Spotify playlist only. Without Spotify
+        // there's no Spotify playlist — save to the in-app collection.
         guard authManager.isAuthenticated else {
             await MainActor.run {
                 SavedGemsStore.shared.save(track)
@@ -239,9 +201,6 @@ struct MainTabView: View {
             }
         } catch {
             print("❌ Failed to save track to '\(playlistName)': \(error)")
-            await MainActor.run {
-                showToast("Couldn't save to \(playlistName): \(error.localizedDescription)", isError: true)
-            }
         }
     }
 
@@ -316,7 +275,17 @@ struct MainTabView: View {
             return existingPlaylist.id
         }
         
-        // Create new playlist if it doesn't exist
+        // Create new playlist if it doesn't exist. The user profile may not
+        // be loaded yet even when authenticated — fetch it on demand instead
+        // of failing with "User ID not available".
+        if authManager.user?.id == nil, let token = authManager.accessToken {
+            if let user = try? await apiService.getCurrentUser(token: token) {
+                await MainActor.run {
+                    authManager.user = user
+                    UserDataManager.shared.saveUserProfile(user)
+                }
+            }
+        }
         guard let userId = authManager.user?.id else {
             throw NSError(domain: "MainTabView", code: 1, userInfo: [NSLocalizedDescriptionKey: "User ID not available"])
         }

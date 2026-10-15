@@ -158,6 +158,16 @@ struct PlaylistPlayerView: View {
                 Text("Track \(audioPlayer.currentIndex + 1) of \(recommendations.count)")
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.textSecondary)
+                
+                // Deck source: swipe-right saves go to this service's
+                // "HJ - {Genre}" playlist (build 57: source-service-only saves).
+                Text(deckSourceName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(8)
             }
             
             Spacer()
@@ -170,6 +180,14 @@ struct PlaylistPlayerView: View {
         .padding(.horizontal, Theme.Spacing.lg)
         .padding(.top, 60)
         .padding(.bottom, Theme.Spacing.md)
+    }
+    
+    /// Which service this deck was discovered from. The deck is always
+    /// single-source: a Spotify token means Spotify tracks, otherwise the
+    /// Apple Music branch (tracks carry "itunes:" IDs).
+    private var deckSourceName: String {
+        let isAppleMusic = recommendations.first?.track.spotifyId?.hasPrefix("itunes:") ?? false
+        return isAppleMusic ? "Apple Music" : "Spotify"
     }
     
     // MARK: - Card Stack
