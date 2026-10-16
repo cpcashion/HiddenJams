@@ -205,19 +205,25 @@ struct GuaranteedDiscoveryTests {
         profile.genreWeights = ["jazz": 0.9, "alternative": 0.1]
 
         let discovery = EnhancedHiddenGemsDiscovery()
-        let tracks = try await discovery.itunesGenreFallbackCandidates(
-            profile: profile,
-            seedTracks: [],
-            maxCandidates: 10,
-            artistCheck: artistCheck(),
-            itunesService: stub
-        )
-
-        #expect(!tracks.isEmpty)
-        // Jazz (strongest genre, 0.9 weight) should dominate the results.
-        // Weighted sampling is random, so we check majority not exclusivity.
-        let jazzCount = tracks.filter { $0.name.hasPrefix("Jazz Song") }.count
-        #expect(jazzCount > tracks.count / 2, "jazz should dominate with 0.9 weight")
+        // The genre-order lottery is random per run, so assert the
+        // statistical property over several runs: jazz (0.9 weight) must
+        // dominate the large majority of them. (A single draw flakes ~10%.)
+        var jazzMajorityRuns = 0
+        let runs = 15
+        for _ in 0..<runs {
+            let tracks = try await discovery.itunesGenreFallbackCandidates(
+                profile: profile,
+                seedTracks: [],
+                maxCandidates: 10,
+                artistCheck: artistCheck(),
+                itunesService: stub
+            )
+            #expect(!tracks.isEmpty)
+            let jazzCount = tracks.filter { $0.name.hasPrefix("Jazz Song") }.count
+            if jazzCount > tracks.count / 2 { jazzMajorityRuns += 1 }
+        }
+        #expect(jazzMajorityRuns >= 12,
+                "jazz should dominate most runs with 0.9 weight (got \(jazzMajorityRuns)/\(runs))")
     }
 
     @Test func itunesFallbackUsesSessionGenresOverProfile() async throws {

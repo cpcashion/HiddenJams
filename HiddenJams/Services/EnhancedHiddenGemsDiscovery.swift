@@ -1222,23 +1222,25 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         // failed — counted to detect a full outage).
         enum CheckOutcome { case verified(VerifiedArtist), unknownArtist, serviceError }
         let outcomes = await withTaskGroup(
-            of: (ItunesPreviewService.ItunesTrack, CheckOutcome).self
+            of: (Int, ItunesPreviewService.ItunesTrack, CheckOutcome).self
         ) { group in
-            for itunes in gathered {
+            for (index, itunes) in gathered.enumerated() {
                 group.addTask {
                     do {
                         if let signal = try await check(itunes.artistName) {
-                            return (itunes, .verified(signal))
+                            return (index, itunes, .verified(signal))
                         }
-                        return (itunes, .unknownArtist)
+                        return (index, itunes, .unknownArtist)
                     } catch {
-                        return (itunes, .serviceError)
+                        return (index, itunes, .serviceError)
                     }
                 }
             }
-            var collected: [(ItunesPreviewService.ItunesTrack, CheckOutcome)] = []
+            var collected: [(Int, ItunesPreviewService.ItunesTrack, CheckOutcome)] = []
             for await result in group { collected.append(result) }
-            return collected
+            // Restore gather order: concurrent completion must not scramble
+            // the weighted genre ranking ("profile-ranked genres come first").
+            return collected.sorted { $0.0 < $1.0 }.map { ($0.1, $0.2) }
         }
         let attemptedChecks = outcomes.count
         let failedChecks = outcomes.filter {
