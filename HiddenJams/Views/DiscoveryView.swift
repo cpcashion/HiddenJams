@@ -237,7 +237,7 @@ struct TrackCard: View {
         } else {
             // Try preview first
             if let previewURL = gem.track.previewUrl {
-                audioPreview.playPreview(url: previewURL, trackId: gem.id)
+                audioPreview.playPreview(url: previewURL, trackId: gem.id, spotifyTrack: gem.track)
             } else {
                 // No preview - open in Spotify app
                 openInSpotify()

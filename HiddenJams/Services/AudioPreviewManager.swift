@@ -407,6 +407,9 @@ class AudioPreviewManager: ObservableObject {
         currentTrack = track
         hasPreview = true
 
+        // Log the play — this is the ground truth for "played in Hidden Jams".
+        PlayedTracksManager.shared.recordPlay(track.track)
+
         startPlayback(urlString: track.track.previewUrl!, trackId: track.id)
     }
 
@@ -540,7 +543,7 @@ class AudioPreviewManager: ObservableObject {
 
     /// Direct single-preview playback (used by track cards). Routes through
     /// the queue machinery so end-of-track advance and state stay consistent.
-    func playPreview(url: String, trackId: String) {
+    func playPreview(url: String, trackId: String, spotifyTrack: SpotifyTrack? = nil) {
         guard !url.isEmpty, URL(string: url) != nil else {
             print("⚠️ No playable preview URL for track \(trackId)")
             return
@@ -550,6 +553,9 @@ class AudioPreviewManager: ObservableObject {
         } else {
             // Not part of the current queue: just resume if it's the
             // current track, otherwise start it standalone.
+            if let spotifyTrack {
+                PlayedTracksManager.shared.recordPlay(spotifyTrack)
+            }
             startPlayback(urlString: url, trackId: trackId)
         }
     }
