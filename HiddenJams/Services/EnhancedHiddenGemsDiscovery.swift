@@ -190,18 +190,40 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         func norm(_ s: String) -> String {
             s.lowercased().replacingOccurrences(of: "-", with: " ").trimmingCharacters(in: .whitespaces)
         }
+        // Significant words: length >= 4, not generic filler. Used for
+        // word-overlap matching when the selected genre has no family entry
+        // (the family map only covers 8 main genres; the picker has dozens).
+        let genericWords: Set<String> = ["rock", "pop", "music", "band", "sound", "wave"]
+        func significantWords(_ s: String) -> Set<String> {
+            Set(s.split(separator: " ").map(String.init).filter { $0.count >= 4 && !genericWords.contains($0) })
+        }
         let lowered = artistGenres.map(norm)
         guard !lowered.isEmpty else { return false }
         for selected in selectedGenres {
             let sel = norm(normalizeGenreName(selected))
             let family = genreFamilies[sel]
                 ?? genreFamilies[sel.replacingOccurrences(of: " ", with: "-")]
-                ?? [sel]
             for artistGenre in lowered {
                 if artistGenre.contains(sel) || sel.contains(artistGenre) { return true }
-                for member in family {
-                    let m = norm(member)
-                    if artistGenre.contains(m) || m.contains(artistGenre) { return true }
+                if let family {
+                    for member in family {
+                        let m = norm(member)
+                        if artistGenre.contains(m) || m.contains(artistGenre) { return true }
+                    }
+                } else {
+                    // No family entry: word-overlap fallback. "neo-psychedelic"
+                    // matches "psychedelic rock" (shared "psychedelic");
+                    // "synthpop" matches "synth pop" (substring "synth").
+                    // Without this, every subgenre outside the 8 mapped
+                    // families was rejected outright.
+                    let selWords = significantWords(sel)
+                    let artistWords = significantWords(artistGenre)
+                    if !selWords.isEmpty && !selWords.isDisjoint(with: artistWords) { return true }
+                    for sw in selWords where sw.count >= 4 {
+                        for aw in artistWords where aw.count >= 4 {
+                            if aw.contains(sw) || sw.contains(aw) { return true }
+                        }
+                    }
                 }
             }
         }
@@ -556,6 +578,42 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     filteredCandidates.append(contentsOf: refiltered)
                     print("[refill] pass \(refillPass): +\(refiltered.count) (total \(filteredCandidates.count))")
                     telemetry["refill_\(refillPass)"] = refiltered.count
+                }
+            }
+
+            // DEEP-SEARCH GUARANTEE: 50 new songs every session. If the
+            // branches + long-tail refill still left us short, run fresh
+            // genre-search passes with new randomization (different year
+            // slices, offsets, shuffled genre order). Each pass explores
+            // different catalog windows, so sessions never repeat. The
+            // popularity/follower contract is NEVER relaxed -- we just look
+            // harder, in more places.
+            if filteredCandidates.count < 50, let deepToken = token {
+                var deepPass = 0
+                while filteredCandidates.count < 50 && deepPass < 3 {
+                    deepPass += 1
+                    print("[deep] pass \(deepPass): \(filteredCandidates.count)/50, fresh search")
+                    await updateProgress("Searching deeper for hidden gems...")
+                    let deepCandidates = try await discoverViaSpotifyHipster(
+                        profile: profile,
+                        activeGenres: activeGenres.shuffled(),
+                        token: deepToken
+                    )
+                    guard !deepCandidates.isEmpty else {
+                        print("[deep] pass \(deepPass): no candidates, stopping")
+                        break
+                    }
+                    let existingIds = Set(filteredCandidates.map { $0.id })
+                    let refiltered = try await applyFastFilters(
+                        tracks: deepCandidates.filter { !existingIds.contains($0.id) },
+                        selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
+                        activeGenres: activeGenres,
+                        token: deepToken,
+                        ignoringHistory: true
+                    )
+                    filteredCandidates.append(contentsOf: refiltered)
+                    print("[deep] pass \(deepPass): +\(refiltered.count) (total \(filteredCandidates.count))")
+                    telemetry["deep_\(deepPass)"] = refiltered.count
                 }
             }
 
@@ -1599,6 +1657,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
 
         for genre in searchGenres {
+            var genreHits = 0
             let slices = yearSlices(count: 4)
             for (index, slice) in slices.enumerated() {
                 do {
@@ -1616,11 +1675,38 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     )
 
                     candidates.append(contentsOf: tracks)
+                    genreHits += tracks.count
                     try await Task.sleep(nanoseconds: 150_000_000) // 0.15s
 
                 } catch {
                     print("⚠️ Search error for \(genre) \(slice): \(error)")
                     continue
+                }
+            }
+            // FALLBACK: if the quoted genre: operator returned nothing,
+            // Spotify's taxonomy may not include this exact string. Try
+            // unquoted, then free-text, before giving up on the genre.
+            if genreHits == 0 {
+                let fallbacks = ["genre:\(genre)", genre]
+                for fb in fallbacks {
+                    do {
+                        print("   🔄 Fallback search: '\(fb)'")
+                        let tracks = try await spotifyAPI.searchTracks(
+                            query: fb,
+                            limit: 50,
+                            offset: Int.random(in: 0...200),
+                            market: "from_token",
+                            token: token
+                        )
+                        if !tracks.isEmpty {
+                            print("   ✅ Fallback '\(fb)' found \(tracks.count)")
+                            candidates.append(contentsOf: tracks)
+                            break
+                        }
+                    } catch {
+                        print("⚠️ Fallback search error for '\(fb)': \(error)")
+                        continue
+                    }
                 }
             }
         }

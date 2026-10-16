@@ -19,7 +19,6 @@ struct ProfileView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @StateObject private var userProfile = UserProfileManager.shared
     @StateObject private var subscriptions = SubscriptionManager.shared
-    @ObservedObject private var playedTracksManager = PlayedTracksManager.shared
 
     @State private var selectedTimeRange: TimeRange = .longTerm
     @State private var hasLoadedData = false
@@ -43,7 +42,6 @@ struct ProfileView: View {
                         }
                         if authManager.isAuthenticated {
                             statsSection
-                            playedInAppSection
                             recentlyPlayedSection
                             topTracksSection
                             topArtistsSection
@@ -56,7 +54,6 @@ struct ProfileView: View {
                         }
                         appearanceSection
                         logoutSection
-                        diagnosticsSection
                         Spacer(minLength: 100)                    }
                     .padding(.horizontal, 20)
                     .padding(.top, 60) // Account for status bar
@@ -236,100 +233,6 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
     
-    // MARK: - Played in Hidden Jams
-
-    /// Ground truth for what the user actually played inside this app
-    /// (not just what was served). Logged at every playback entry point.
-    private var playedInAppSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Played in Hidden Jams")
-
-            if playedTracksManager.playedTracks.isEmpty {
-                Text("Nothing played here yet — hit play on a track and it'll show up.")
-                    .font(.subheadline)
-                    .foregroundColor(Theme.Colors.textSecondary)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(playedTracksManager.playedTracks.prefix(5)) { play in
-                        playedTrackRow(play)
-                    }
-                }
-            }
-        }
-    }
-
-    private func playedTrackRow(_ play: PlayedTrack) -> some View {
-        HStack(spacing: 12) {
-            if let urlString = play.artworkURL, let url = URL(string: urlString) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                }
-                .frame(width: 48, height: 48)
-                .cornerRadius(8)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(play.name)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(Theme.Colors.textPrimary)
-                    .lineLimit(1)
-                Text(play.artistName)
-                    .font(.caption)
-                    .foregroundColor(Theme.Colors.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Text(play.playedAt, style: .relative)
-                .font(.caption)
-                .foregroundColor(Theme.Colors.textSecondary)
-        }
-    }
-
-    // MARK: - Diagnostics (hidden from main UX, one tap away)
-
-    /// Skipped tracks live here — collapsed by default, out of the main
-    /// flow, but accessible for debugging what the user rejected.
-    private var diagnosticsSection: some View {
-        DisclosureGroup("Diagnostics") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Skipped tracks")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(Theme.Colors.textPrimary)
-
-                if playedTracksManager.skippedTracks.isEmpty {
-                    Text("No skips yet.")
-                        .font(.caption)
-                        .foregroundColor(Theme.Colors.textSecondary)
-                } else {
-                    ForEach(playedTracksManager.recentSkips(limit: 20)) { skip in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(skip.name)
-                                    .font(.subheadline)
-                                    .foregroundColor(Theme.Colors.textPrimary)
-                                    .lineLimit(1)
-                                Text(skip.artistName)
-                                    .font(.caption)
-                                    .foregroundColor(Theme.Colors.textSecondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Text(skip.skippedAt, style: .relative)
-                                .font(.caption)
-                                .foregroundColor(Theme.Colors.textSecondary)
-                        }
-                    }
-                }
-            }
-            .padding(.top, 8)
-        }
-        .font(.subheadline)
-        .foregroundColor(Theme.Colors.textSecondary)
-    }
-
     // MARK: - Recently Played
 
     private var recentlyPlayedSection: some View {
