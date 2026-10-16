@@ -43,8 +43,8 @@ final class LongTailDiscoveryService {
         sessionGenres: [String],
         token: String,
         popularityThreshold: Double,
-        maxArtists: Int = 40,
-        maxTracks: Int = 160,
+        maxArtists: Int = 60,
+        maxTracks: Int = 200,
         updateProgress: @escaping (String) async -> Void
     ) async -> [SpotifyTrack] {
         var explored = loadExplored()
@@ -100,6 +100,28 @@ final class LongTailDiscoveryService {
             if discovered.count >= maxArtists { break }
         }
         print("🌊 Long-tail: discovered \(discovered.count) NEW artists")
+
+        // 2b. Spotify related-artists graph (parallel source -- survives
+        // Last.fm outages, and every result is a real Spotify artist, so
+        // resolution in step 4 can't miss). Related artists of an obscure
+        // seed are typically obscure themselves.
+        for seed in seeds {
+            do {
+                let found = try await spotifyAPI.searchArtist(name: seed, token: token)
+                guard let seedId = found.first?.spotifyId else { continue }
+                let related = try await spotifyAPI.getRelatedArtists(artistId: seedId, token: token)
+                for artist in related {
+                    let key = artist.name.lowercased()
+                    guard !key.isEmpty, !explored.contains(key) else { continue }
+                    explored.insert(key)
+                    discovered.append(artist.name)
+                }
+            } catch {
+                print("[long-tail] Spotify related-artists failed for '\(seed)': \(error)")
+            }
+            if discovered.count >= maxArtists { break }
+        }
+        print("[long-tail] after Spotify graph, \(discovered.count) new artists")
 
         // 3. Depth charge: if level 1 was thin, walk similar-of-similar.
         if discovered.count < 15 {

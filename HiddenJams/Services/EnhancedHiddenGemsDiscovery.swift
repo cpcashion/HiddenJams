@@ -442,150 +442,44 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             telemetry["filtered"] = filteredCandidates.count
             telemetry["total_candidates"] = allCandidates.count
 
-            // POOL RESCUE: If filters starved the pool (< 10 tracks), do a
-            // second pass with ONLY history + basic hygiene (has preview,
-            // not compilation). Popularity, followers, and genre validation
-            // become scoring signals, not hard gates. This guarantees volume —
-            // "different track every time" beats "perfectly filtered."
-            if filteredCandidates.count < 50 && !allCandidates.isEmpty {
-                print("🆘 Pool rescue: only \(filteredCandidates.count) survived filters, re-running lenient")
-                let rescued = await applyLenientFilters(
-                    tracks: allCandidates,
-                    selectedGenres: validationGenres.isEmpty ? nil : validationGenres
-                )
-                // Only use rescued tracks that aren't already in the filtered set
-                let existingIds = Set(filteredCandidates.map { $0.id })
-                let fresh = rescued.filter { !existingIds.contains($0.id) }
-                filteredCandidates.append(contentsOf: fresh)
-                print("🆘 Pool rescue: +\(fresh.count) tracks (total \(filteredCandidates.count))")
-                telemetry["rescued"] = fresh.count
-            }
-            
-            // PROGRESSIVE RELAXATION: If we don't have enough tracks, relax thresholds.
-            // Uses LOCAL copies — the instance thresholds must not ratchet up
-            // permanently across sessions (that corrupted the slider).
-            let minimumRequired = 50
-            var relaxationAttempts = 0
-            let maxRelaxationAttempts = 2
-            var relaxedPopularity = popularityThreshold
-            var relaxedFollowers = followerThreshold
-
-            while filteredCandidates.count < minimumRequired && relaxationAttempts < maxRelaxationAttempts {
-                relaxationAttempts += 1
-
-                // Double the thresholds for each relaxation attempt.
-                // ADDITIVE floor (+15) ensures progress even when the slider
-                // is all the way left (0 * 2 = 0 would never relax).
-                relaxedPopularity = min(max(relaxedPopularity * 2, relaxedPopularity + 15), 80)
-                relaxedFollowers = relaxedFollowers * 2            // Double followers
-
-                print("⚠️ Only \(filteredCandidates.count) tracks passed filters (need \(minimumRequired))")
-                print("🔄 Relaxation attempt \(relaxationAttempts): popularity<\(relaxedPopularity), followers<\(relaxedFollowers/1000)k")
-
-                // Re-filter with relaxed thresholds (via temporary override)
-                let savedPopularity = popularityThreshold
-                let savedFollowers = followerThreshold
-                popularityThreshold = relaxedPopularity
-                followerThreshold = relaxedFollowers
-                filteredCandidates = try await applyFastFilters(
-                    tracks: allCandidates,
-                    selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
-                    activeGenres: activeGenres,
-                    token: token,
-                    ignoringHistory: true
-                )
-                popularityThreshold = savedPopularity
-                followerThreshold = savedFollowers
-                print("✨ After relaxation: \(filteredCandidates.count) hidden gems")
-            }
-
-            // NO history-ignoring refill. A previous version refilled small
-            // batches from previously-served tracks ("there should always be
-            // music") — that is exactly what caused "the same songs over and
-            // over." A small batch of NEW tracks is always better than a big
-            // batch of repeats. If the batch is truly empty, the honest
-            // error message below explains why.
-
-            // TRUE LAST RESORT: if filters ate everything, walk FURTHER into
-            // the tail. The frontier chains forward into unexplored territory,
-            // so this finds NEW artists — never repeats, and almost never
-            // empty while the graph has unexplored artists. Popularity is
-            // relaxed (fresh beats obscure here); history is NOT.
-            // (Spotify only — the walk needs a token.)
-            if filteredCandidates.isEmpty, let spotifyToken = token {
-                print("🆘 Batch empty after relaxation — emergency deep walk")
-                await updateProgress("Digging deeper for fresh sounds...")
-                let emergencyCandidates = await longTailDiscovery.discover(
-                    profile: profile,
-                    sessionGenres: Array(selectedGenres ?? []),
-                    token: spotifyToken,
-                    popularityThreshold: 70,
-                    maxArtists: 30,
-                    maxTracks: 80,
-                    updateProgress: { msg in await self.updateProgress(msg) }
-                )
-                print("🆘 Emergency walk: \(emergencyCandidates.count) candidates")
-                telemetry["emergency"] = emergencyCandidates.count
-                if !emergencyCandidates.isEmpty {
-                    filteredCandidates = try await applyFastFilters(
-                        tracks: emergencyCandidates,
-                        selectedGenres: nil,
+            // THRESHOLD-HONORING REFILL: if the strict filter left us short
+            // of 50, walk DEEPER into the tail -- additional passes over new
+            // territory (the walk persists explored state, so every pass
+            // chains forward into unvisited artists). The slider's popularity
+            // and follower thresholds are NEVER relaxed: they are a contract
+            // with the user, not a starting bid. Genre breadth may widen;
+            // popularity may not.
+            if filteredCandidates.count < 50, let walkToken = token {
+                var refillPass = 0
+                while filteredCandidates.count < 50 && refillPass < 2 {
+                    refillPass += 1
+                    print("[refill] pass \(refillPass): \(filteredCandidates.count) tracks, walking deeper")
+                    await updateProgress("Digging deeper for rare gems...")
+                    let refillCandidates = await longTailDiscovery.discover(
+                        profile: profile,
+                        sessionGenres: Array(selectedGenres ?? []),
+                        token: walkToken,
+                        popularityThreshold: Double(popularityThreshold),
+                        maxArtists: 60,
+                        maxTracks: 120,
+                        updateProgress: { msg in await self.updateProgress(msg) }
+                    )
+                    guard !refillCandidates.isEmpty else {
+                        print("[refill] pass \(refillPass): walk came back empty, stopping")
+                        break
+                    }
+                    let existingIds = Set(filteredCandidates.map { $0.id })
+                    let refiltered = try await applyFastFilters(
+                        tracks: refillCandidates.filter { !existingIds.contains($0.id) },
+                        selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                         activeGenres: activeGenres,
                         token: token,
-                    ignoringHistory: true
+                        ignoringHistory: true
                     )
-                    print("🆘 After emergency filter: \(filteredCandidates.count) hidden gems")
+                    filteredCandidates.append(contentsOf: refiltered)
+                    print("[refill] pass \(refillPass): +\(refiltered.count) (total \(filteredCandidates.count))")
+                    telemetry["refill_\(refillPass)"] = refiltered.count
                 }
-            }
-
-            // ABSOLUTE LAST RESORT — the 100% music guarantee.
-            // If we reach here, all branches + relaxation + emergency walk
-            // came back empty. This MUST NOT happen while the Spotify API
-            // is reachable: do plain genre searches with NO popularity
-            // filter and NO strict genre validation — only "not in history".
-            // Spotify search essentially always returns results, so this
-            // cannot come back empty unless the API itself is down (a true
-            // error, not an empty result).
-            if filteredCandidates.isEmpty, let spotifyToken2 = token {
-                print("🆘🆘 ABSOLUTE LAST RESORT: unfiltered search")
-                await updateProgress("Finding you something fresh...")
-                let searchGenres = activeGenres.isEmpty ? ["pop"] : activeGenres
-                var lastResortPool: [SpotifyTrack] = []
-                // Try up to 3 genre searches, broadening as we go.
-                for genre in searchGenres.shuffled().prefix(3) {
-                    do {
-                        let tracks = try await spotifyAPI.searchTracks(
-                            query: "genre:\"\(genre)\"",
-                            limit: 50,
-                            token: spotifyToken2
-                        )
-                        lastResortPool.append(contentsOf: tracks)
-                    } catch {
-                        print("⚠️ Last-resort search failed for '\(genre)': \(error)")
-                        continue
-                    }
-                    if lastResortPool.count >= 50 { break }
-                }
-                // If genre searches failed, one broad search with no genre.
-                if lastResortPool.isEmpty {
-                    do {
-                        let tracks = try await spotifyAPI.searchTracks(
-                            query: "year:2020-2026",
-                            limit: 50,
-                            token: spotifyToken2
-                        )
-                        lastResortPool.append(contentsOf: tracks)
-                    } catch {
-                        print("⚠️ Last-resort broad search failed: \(error)")
-                    }
-                }
-                let history2 = DiscoveryHistoryManager.shared
-                var seen2 = Set<String>()
-                filteredCandidates = lastResortPool.filter {
-                    !history2.isSeen(trackId: $0.id) && seen2.insert($0.id).inserted
-                }
-                print("🆘🆘 Last resort yielded \(filteredCandidates.count) tracks")
-                telemetry["last_resort"] = filteredCandidates.count
             }
 
 
@@ -657,7 +551,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 )
             }
             
-            let topRecommendations = Array(finalRecommendations.shuffled().prefix(count))
+            // Rarest-first: the deck leads with the most obscure, best-matching
+            // tracks. (Was a pure shuffle -- which is how a Weezer track
+            // landed at #1 of a "deep cuts" deck.) Session variety comes
+            // from the walk advancing into new territory each run, not
+            // from randomizing the order.
+            let topRecommendations = Array(finalRecommendations.sorted { $0.totalScore > $1.totalScore }.prefix(count))
 
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
 
@@ -1978,30 +1877,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Lenient filters for pool rescue: ONLY history + basic hygiene.
     /// No popularity, follower, or genre hard gates — those become scoring
     /// signals. This guarantees volume when the strict filters starve the pool.
-    internal func applyLenientFilters(
-        tracks: [SpotifyTrack],
-        selectedGenres: Set<String>?
-    ) async -> [SpotifyTrack] {
-        let history = DiscoveryHistoryManager.shared
-        return tracks.filter { track in
-            // Not in user's library
-            guard !knownTrackIds.contains(track.id) else { return false }
-            // Not seen this session
-            guard !sessionSeenTracks.contains(track.id) else { return false }
-            // Not in 7-day history
-            guard !history.isSeen(trackId: track.id) else { return false }
-            // Artist not seen this session
-            if let artistId = track.artists.first?.id {
-                guard !sessionSeenArtists.contains(artistId) else { return false }
-            }
-            // Not a compilation
-            guard !isCompilationAlbum(track.album.name) else { return false }
-            // Must have (or be able to get) a preview — without audio it's not a discovery
-            // Note: iTunes tracks already carry previews; Spotify tracks get them in enrichment
-            return true
-        }.shuffled()  // Shuffle so rescue picks are varied, not ordered
-    }
-
     /// - Parameter ignoringHistory: when true, the persistent 7-day seen
     ///   track/artist history is ignored (the user's own library and this
     ///   session's seen sets still apply). Used as a last resort so discovery

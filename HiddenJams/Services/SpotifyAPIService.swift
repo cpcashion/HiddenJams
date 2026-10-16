@@ -273,6 +273,21 @@ class SpotifyAPIService: ObservableObject {
         return response.artists.items
     }
     
+    /// Get artists related to the given artist (Spotify's own similarity graph).
+    /// Unlike search, this is NOT popularity-ordered — related artists of an
+    /// obscure seed are typically obscure themselves, which makes it a
+    /// long-tail-safe graph source for discovery.
+    func getRelatedArtists(artistId: String, token: String) async throws -> [SpotifyArtist] {
+        guard let url = URL(string: "\(baseURL)/artists/\(artistId)/related-artists") else {
+            throw APIError.invalidResponse
+        }
+        struct RelatedArtistsResponse: Codable {
+            let artists: [SpotifyArtist]
+        }
+        let response: RelatedArtistsResponse = try await makeRequest(url: url, token: token)
+        return response.artists
+    }
+
     /// Search for a track by name and artist (for cross-referencing with external APIs)
     func searchTrack(name: String, artist: String, token: String) async throws -> [SpotifyTrack] {
         let query = "track:\(name) artist:\(artist)"
