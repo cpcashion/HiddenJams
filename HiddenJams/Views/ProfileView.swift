@@ -56,6 +56,7 @@ struct ProfileView: View {
                         }
                         appearanceSection
                         logoutSection
+                        diagnosticsSection
                         Spacer(minLength: 100)                    }
                     .padding(.horizontal, 20)
                     .padding(.top, 60) // Account for status bar
@@ -284,6 +285,49 @@ struct ProfileView: View {
                 .font(.caption)
                 .foregroundColor(Theme.Colors.textSecondary)
         }
+    }
+
+    // MARK: - Diagnostics (hidden from main UX, one tap away)
+
+    /// Skipped tracks live here — collapsed by default, out of the main
+    /// flow, but accessible for debugging what the user rejected.
+    private var diagnosticsSection: some View {
+        DisclosureGroup("Diagnostics") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Skipped tracks")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(Theme.Colors.textPrimary)
+
+                if playedTracksManager.skippedTracks.isEmpty {
+                    Text("No skips yet.")
+                        .font(.caption)
+                        .foregroundColor(Theme.Colors.textSecondary)
+                } else {
+                    ForEach(playedTracksManager.recentSkips(limit: 20)) { skip in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(skip.name)
+                                    .font(.subheadline)
+                                    .foregroundColor(Theme.Colors.textPrimary)
+                                    .lineLimit(1)
+                                Text(skip.artistName)
+                                    .font(.caption)
+                                    .foregroundColor(Theme.Colors.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text(skip.skippedAt, style: .relative)
+                                .font(.caption)
+                                .foregroundColor(Theme.Colors.textSecondary)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+        .font(.subheadline)
+        .foregroundColor(Theme.Colors.textSecondary)
     }
 
     // MARK: - Recently Played

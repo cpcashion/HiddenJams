@@ -444,6 +444,10 @@ struct PlaylistPlayerView: View {
             if direction == .right, let track = currentTrack {
                 savedTracks.insert(track.id)
                 onSave(track)
+            } else if direction == .left, let track = currentTrack {
+                // Swipe left = skip: log the negative signal (hidden from
+                // main UX, visible in Profile > Diagnostics).
+                PlayedTracksManager.shared.recordSkip(track)
             }
             
             // Check if there's a next track

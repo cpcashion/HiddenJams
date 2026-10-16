@@ -65,7 +65,6 @@ struct LoginView: View {
                     connectButton(
                         title: sourceManager.spotifyConnected ? "Spotify Connected ✓" : "Connect with Spotify",
                         icon: "music.note.list",
-                        gradient: Theme.Colors.primaryGradient,
                         disabled: sourceManager.spotifyConnected,
                         action: {
                             withAnimation(.spring()) {
@@ -78,11 +77,6 @@ struct LoginView: View {
                     connectButton(
                         title: sourceManager.appleMusicConnected ? "Apple Music Connected ✓" : "Connect with Apple Music",
                         icon: "apple.logo",
-                        gradient: LinearGradient(
-                            colors: [Color(hex: "FA243C"), Color(hex: "FC5C72")],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
                         disabled: sourceManager.appleMusicConnected,
                         action: { connectAppleMusic() }
                     )
@@ -133,7 +127,6 @@ struct LoginView: View {
     private func connectButton(
         title: String,
         icon: String,
-        gradient: LinearGradient,
         disabled: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -145,12 +138,15 @@ struct LoginView: View {
                 Text(title)
                     .font(Theme.Typography.headline)
             }
-            .foregroundColor(Theme.Colors.buttonText)
+            .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.md)
-            .background(disabled ? AnyShapeStyle(Color.gray.opacity(0.4)) : AnyShapeStyle(gradient))
-            .cornerRadius(Theme.CornerRadius.lg)
-            .applyShadow(Theme.Shadows.medium)
+            .background(Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
+                    .stroke(Color.white, lineWidth: 1.5)
+            )
+            .opacity(disabled ? 0.5 : 1.0)
         }
         .disabled(disabled)
     }

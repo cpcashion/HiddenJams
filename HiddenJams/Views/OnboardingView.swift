@@ -81,9 +81,12 @@ struct OnboardingView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(AnyShapeStyle(Theme.Colors.primaryGradient))
-                            .cornerRadius(12)
-                            .shadow(color: Theme.Colors.spotifyGreen.opacity(0.3), radius: 10, x: 0, y: 5)
+                            .background(Color.clear)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white, lineWidth: 1.5)
+                            )
+                            .opacity(sourceManager.spotifyConnected ? 0.5 : 1.0)
                         }
                         .disabled(sourceManager.spotifyConnected)
 
@@ -96,15 +99,12 @@ struct OnboardingView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [Color(hex: "FA243C"), Color(hex: "FC5C72")],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            ))
-                            .cornerRadius(12)
-                            .shadow(color: Color(hex: "FA243C").opacity(0.3), radius: 10, x: 0, y: 5)
+                            .background(Color.clear)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white, lineWidth: 1.5)
+                            )
+                            .opacity(sourceManager.appleMusicConnected ? 0.5 : 1.0)
                         }
                         .disabled(sourceManager.appleMusicConnected)
 
