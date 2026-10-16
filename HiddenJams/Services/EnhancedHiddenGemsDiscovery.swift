@@ -164,6 +164,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 "folk punk", "progressive folk", "psychedelic folk", "world folk"
             ],
             
+            // Indie family: selecting "Indie" must play indie -- not trance,
+            // not rock. Substring matching catches "indie garage rock" etc.
+            "indie": [
+                "indie", "indie rock", "indie pop", "indie folk", "indietronica",
+                "indie dance", "indie punk", "alternative", "alternative rock",
+                "alternative pop"
+            ],
+
             // DnB family - all variants map to the same set!
             "drum and bass": electronicFamily,
             "drum-and-bass": electronicFamily,
@@ -172,6 +180,54 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         ]
     }()
     
+    /// Positive genre gate: in strict mode (explicit genre selection), an
+    /// artist's genres must match at least one selected genre's family.
+    /// This is what makes "Indie" play indie -- the old code only had a
+    /// blacklist (Christmas, kids' music...), so trance sailed into indie
+    /// decks whenever Spotify returned empty genre metadata.
+    func artistMatchesSelectedGenres(_ artistGenres: [String], selectedGenres: Set<String>) -> Bool {
+        // Hyphen/space-insensitive ("hip-hop" == "hip hop").
+        func norm(_ s: String) -> String {
+            s.lowercased().replacingOccurrences(of: "-", with: " ").trimmingCharacters(in: .whitespaces)
+        }
+        let lowered = artistGenres.map(norm)
+        guard !lowered.isEmpty else { return false }
+        for selected in selectedGenres {
+            let sel = norm(normalizeGenreName(selected))
+            let family = genreFamilies[sel]
+                ?? genreFamilies[sel.replacingOccurrences(of: " ", with: "-")]
+                ?? [sel]
+            for artistGenre in lowered {
+                if artistGenre.contains(sel) || sel.contains(artistGenre) { return true }
+                for member in family {
+                    let m = norm(member)
+                    if artistGenre.contains(m) || m.contains(artistGenre) { return true }
+                }
+            }
+        }
+        return false
+    }
+    
+    /// Session cache for Last.fm genre tags (artist name -> tags).
+    /// Keeps the positive genre gate from re-querying the same artist.
+    private var lastFmTagCache: [String: [String]] = [:]
+
+    /// Last.fm crowd tags for an artist, cached per session. Fails soft --
+    /// an empty result means "unverifiable", which the genre gate rejects.
+    func lastFmGenreTags(for artistName: String) async -> [String] {
+        let key = artistName.lowercased()
+        if let cached = lastFmTagCache[key] { return cached }
+        do {
+            let info = try await lastFmService.getArtistInfo(name: artistName)
+            let tags = info.tagNames
+            lastFmTagCache[key] = tags
+            return tags
+        } catch {
+            lastFmTagCache[key] = []
+            return []
+        }
+    }
+
     private var knownTrackIds: Set<String> = []
     private var userLibrary: [SpotifyTrack] = []  // For AI explanations
     
@@ -306,6 +362,19 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // carries its own diagnosis.
             var telemetry: [String: Int] = [:]
 
+            // Strict genre gate for the long-tail walk (Branch F + refill).
+            // When the user picked genres explicitly, walked artists must
+            // verifiably belong -- indie seeds wandering into trance get
+            // stopped in the walk, not in the deck. (Open mode and DnB: no gate.)
+            let walkStrict = (selectedGenres != nil && !selectedGenres!.isEmpty) && !isDnBMode
+            let walkGenreSet: Set<String> = walkStrict ? Set(selectedGenres!) : []
+            let walkGenreCheck: (([String]) -> Bool)? = walkStrict
+                ? { [weak self] genres in
+                    guard let self else { return true }
+                    return self.artistMatchesSelectedGenres(genres, selectedGenres: walkGenreSet)
+                }
+                : nil
+
             if let spotifyToken = token {
                 // BRANCH A: Taste-seeded recommendations (artist seeds sampled
                 // per-session from the user's profile — personal, not the old
@@ -377,11 +446,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 // similar-artist graph reaches the obscure depths. Seeds are
                 // sampled per-session from the user's taste, so two users
                 // walk different graphs and get different tracks.
+                //
+                // The walk carries the strict genre gate: when the user picked
+                // genres explicitly, walked artists must verifiably belong --
+                // indie seeds wandering into trance get stopped here, not in
+                // the deck. (Open mode and DnB mode: no gate.)
+                // (walkGenreCheck defined above -- strict genre gate for the walk)
                 let longTailCandidates = await longTailDiscovery.discover(
                     profile: profile,
                     sessionGenres: Array(selectedGenres ?? []),
                     token: spotifyToken,
                     popularityThreshold: Double(popularityThreshold),
+                    genreCheck: walkGenreCheck,
                     updateProgress: { msg in await self.updateProgress(msg) }
                 )
                 print("✅ Long-tail walk: Found \(longTailCandidates.count) candidates")
@@ -462,6 +538,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         popularityThreshold: Double(popularityThreshold),
                         maxArtists: 60,
                         maxTracks: 120,
+                        genreCheck: walkGenreCheck,
                         updateProgress: { msg in await self.updateProgress(msg) }
                     )
                     guard !refillCandidates.isEmpty else {
@@ -2069,26 +2146,23 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 }
             }
             
-            // CHECK 2: Genre Validation (FULLY RELAXED - Fix #6)
-            // We now FULLY TRUST Spotify's genre search results!
-            // If a track came from genre:"folk" search, it's folk-adjacent enough.
-            // Only reject if artist explicitly belongs to a HARD-BLACKLIST genre
-            // (e.g., death metal artist accidentally appearing in folk results)
+            // CHECK 2: Positive genre gate (strict mode only).
+            // When the user explicitly picked genres, the artist must VERIFIABLY
+            // belong to the selection -- "Indie" plays indie, not trance. Trust
+            // chain: Spotify artist genres first; if Spotify has none (common
+            // for obscure/EDM artists), Last.fm crowd tags; if neither verifies,
+            // the artist is out. Unverifiable is not a pass.
             if strictMode {
-                if let genres = artist.genres, !genres.isEmpty {
-                    // Only check for "hard blacklist" - extreme genres that NEVER belong
-                    let hardBlacklist: Set<String> = ["death metal", "black metal", "grindcore", "screamo", "deathcore"]
-                    let hasHardBlacklist = genres.contains { g in
-                        hardBlacklist.contains { g.lowercased().contains($0) }
-                    }
-                    
-                    if hasHardBlacklist {
-                        print("   🔒 Hard Rejected \(artist.name): has blacklisted genre in \(genres)")
-                        continue
-                    }
-                    // Otherwise, ALLOW - trust the genre search completely!
+                let spotifyGenres = artist.genres ?? []
+                var genreOK = artistMatchesSelectedGenres(spotifyGenres, selectedGenres: allowedKeywords)
+                if !genreOK && spotifyGenres.isEmpty {
+                    let tags = await lastFmGenreTags(for: artist.name)
+                    genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
                 }
-                // Artists without genre tags are always allowed - they came from genre search
+                if !genreOK {
+                    print("   Genre rejected \(artist.name): \(spotifyGenres) not in \(allowedKeywords)")
+                    continue
+                }
             }
             
             // CHECK 3: Blacklist Filtering (Only apply if NOT in selected genre families)

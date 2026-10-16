@@ -45,6 +45,7 @@ final class LongTailDiscoveryService {
         popularityThreshold: Double,
         maxArtists: Int = 60,
         maxTracks: Int = 200,
+        genreCheck: (([String]) -> Bool)? = nil,
         updateProgress: @escaping (String) async -> Void
     ) async -> [SpotifyTrack] {
         var explored = loadExplored()
@@ -164,6 +165,19 @@ final class LongTailDiscoveryService {
                 let artists = try await spotifyAPI.searchArtist(name: artistName, token: token)
                 guard let artist = artists.first else { continue }
                 if history.isArtistSeen(artistId: artist.id) { continue }
+                // Genre gate: the walk must not drift out of the user's
+                // selection (indie seeds can wander into trance via
+                // indietronica bridges). Spotify genres first, Last.fm
+                // tags for genre-less artists, reject if unverifiable.
+                if let check = genreCheck {
+                    let spotifyGenres = artist.genres ?? []
+                    var ok = check(spotifyGenres)
+                    if !ok && spotifyGenres.isEmpty,
+                       let info = try? await lastFm.getArtistInfo(name: artist.name) {
+                        ok = check(info.tagNames)
+                    }
+                    guard ok else { continue }
+                }
                 let artistPop = Double(artist.popularity ?? 100)
                 guard artistPop < max(popularityThreshold + 25, 55) else { continue }
 
