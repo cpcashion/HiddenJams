@@ -204,7 +204,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             let family = genreFamilies[sel]
                 ?? genreFamilies[sel.replacingOccurrences(of: " ", with: "-")]
             for artistGenre in lowered {
-                if artistGenre.contains(sel) || sel.contains(artistGenre) { return true }
+                // Substring checks are dangerous with short generic words:
+                // "synthpop".contains("pop") must NOT match a plain "pop"
+                // artist. Only allow substring when both sides are significant.
+                let selSig = significantWords(sel)
+                let artistSig = significantWords(artistGenre)
+                if artistGenre.contains(sel) && !selSig.isEmpty { return true }
+                if sel.contains(artistGenre) && !artistSig.isEmpty && artistGenre.count >= 4 { return true }
                 if let family {
                     for member in family {
                         let m = norm(member)
@@ -507,16 +513,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             await updateProgress("Filtering gems...")
             // Apply filters (OPTIMIZED - batch check)
             await updateProgress("Filtering gems...")
-            // If strict mode is active, we must also allow the micro-genres that we are about to search for
-            // Otherwise, the strict filter will reject the very tracks we find in the micro-genre step.
-            var validationGenres = Set(activeGenres) // Convert to Set for formUnion
-            if strictMode { // Only expand if strict mode is active
-                let expandedStart = Date()
-                let microGenres = everyNoiseService.getMicroGenres(fromGenres: Array(activeGenres))
-                // Add top 20 micro-genres to allow-list (matching the search limit)
-                validationGenres.formUnion(microGenres.prefix(20))
-                print("🔓 Expanded strict filter to include \(microGenres.prefix(20).count) micro-genres")
-            }
+            // STRICT: validationGenres is ONLY the user's selected genres.
+            // The old code expanded with 20 Every Noise micro-genres, which
+            // let off-genre tracks through (e.g. "electropop" in a "synthpop"
+            // deck). The word-overlap in artistMatchesSelectedGenres already
+            // handles legitimate subgenres ("synth pop" matches "synthpop");
+            // unrelated micro-genres are correctly rejected.
+            let validationGenres = Set(activeGenres)
             
             // 3. Apply Filters (Popularity, Blacklist, Language, Duplicates)
             // Pass the EXPANDED validation genres so we don't reject valid findings
@@ -590,7 +593,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // harder, in more places.
             if filteredCandidates.count < 50, let deepToken = token {
                 var deepPass = 0
-                while filteredCandidates.count < 50 && deepPass < 3 {
+                while filteredCandidates.count < 50 && deepPass < 5 {
                     deepPass += 1
                     print("[deep] pass \(deepPass): \(filteredCandidates.count)/50, fresh search")
                     await updateProgress("Searching deeper for hidden gems...")
@@ -1633,24 +1636,22 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let searchGenres = activeGenres.prefix(10)
         print("🎯 Using genres: \(Array(searchGenres))")
 
-        // Build year slices: single recent years + short ranges, shuffled.
-        // Bias toward recent uploads (2020+) where obscure new music lives.
+        // Build year slices: SINGLE YEARS (narrow = fewer results per slice =
+        // any offset goes proportionally deeper into the tail). Bias toward
+        // recent uploads where obscure new music lives, but cover the full
+        // catalog for variety.
         func yearSlices(count: Int) -> [String] {
             let currentYear = Calendar.current.component(.year, from: Date())
             var slices: [String] = []
-            // Recent single years (highest weight)
-            for year in (max(currentYear - 3, 2000)...currentYear).reversed() {
+            // Every single year from current back to 1990 (narrow slices)
+            for year in (1990...currentYear).reversed() {
                 slices.append("year:\(year)")
-                slices.append("year:\(year)")  // double weight
+                // Double-weight recent years (more obscure uploads)
+                if year >= currentYear - 5 {
+                    slices.append("year:\(year)")
+                }
             }
-            // Short ranges going back
-            var start = currentYear - 4
-            while start >= 1990 {
-                let end = start + 2
-                slices.append("year:\(start)-\(end)")
-                start -= 3
-            }
-            // Older catalog
+            // Older decades as single ranges (catalog is smaller there anyway)
             slices.append("year:1980-1989")
             slices.append("year:1970-1979")
             return Array(slices.shuffled().prefix(count))
@@ -1658,13 +1659,19 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
         for genre in searchGenres {
             var genreHits = 0
-            let slices = yearSlices(count: 4)
+            // 12 slices per genre (was 4): the popularity<=15 filter has a
+            // low yield on Spotify's popularity-sorted results, so we need
+            // 3x the raw candidates to net 50 obscure tracks.
+            let slices = yearSlices(count: 12)
             for (index, slice) in slices.enumerated() {
                 do {
                     let query = "genre:\"\(genre)\" \(slice)"
-                    let randomOffset = Int.random(in: 0...200)
+                    // Offsets 0-1000 (was 0-200): Spotify sorts by popularity,
+                    // so low offsets are the popular head. Deep offsets reach
+                    // the obscure tail where hidden jams live.
+                    let randomOffset = Int.random(in: 0...1000)
 
-                    print("   🎲 Searching '\(genre)' \(slice) (slice \(index + 1)/4, offset \(randomOffset))")
+                    print("   🎲 Searching '\(genre)' \(slice) (slice \(index + 1)/12, offset \(randomOffset))")
 
                     let tracks = try await spotifyAPI.searchTracks(
                         query: query,
@@ -1676,7 +1683,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
                     candidates.append(contentsOf: tracks)
                     genreHits += tracks.count
-                    try await Task.sleep(nanoseconds: 150_000_000) // 0.15s
+                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
 
                 } catch {
                     print("⚠️ Search error for \(genre) \(slice): \(error)")
@@ -1694,7 +1701,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         let tracks = try await spotifyAPI.searchTracks(
                             query: fb,
                             limit: 50,
-                            offset: Int.random(in: 0...200),
+                            offset: Int.random(in: 0...1000),
                             market: "from_token",
                             token: token
                         )
