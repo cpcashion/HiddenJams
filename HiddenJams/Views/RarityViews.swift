@@ -114,16 +114,9 @@ struct RaritySheet: View {
                         Label("Genres", systemImage: "tag")
                             .font(.caption)
                             .foregroundColor(Theme.Colors.textSecondary)
-                        FlowLayout(spacing: 8) {
-                            ForEach(rarity.genres.prefix(6), id: \.self) { genre in
-                                Text(genre)
-                                    .font(.caption)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(Color.white.opacity(0.1))
-                                    .cornerRadius(12)
-                            }
-                        }
+                        Text(rarity.genres.prefix(6).joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundColor(Theme.Colors.textPrimary)
                     }
                 }
             }
@@ -167,46 +160,4 @@ struct RaritySheet: View {
     }
 }
 
-// MARK: - Simple flow layout for genre chips
 
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = arrange(proposal: proposal, subviews: subviews)
-        return result.size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrange(proposal: proposal, subviews: subviews)
-        for (index, pos) in result.positions.enumerated() {
-            subviews[index].place(
-                at: CGPoint(x: bounds.minX + pos.x, y: bounds.minY + pos.y),
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
-        let maxWidth = proposal.width ?? .infinity
-        var positions: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var totalHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > maxWidth && x > 0 {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            positions.append(CGPoint(x: x, y: y))
-            rowHeight = max(rowHeight, size.height)
-            x += size.width + spacing
-            totalHeight = y + rowHeight
-        }
-        return (CGSize(width: maxWidth, height: totalHeight), positions)
-    }
-}
