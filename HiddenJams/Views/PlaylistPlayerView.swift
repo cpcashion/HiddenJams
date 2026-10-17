@@ -10,8 +10,13 @@ import UIKit
 
 struct PlaylistPlayerView: View {
     @EnvironmentObject var audioPlayer: AudioPreviewManager
+    @EnvironmentObject var authManager: SpotifyAuthManager
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var watchBridge = WatchBridge.shared
+
+    // Rarity reveal state
+    @State private var artistRarity: ArtistRarity?
+    @State private var showRaritySheet = false
     
     let recommendations: [RecommendedTrack]
     let onSave: (RecommendedTrack) -> Void
@@ -103,6 +108,13 @@ struct PlaylistPlayerView: View {
         .onAppear { pushCurrentGemToWatch() }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in pushCurrentGemToWatch() }
         .onChange(of: audioPlayer.isPlaying) { _ in pushCurrentGemToWatch() }
+        .onAppear { loadRarity() }
+        .onChange(of: audioPlayer.currentTrack?.id) { _ in loadRarity() }
+        .sheet(isPresented: $showRaritySheet) {
+            if let rarity = artistRarity, let track = currentTrack {
+                RaritySheet(rarity: rarity, trackName: track.track.name)
+            }
+        }
         .onChange(of: watchBridge.pendingCommand) { command in
             guard let command else { return }
             watchBridge.pendingCommand = nil
@@ -275,9 +287,38 @@ struct PlaylistPlayerView: View {
                                 openSpotifyArtist(id: firstArtist.id)
                             }
                         }
+
+                    // Rarity pill — tap (or swipe up on artwork) for stats
+                    RarityPill(rarity: artistRarity)
+                        .onTapGesture { showRaritySheet = true }
+                        .padding(.top, 4)
                 }
                 .padding(.top, 32)
                 .padding(.horizontal, Theme.Spacing.md)
+            }
+        }
+    }
+
+    /// Fetch rarity for the current track's artist.
+    private func loadRarity() {
+        guard let track = currentTrack,
+              let artist = track.track.artists.first else {
+            artistRarity = nil
+            return
+        }
+        // Don't refetch if already loaded for this artist
+        if artistRarity?.artistName == artist.name { return }
+        artistRarity = nil
+        Task {
+            let rarity = await RarityService.shared.rarity(
+                for: artist,
+                spotifyToken: authManager.accessToken
+            )
+            await MainActor.run {
+                // Only apply if still on the same track
+                if currentTrack?.track.artists.first?.name == artist.name {
+                    artistRarity = rarity
+                }
             }
         }
     }
@@ -392,10 +433,22 @@ struct PlaylistPlayerView: View {
     
     private func onDragEnded(_ gesture: DragGesture.Value) {
         guard !isAnimatingOut else { return }
-        
+
+        // Swipe UP for rarity stats: strong vertical, minimal horizontal.
+        // Checked first so it doesn't fight the left/right card swipe.
+        let height = gesture.translation.height
+        if height < -80 && abs(gesture.translation.width) < 50 {
+            showRaritySheet = true
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                cardOffset = .zero
+                cardRotation = 0
+            }
+            return
+        }
+
         let velocity = gesture.predictedEndLocation.x - gesture.location.x
         let width = gesture.translation.width
-        
+
         // Use velocity to make throwing feel more natural
         let shouldSwipeRight = width > swipeThreshold || (width > 40 && velocity > 200)
         let shouldSwipeLeft = width < -swipeThreshold || (width < -40 && velocity < -200)

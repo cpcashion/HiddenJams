@@ -11,12 +11,17 @@ import SwiftUI
 
 struct ExpandedPlayerView: View {
     @EnvironmentObject var audioManager: AudioPreviewManager
+    @EnvironmentObject var authManager: SpotifyAuthManager
     @Environment(\.dismiss) private var dismiss
 
     // Scrubbing state: while the user drags, hold the thumb locally so the
     // 0.1s time observer doesn't fight the drag; seek once on release.
     @State private var isScrubbing = false
     @State private var scrubValue: Double = 0
+
+    // Rarity reveal state
+    @State private var artistRarity: ArtistRarity?
+    @State private var showRaritySheet = false
 
     var body: some View {
         if let track = audioManager.currentTrack {
@@ -79,7 +84,14 @@ struct ExpandedPlayerView: View {
                         .lineLimit(1)
                         .padding(.horizontal, 32)
                         .onTapGesture { _ = FullSongOpener.openFullSong(for: track) }
+
+                    // Rarity pill — tap for the full rarity sheet
+                    RarityPill(rarity: artistRarity)
+                        .onTapGesture { showRaritySheet = true }
+                        .padding(.top, 8)
                 }
+                .onAppear { loadRarity(for: track) }
+                .onChange(of: track.id) { _ in loadRarity(for: track) }
 
                 Spacer(minLength: 16)
 
@@ -137,6 +149,31 @@ struct ExpandedPlayerView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.Colors.backgroundGradient.ignoresSafeArea())
+            .sheet(isPresented: $showRaritySheet) {
+                if let rarity = artistRarity, let track = audioManager.currentTrack {
+                    RaritySheet(rarity: rarity, trackName: track.track.name)
+                }
+            }
+        }
+    }
+
+    private func loadRarity(for track: RecommendedTrack) {
+        guard let artist = track.track.artists.first else {
+            artistRarity = nil
+            return
+        }
+        if artistRarity?.artistName == artist.name { return }
+        artistRarity = nil
+        Task {
+            let rarity = await RarityService.shared.rarity(
+                for: artist,
+                spotifyToken: authManager.accessToken
+            )
+            await MainActor.run {
+                if audioManager.currentTrack?.track.artists.first?.name == artist.name {
+                    artistRarity = rarity
+                }
+            }
         }
     }
 
