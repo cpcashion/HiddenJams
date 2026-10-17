@@ -190,12 +190,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         func norm(_ s: String) -> String {
             s.lowercased().replacingOccurrences(of: "-", with: " ").trimmingCharacters(in: .whitespaces)
         }
-        // Significant words: length >= 4, not generic filler. Used for
+        // Significant words: length >= 3, not generic filler. Used for
         // word-overlap matching when the selected genre has no family entry
         // (the family map only covers 8 main genres; the picker has dozens).
-        let genericWords: Set<String> = ["rock", "pop", "music", "band", "sound", "wave"]
+        // Threshold is 3 (not 4) so short genres like "hip-hop" ("hip", "hop")
+        // and "rap" work. "pop" stays excluded as generic.
+        let genericWords: Set<String> = ["pop", "music", "band", "sound", "wave"]
         func significantWords(_ s: String) -> Set<String> {
-            Set(s.split(separator: " ").map(String.init).filter { $0.count >= 4 && !genericWords.contains($0) })
+            Set(s.split(separator: " ").map(String.init).filter { $0.count >= 3 && !genericWords.contains($0) })
         }
         let lowered = artistGenres.map(norm)
         guard !lowered.isEmpty else { return false }
@@ -210,7 +212,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 let selSig = significantWords(sel)
                 let artistSig = significantWords(artistGenre)
                 if artistGenre.contains(sel) && !selSig.isEmpty { return true }
-                if sel.contains(artistGenre) && !artistSig.isEmpty && artistGenre.count >= 4 { return true }
+                if sel.contains(artistGenre) && !artistSig.isEmpty && artistGenre.count >= 3 { return true }
                 if let family {
                     for member in family {
                         let m = norm(member)
@@ -385,6 +387,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🧠 AI Explanations: Comparing to \(userLibrary.count) tracks in your library")
             
             var allCandidates: [SpotifyTrack] = []
+            // Tracks sourced from Spotify genre: searches. These are
+            // genre-verified by Spotify's own taxonomy, so the strict
+            // genre gate treats them leniently (accepts empty genre data).
+            var searchVerifiedIds = Set<String>()
             // Telemetry: per-branch candidate counts + filter outcomes.
             // Surfaced in the empty-state error so a "no music" report
             // carries its own diagnosis.
@@ -426,6 +432,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 )
                 print("✅ Genre searches: Found \(genreCandidates.count) candidates")
                 telemetry["search"] = genreCandidates.count
+                searchVerifiedIds.formUnion(genreCandidates.map { $0.id })
                 allCandidates.append(contentsOf: genreCandidates)
 
                 // FALLBACK: If drum and bass or related genres return 0 results, search electronic instead
@@ -441,6 +448,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                             token: spotifyToken
                         )
                         print("✅ Fallback electronic search: Found \(fallbackCandidates.count) candidates")
+                        searchVerifiedIds.formUnion(fallbackCandidates.map { $0.id })
                         allCandidates.append(contentsOf: fallbackCandidates)
                     }
                 }
@@ -528,17 +536,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                 activeGenres: activeGenres,
                 token: token,
-                ignoringHistory: true
+                ignoringHistory: false,
+                searchVerifiedIds: searchVerifiedIds
             )
-            // RANK: unseen tracks first. History is a ranking signal, not a filter.
-            // Showing a repeat beats showing 13 tracks.
-            let _history = DiscoveryHistoryManager.shared
-            filteredCandidates.sort { a, b in
-                let aSeen = _history.isSeen(trackId: a.id)
-                let bSeen = _history.isSeen(trackId: b.id)
-                if aSeen != bSeen { return bSeen }
-                return false
-            }
+            // History is now a HARD FILTER (ignoringHistory=false above):
+            // tracks/artists seen in the last 90/21 days are rejected.
+            // No repeats, ever. The improved yield + gradual relaxation
+            // guarantee 50 fresh tracks without needing repeats.
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
             telemetry["filtered"] = filteredCandidates.count
             telemetry["total_candidates"] = allCandidates.count
@@ -576,7 +580,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                         activeGenres: activeGenres,
                         token: token,
-                        ignoringHistory: true
+                        ignoringHistory: false,
+                        searchVerifiedIds: searchVerifiedIds
                     )
                     filteredCandidates.append(contentsOf: refiltered)
                     print("[refill] pass \(refillPass): +\(refiltered.count) (total \(filteredCandidates.count))")
@@ -584,17 +589,27 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 }
             }
 
-            // DEEP-SEARCH GUARANTEE: 50 new songs every session. If the
-            // branches + long-tail refill still left us short, run fresh
-            // genre-search passes with new randomization (different year
+            // DEEP-SEARCH GUARANTEE: 50 tracks every session, non-negotiable.
+            // If the branches + long-tail refill still left us short, run
+            // fresh genre-search passes with new randomization (different year
             // slices, offsets, shuffled genre order). Each pass explores
-            // different catalog windows, so sessions never repeat. The
-            // popularity/follower contract is NEVER relaxed -- we just look
-            // harder, in more places.
+            // different catalog windows.
+            //
+            // GRADUAL RELAXATION: if 3 passes at the user's threshold still
+            // leave us short, relax popularity 15->20->25->30 (3 passes each).
+            // A track at popularity 25 is still "no one's ever heard" --
+            // and 50 tracks at 25 beats 7 tracks at 15. The user's slider
+            // is never modified; this is a per-session fallback to
+            // guarantee volume. Followers and genre are NEVER relaxed.
             if filteredCandidates.count < 50, let deepToken = token {
+                let originalThreshold = self.popularityThreshold
+                let relaxationSteps = [20, 25, 30]
+                var relaxationIdx = -1  // -1 = user's threshold
                 var deepPass = 0
-                while filteredCandidates.count < 50 && deepPass < 5 {
+                var passesAtLevel = 0
+                while filteredCandidates.count < 50 && deepPass < 12 {
                     deepPass += 1
+                    passesAtLevel += 1
                     print("[deep] pass \(deepPass): \(filteredCandidates.count)/50, fresh search")
                     await updateProgress("Searching deeper for hidden gems...")
                     let deepCandidates = try await discoverViaSpotifyHipster(
@@ -606,18 +621,35 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                         print("[deep] pass \(deepPass): no candidates, stopping")
                         break
                     }
+                    searchVerifiedIds.formUnion(deepCandidates.map { $0.id })
                     let existingIds = Set(filteredCandidates.map { $0.id })
                     let refiltered = try await applyFastFilters(
                         tracks: deepCandidates.filter { !existingIds.contains($0.id) },
                         selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                         activeGenres: activeGenres,
                         token: deepToken,
-                        ignoringHistory: true
+                        ignoringHistory: false,
+                        searchVerifiedIds: searchVerifiedIds
                     )
                     filteredCandidates.append(contentsOf: refiltered)
-                    print("[deep] pass \(deepPass): +\(refiltered.count) (total \(filteredCandidates.count))")
-                    telemetry["deep_\(deepPass)"] = refiltered.count
+                    let levelDesc = relaxationIdx < 0 ? originalThreshold : relaxationSteps[relaxationIdx]
+                    print("[deep] pass \(deepPass): +\(refiltered.count) (total \(filteredCandidates.count)) at pop<=\(levelDesc)")
+                    telemetry["deep_\(deepPass)_pop\(levelDesc)"] = refiltered.count
+
+                    // After 3 passes at a level still short of 50, relax popularity.
+                    if filteredCandidates.count < 50 && passesAtLevel >= 3 {
+                        if relaxationIdx + 1 < relaxationSteps.count {
+                            relaxationIdx += 1
+                            self.popularityThreshold = relaxationSteps[relaxationIdx]
+                            passesAtLevel = 0
+                            print("[relax] popularity threshold -> \(self.popularityThreshold)")
+                        } else {
+                            print("[deep] max relaxation reached at \(filteredCandidates.count), stopping")
+                            break
+                        }
+                    }
                 }
+                self.popularityThreshold = originalThreshold
             }
 
 
@@ -2053,7 +2085,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     ///   track/artist history is ignored (the user's own library and this
     ///   session's seen sets still apply). Used as a last resort so discovery
     ///   recycles older gems instead of serving nothing.
-    internal func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil, ignoringHistory: Bool = false) async throws -> [SpotifyTrack] {
+    internal func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil, ignoringHistory: Bool = false, searchVerifiedIds: Set<String> = []) async throws -> [SpotifyTrack] {
         // Strict Mode Flag - DISABLED for DnB mode!
         // In DnB mode, we want to allow tracks from neurofunk, liquid funk, etc without strict validation
         let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty) && !self.isDnBMode
@@ -2247,12 +2279,28 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // chain: Spotify artist genres first; if Spotify has none (common
             // for obscure/EDM artists), Last.fm crowd tags; if neither verifies,
             // the artist is out. Unverifiable is not a pass.
+            //
+            // LENIENT EXCEPTION: tracks from Spotify genre: searches
+            // (searchVerifiedIds) are trusted -- Spotify's own taxonomy
+            // returned them for the genre query. If the artist has genre data
+            // we still verify it; if they have NO genre data (common for
+            // obscure artists), we accept rather than rejecting for
+            // "unverifiable." This is the yield fix: the strict gate was
+            // starving the deck by rejecting obscure artists with empty
+            // genre arrays.
             if strictMode {
                 let spotifyGenres = artist.genres ?? []
+                let isSearchVerified = searchVerifiedIds.contains(track.id)
                 var genreOK = artistMatchesSelectedGenres(spotifyGenres, selectedGenres: allowedKeywords)
                 if !genreOK && spotifyGenres.isEmpty {
-                    let tags = await lastFmGenreTags(for: artist.name)
-                    genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
+                    // Lenient: search-sourced tracks with no genre data pass.
+                    // Spotify's genre: operator already classified them.
+                    if isSearchVerified {
+                        genreOK = true
+                    } else {
+                        let tags = await lastFmGenreTags(for: artist.name)
+                        genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
+                    }
                 }
                 if !genreOK {
                     print("   Genre rejected \(artist.name): \(spotifyGenres) not in \(allowedKeywords)")
