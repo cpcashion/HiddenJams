@@ -39,8 +39,10 @@ struct SpotifyTrack: Codable, Identifiable {
     let durationMs: Int
     /// Spotify's external_ids.isrc — the universal recording identifier.
     /// Used to match Spotify tracks to Apple Music catalog songs for
-    /// in-app full-song playback.
-    let externalIds: ExternalIds? = nil
+    /// in-app full-song playback, and to Deezer for exact previews.
+    /// (A `var`, so it's actually decoded — a `let` with a default value
+    /// is silently skipped by Codable.)
+    var externalIds: ExternalIds? = nil
 
     var id: String { spotifyId ?? UUID().uuidString }
 
@@ -68,6 +70,20 @@ struct SpotifyTrack: Codable, Identifiable {
     
     var artistNames: String {
         artists.map { $0.name }.joined(separator: ", ")
+    }
+
+    /// Same track with a different preview URL.
+    func withPreview(_ url: String?) -> SpotifyTrack {
+        SpotifyTrack(spotifyId: spotifyId, name: name, artists: artists, album: album,
+                     popularity: popularity, previewUrl: url, uri: uri,
+                     durationMs: durationMs, externalIds: externalIds)
+    }
+
+    /// Same track with full artist objects (genres, followers) swapped in.
+    func withArtists(_ artists: [SpotifyArtist]) -> SpotifyTrack {
+        SpotifyTrack(spotifyId: spotifyId, name: name, artists: artists, album: album,
+                     popularity: popularity, previewUrl: previewUrl, uri: uri,
+                     durationMs: durationMs, externalIds: externalIds)
     }
 }
 

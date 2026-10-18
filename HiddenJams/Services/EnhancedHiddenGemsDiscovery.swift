@@ -34,7 +34,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // Services
     private let spotifyAPI: SpotifyAPIService
     private let lastFmService: LastFmService
-    private let longTailDiscovery = LongTailDiscoveryService()
     private let musicBrainzService: MusicBrainzService
     private let everyNoiseService: EveryNoiseService
     private let crossReferenceService: SpotifyCrossReferenceService
@@ -45,32 +44,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private var popularityThreshold = 50  // Tracks below this popularity score (raised from 30)
     private var followerThreshold = 50_000  // Artists with fewer followers (raised from 15k)
     private var recencyMonths = 12  // Tracks from last N months
-    
-    // The DnB-related genre names that can trigger Drum & Bass mode.
-    private static let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
 
-    /// True only when the user's genre selection consists EXCLUSIVELY of
-    /// DnB-related genres. A broad selection (e.g. "Select All", which happens
-    /// to include "Drum and Bass" among dozens of genres) must not trigger it.
-    static func isDnBExclusiveSelection(_ selected: Set<String>?) -> Bool {
-        guard let selected = selected, !selected.isEmpty else { return false }
-        return Set(selected.map { $0.lowercased() }).isSubset(of: dnbGenres)
-    }
-
-    // Relaxed settings for genres with limited Spotify search support
-    private func getPopularityThreshold(for genres: [String]) -> Int {
-        let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
-        let acousticGenres: Set<String> = ["folk", "folk rock", "indie folk", "acoustic", "singer-songwriter", "americana", "bluegrass"]
-        let genresSet = Set(genres.map { $0.lowercased() })
-        if !genresSet.isDisjoint(with: dnbGenres) {
-            return 60  // Relaxed for DnB since we use electronic fallback
-        }
-        if !genresSet.isDisjoint(with: acousticGenres) {
-            return 55  // Relaxed for folk/acoustic genres
-        }
-        return 50  // Normal threshold (raised from 30)
-    }
-    
     // Genre normalization: Maps user-friendly names to Spotify's exact genre names
     private let genreNameMapping: [String: String] = [
         "drum and bass": "drum-and-bass",  // Spotify uses hyphens!
@@ -260,11 +234,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
     private var knownTrackIds: Set<String> = []
     private var userLibrary: [SpotifyTrack] = []  // For AI explanations
-    
-    // MARK: - DnB Mode Flag (persists through discovery flow)
-    // This flag is set when user selects a DnB genre and ensures relaxed filters throughout
-    private var isDnBMode: Bool = false
-    
+
     // MARK: - Session-Based Deduplication (for "Discover More" within same session)
     private var sessionSeenTracks: Set<String> = []  // Tracks seen in THIS discovery session only
     private var sessionSeenArtists: Set<String> = []  // Artists seen in THIS discovery session only
@@ -327,7 +297,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         
         await MainActor.run {
             isDiscovering = true
-            isDnBMode = false  // Reset DnB mode flag for each discovery session
             errorMessage = nil  // Clear any stale error from a previous run
             // Only clear if not appending
             if !appendResults {
@@ -344,34 +313,28 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 discoveryProgress = "Starting deep discovery..."
             }
         }
-        
+
+        // Spotify: the genre deck — 50 tracks, every one verified in the
+        // selected genres, most obscure first per the slider.
+        if let spotifyToken = token {
+            await discoverSpotifyDeck(
+                profile: profile,
+                selectedGenres: selectedGenres,
+                token: spotifyToken,
+                count: count,
+                appendResults: appendResults
+            )
+            return
+        }
+
         do {
             print("🎯 Deep Discovery Mode")
             print("📊 Using popularity threshold: \(popularityThreshold)")
             var activeGenres = profile.genreWeights.keys.map { $0 }
-            
+
             // STRICT MODE: Determine active genres
-            var strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty)
-            
-            // DRUM AND BASS OVERRIDE: only when the user's selection is EXCLUSIVELY
-            // DnB-related genres. A broad selection (e.g. "Select All", which
-            // includes "Drum and Bass" among dozens of genres) must NOT collapse
-            // the whole discovery session into DnB mode.
-            if let selected = selectedGenres, !selected.isEmpty {
-                if Self.isDnBExclusiveSelection(selected) {
-                    print("🎵 DRUM AND BASS MODE ACTIVATED")
-                    isDnBMode = true  // Set persistent flag for filter bypass!
-                    // NOTE: never put a bare genre word like "jungle" here.
-                    // These strings become iTunes/Spotify catalog queries, and
-                    // catalogs match them against track/artist NAMES — "jungle"
-                    // returns songs *titled* "Jungle" (Drake, H.E.R., …), not
-                    // drum & bass. Genre membership is verified per-artist via
-                    // Last.fm tags instead (see itunesGenreFallbackCandidates).
-                    activeGenres = ["drum-and-bass", "electronic"]
-                    strictMode = false  // Disable strict genre validation
-                }
-            }
-            
+            let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty)
+
             if strictMode {
                 activeGenres = Array(selectedGenres!)
                 print("🔒 STRICT FILTER ACTIVE: Restricted to \(activeGenres)")
@@ -387,138 +350,26 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🧠 AI Explanations: Comparing to \(userLibrary.count) tracks in your library")
             
             var allCandidates: [SpotifyTrack] = []
-            // Tracks sourced from Spotify genre: searches. These are
-            // genre-verified by Spotify's own taxonomy, so the strict
-            // genre gate treats them leniently (accepts empty genre data).
-            var searchVerifiedIds = Set<String>()
-            // Telemetry: per-branch candidate counts + filter outcomes.
-            // Surfaced in the empty-state error so a "no music" report
-            // carries its own diagnosis.
+            // Telemetry: candidate counts + filter outcomes, surfaced in the
+            // empty-state error so a "no music" report carries its own diagnosis.
             var telemetry: [String: Int] = [:]
 
-            // Strict genre gate for the long-tail walk (Branch F + refill).
-            // When the user picked genres explicitly, walked artists must
-            // verifiably belong -- indie seeds wandering into trance get
-            // stopped in the walk, not in the deck. (Open mode and DnB: no gate.)
-            let walkStrict = (selectedGenres != nil && !selectedGenres!.isEmpty) && !isDnBMode
-            let walkGenreSet: Set<String> = walkStrict ? Set(selectedGenres!) : []
-            let walkGenreCheck: (([String]) -> Bool)? = walkStrict
-                ? { [weak self] genres in
-                    guard let self else { return true }
-                    return self.artistMatchesSelectedGenres(genres, selectedGenres: walkGenreSet)
-                }
-                : nil
-
-            if let spotifyToken = token {
-                // BRANCH A: Taste-seeded recommendations (artist seeds sampled
-                // per-session from the user's profile — personal, not the old
-                // deterministic genre seeds).
-                await updateProgress("Fetching recommendations...")
-                let recommendationCandidates = try await discoverViaRecommendations(
-                    profile: profile,
-                    activeGenres: activeGenres,
-                    token: spotifyToken
-                )
-                print("✅ Recommendations API: Found \(recommendationCandidates.count) candidates")
-                telemetry["recommendations"] = recommendationCandidates.count
-                allCandidates.append(contentsOf: recommendationCandidates)
-
-                // BRANCH B: Search API (existing, with electronic fallback)
-                await updateProgress("Searching Spotify (Main Genres)...")
-                let genreCandidates = try await discoverViaSpotifyHipster(
-                    profile: profile,
-                    activeGenres: activeGenres,
-                    token: spotifyToken
-                )
-                print("✅ Genre searches: Found \(genreCandidates.count) candidates")
-                telemetry["search"] = genreCandidates.count
-                searchVerifiedIds.formUnion(genreCandidates.map { $0.id })
-                allCandidates.append(contentsOf: genreCandidates)
-
-                // FALLBACK: If drum and bass or related genres return 0 results, search electronic instead
-                // Spotify's /search endpoint doesn't support all genre seeds!
-                if genreCandidates.isEmpty {
-                    let dnbGenres: Set<String> = ["drum-and-bass", "drum and bass", "dnb", "jungle", "liquid funk", "neurofunk"]
-                    let activeGenresSet = Set(activeGenres)
-                    if !activeGenresSet.isDisjoint(with: dnbGenres) {
-                        print("⚠️ No results for DnB genres, falling back to 'electronic' search")
-                        let fallbackCandidates = try await discoverViaSpotifyHipster(
-                            profile: profile,
-                            activeGenres: ["electronic"],
-                            token: spotifyToken
-                        )
-                        print("✅ Fallback electronic search: Found \(fallbackCandidates.count) candidates")
-                        searchVerifiedIds.formUnion(fallbackCandidates.map { $0.id })
-                        allCandidates.append(contentsOf: fallbackCandidates)
-                    }
-                }
-
-                // BRANCH C: Artist-Based Discovery (NEW - for drum and bass!)
-                if let firstGenre = activeGenres.first {
-                    await updateProgress("Discovering via related artists...")
-                    let artistCandidates = try await discoverViaKnownArtists(
-                        genre: firstGenre,
-                        token: spotifyToken
-                    )
-                    print("✅ Artist-based discovery: Found \(artistCandidates.count) candidates")
-                telemetry["artists"] = artistCandidates.count
-                    allCandidates.append(contentsOf: artistCandidates)
-                }
-
-                // BRANCH D: Micro-Genre Discovery
-                await updateProgress("Searching Micro-Genres (Deep Dive)...")
-                let microCandidates = try await discoverViaMicroGenres(
-                    profile: profile,
-                    activeGenres: activeGenres,
-                    token: spotifyToken,
-                    limit: 100 // Increased from default to ensure volume
-                )
-                print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
-                telemetry["microgenres"] = microCandidates.count
-                allCandidates.append(contentsOf: microCandidates)
-
-                // BRANCH F: Long-tail graph walk. Spotify's search and
-                // recommendations only surface the popular head; Last.fm's
-                // similar-artist graph reaches the obscure depths. Seeds are
-                // sampled per-session from the user's taste, so two users
-                // walk different graphs and get different tracks.
-                //
-                // The walk carries the strict genre gate: when the user picked
-                // genres explicitly, walked artists must verifiably belong --
-                // indie seeds wandering into trance get stopped here, not in
-                // the deck. (Open mode and DnB mode: no gate.)
-                // (walkGenreCheck defined above -- strict genre gate for the walk)
-                let longTailCandidates = await longTailDiscovery.discover(
-                    profile: profile,
-                    sessionGenres: Array(selectedGenres ?? []),
-                    token: spotifyToken,
-                    popularityThreshold: Double(popularityThreshold),
-                    genreCheck: walkGenreCheck,
-                    updateProgress: { msg in await self.updateProgress(msg) }
-                )
-                print("✅ Long-tail walk: Found \(longTailCandidates.count) candidates")
-                telemetry["longtail"] = longTailCandidates.count
-                allCandidates.append(contentsOf: longTailCandidates)
-            } else {
-                // BRANCH E: Apple Music discovery (no Spotify token).
-                // Last.fm finds similar tracks, Last.fm listener counts filter for
-                // obscurity, and iTunes provides playable previews + artwork.
-                await updateProgress("Finding similar artists...")
-                let appleCandidates = try await discoverViaLastFmAppleMusic(
-                    profile: profile,
-                    seedTracks: appleMusicSeeds,
-                    sessionGenres: activeGenres
-                )
-                print("✅ Apple Music discovery: Found \(appleCandidates.count) candidates")
-                allCandidates.append(contentsOf: appleCandidates)
-            }
+            // Apple Music discovery (Spotify users never reach this point).
+            // Last.fm finds similar tracks, Last.fm listener counts filter for
+            // obscurity, and iTunes provides playable previews + artwork.
+            await updateProgress("Finding similar artists...")
+            let appleCandidates = try await discoverViaLastFmAppleMusic(
+                profile: profile,
+                seedTracks: appleMusicSeeds,
+                sessionGenres: activeGenres
+            )
+            print("✅ Apple Music discovery: Found \(appleCandidates.count) candidates")
+            allCandidates.append(contentsOf: appleCandidates)
 
             // Remove duplicates
             allCandidates = deduplicateTracks(allCandidates)
             print("📦 Total unique candidates: \(allCandidates.count)")
             
-            // Apply filters (OPTIMIZED - batch check)
-            await updateProgress("Filtering gems...")
             // Apply filters (OPTIMIZED - batch check)
             await updateProgress("Filtering gems...")
             // STRICT: validationGenres is ONLY the user's selected genres.
@@ -531,127 +382,18 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             // 3. Apply Filters (Popularity, Blacklist, Language, Duplicates)
             // Pass the EXPANDED validation genres so we don't reject valid findings
-            var filteredCandidates = try await applyFastFilters(
+            let filteredCandidates = try await applyFastFilters(
                 tracks: allCandidates,
                 selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                 activeGenres: activeGenres,
                 token: token,
-                ignoringHistory: false,
-                searchVerifiedIds: searchVerifiedIds
+                ignoringHistory: false
             )
-            // History is now a HARD FILTER (ignoringHistory=false above):
+            // History is a HARD FILTER (ignoringHistory=false above):
             // tracks/artists seen in the last 90/21 days are rejected.
-            // No repeats, ever. The improved yield + gradual relaxation
-            // guarantee 50 fresh tracks without needing repeats.
             print("✨ Filtered to \(filteredCandidates.count) hidden gems")
             telemetry["filtered"] = filteredCandidates.count
             telemetry["total_candidates"] = allCandidates.count
-
-            // THRESHOLD-HONORING REFILL: if the strict filter left us short
-            // of 50, walk DEEPER into the tail -- additional passes over new
-            // territory (the walk persists explored state, so every pass
-            // chains forward into unvisited artists). The slider's popularity
-            // and follower thresholds are NEVER relaxed: they are a contract
-            // with the user, not a starting bid. Genre breadth may widen;
-            // popularity may not.
-            if filteredCandidates.count < 50, let walkToken = token {
-                var refillPass = 0
-                while filteredCandidates.count < 50 && refillPass < 2 {
-                    refillPass += 1
-                    print("[refill] pass \(refillPass): \(filteredCandidates.count) tracks, walking deeper")
-                    await updateProgress("Digging deeper for rare gems...")
-                    let refillCandidates = await longTailDiscovery.discover(
-                        profile: profile,
-                        sessionGenres: Array(selectedGenres ?? []),
-                        token: walkToken,
-                        popularityThreshold: Double(popularityThreshold),
-                        maxArtists: 60,
-                        maxTracks: 120,
-                        genreCheck: walkGenreCheck,
-                        updateProgress: { msg in await self.updateProgress(msg) }
-                    )
-                    guard !refillCandidates.isEmpty else {
-                        print("[refill] pass \(refillPass): walk came back empty, stopping")
-                        break
-                    }
-                    let existingIds = Set(filteredCandidates.map { $0.id })
-                    let refiltered = try await applyFastFilters(
-                        tracks: refillCandidates.filter { !existingIds.contains($0.id) },
-                        selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
-                        activeGenres: activeGenres,
-                        token: token,
-                        ignoringHistory: false,
-                        searchVerifiedIds: searchVerifiedIds
-                    )
-                    filteredCandidates.append(contentsOf: refiltered)
-                    print("[refill] pass \(refillPass): +\(refiltered.count) (total \(filteredCandidates.count))")
-                    telemetry["refill_\(refillPass)"] = refiltered.count
-                }
-            }
-
-            // DEEP-SEARCH GUARANTEE: 50 tracks every session, non-negotiable.
-            // If the branches + long-tail refill still left us short, run
-            // fresh genre-search passes with new randomization (different year
-            // slices, offsets, shuffled genre order). Each pass explores
-            // different catalog windows.
-            //
-            // GRADUAL RELAXATION: if 3 passes at the user's threshold still
-            // leave us short, relax popularity 15->20->25->30 (3 passes each).
-            // A track at popularity 25 is still "no one's ever heard" --
-            // and 50 tracks at 25 beats 7 tracks at 15. The user's slider
-            // is never modified; this is a per-session fallback to
-            // guarantee volume. Followers and genre are NEVER relaxed.
-            if filteredCandidates.count < 50, let deepToken = token {
-                let originalThreshold = self.popularityThreshold
-                let relaxationSteps = [20, 25, 30]
-                var relaxationIdx = -1  // -1 = user's threshold
-                var deepPass = 0
-                var passesAtLevel = 0
-                while filteredCandidates.count < 50 && deepPass < 12 {
-                    deepPass += 1
-                    passesAtLevel += 1
-                    print("[deep] pass \(deepPass): \(filteredCandidates.count)/50, fresh search")
-                    await updateProgress("Searching deeper for hidden gems...")
-                    let deepCandidates = try await discoverViaSpotifyHipster(
-                        profile: profile,
-                        activeGenres: activeGenres.shuffled(),
-                        token: deepToken
-                    )
-                    guard !deepCandidates.isEmpty else {
-                        print("[deep] pass \(deepPass): no candidates, stopping")
-                        break
-                    }
-                    searchVerifiedIds.formUnion(deepCandidates.map { $0.id })
-                    let existingIds = Set(filteredCandidates.map { $0.id })
-                    let refiltered = try await applyFastFilters(
-                        tracks: deepCandidates.filter { !existingIds.contains($0.id) },
-                        selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
-                        activeGenres: activeGenres,
-                        token: deepToken,
-                        ignoringHistory: false,
-                        searchVerifiedIds: searchVerifiedIds
-                    )
-                    filteredCandidates.append(contentsOf: refiltered)
-                    let levelDesc = relaxationIdx < 0 ? originalThreshold : relaxationSteps[relaxationIdx]
-                    print("[deep] pass \(deepPass): +\(refiltered.count) (total \(filteredCandidates.count)) at pop<=\(levelDesc)")
-                    telemetry["deep_\(deepPass)_pop\(levelDesc)"] = refiltered.count
-
-                    // After 3 passes at a level still short of 50, relax popularity.
-                    if filteredCandidates.count < 50 && passesAtLevel >= 3 {
-                        if relaxationIdx + 1 < relaxationSteps.count {
-                            relaxationIdx += 1
-                            self.popularityThreshold = relaxationSteps[relaxationIdx]
-                            passesAtLevel = 0
-                            print("[relax] popularity threshold -> \(self.popularityThreshold)")
-                        } else {
-                            print("[deep] max relaxation reached at \(filteredCandidates.count), stopping")
-                            break
-                        }
-                    }
-                }
-                self.popularityThreshold = originalThreshold
-            }
-
 
             // Score first, THEN fetch preview URLs only for top candidates
             await updateProgress("Scoring tracks...")
@@ -833,8 +575,123 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
     }
     
+    // MARK: - Spotify genre deck
+
+    /// Spotify discovery: a deck of `count` tracks (50), every one verified to
+    /// be in the selected genres (or the user's top genres when none are
+    /// picked), most obscure first per the slider, with previews ready.
+    /// When the slider's limits leave too few tracks, popularity is raised
+    /// in the background and those tracks go last.
+    private func discoverSpotifyDeck(
+        profile: ListeningProfile,
+        selectedGenres: Set<String>?,
+        token: String,
+        count: Int,
+        appendResults: Bool
+    ) async {
+        let picked = (selectedGenres ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let genres = picked.isEmpty ? Self.openModeGenres(profile: profile) : picked.sorted()
+        let history = DiscoveryHistoryManager.shared
+        let sessionArtists = sessionSeenArtists
+        var excluded = knownTrackIds.union(sessionSeenTracks)
+        if appendResults { excluded.formUnion(discoveredGems.map { $0.track.id }) }
+
+        var request = GenreDeckRequest(
+            genres: genres,
+            userSelected: !picked.isEmpty,
+            popularityCeiling: popularityThreshold,
+            followerCeiling: followerThreshold
+        )
+        request.excludedTrackIds = excluded
+        request.isTrackSeen = { history.isSeen(trackId: $0) }
+        request.isArtistSeen = { sessionArtists.contains($0) || history.isArtistSeen(artistId: $0) }
+        request.userExcludedGenres = Self.userExcludedGenres()
+        request.target = max(1, count)
+
+        let catalog = SpotifyGenreDeckCatalog(token: token)
+        let builder = GenreDeckBuilder(catalog: catalog)
+        builder.onProgress = { [weak self] message in
+            await self?.updateProgress(message)
+        }
+        let deck = await builder.build(request)
+        let summary = deck.stats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+        print("🎛️ Genre deck \(genres): \(deck.tracks.count) tracks, \(deck.playableCount) playable, \(deck.relaxedCount) relaxed [\(summary)]")
+
+        let recommendations = deck.tracks.map { makeRecommendation(for: $0, profile: profile) }
+        discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
+        DiscoveryQuotaManager.shared.recordDiscovered(count: recommendations.count)
+
+        for gem in recommendations {
+            sessionSeenTracks.insert(gem.track.id)
+            if let artistId = gem.track.artists.first?.spotifyId {
+                sessionSeenArtists.insert(artistId)
+            }
+        }
+        DiscoveryHistoryManager.shared.addToHistory(
+            trackIds: recommendations.map { $0.track.id },
+            artistIds: Array(Set(recommendations.flatMap { $0.track.artists.compactMap { $0.spotifyId } }))
+        )
+
+        if recommendations.isEmpty {
+            if catalog.authFailed {
+                errorMessage = "Spotify needs you to sign in again. Reconnect Spotify, then tap Discover."
+            } else if deck.stats["pages_ok", default: 0] == 0 {
+                errorMessage = "Couldn't reach Spotify. Check your connection and try again."
+            } else {
+                let names = genres.prefix(3).joined(separator: ", ")
+                errorMessage = appendResults
+                    ? "No more new \(names) tracks right now. Try again later or add another genre. [\(summary)]"
+                    : "Couldn't find \(names) tracks on Spotify. Try another genre. [\(summary)]"
+            }
+        }
+        isDiscovering = false
+        discoveryProgress = "Complete!"
+    }
+
+    private func makeRecommendation(for track: SpotifyTrack, profile: ListeningProfile) -> RecommendedTrack {
+        let scores = calculateDetailedScores(track: track, profile: profile)
+        let (explanation, similarTrack, reasons) = aiExplainer.generateExplanation(
+            for: track,
+            userLibrary: userLibrary,
+            profile: profile
+        )
+        return RecommendedTrack(
+            id: track.id,
+            spotifyURI: track.uri,
+            track: track,
+            matchScore: scores.tasteMatch,
+            obscurityScore: scores.obscurity,
+            recencyScore: scores.recency,
+            totalScore: scores.tasteMatch * 0.5 + scores.obscurity * 0.3 + scores.recency * 0.2,
+            obscurityReason: generateObscurityReason(track: track, scores: scores),
+            matchExplanation: explanation,
+            similarToTrack: similarTrack,
+            similarityReasons: reasons
+        )
+    }
+
+    /// Discover with no genres picked: the user's strongest profile genres
+    /// (a weighted draw, so sessions vary), or a broad default.
+    private static func openModeGenres(profile: ListeningProfile) -> [String] {
+        let weights = profile.genreWeights
+        let top = weights.sorted { $0.value > $1.value }.prefix(10).map { $0.key }
+        guard !top.isEmpty else { return ["indie", "electronic", "alternative", "hip hop"] }
+        return DiscoveryRandomization.weightedSample(
+            Array(top),
+            count: min(5, top.count),
+            weight: { max(weights[$0] ?? 0.05, 0.05) }
+        )
+    }
+
+    /// Genres the user excluded in settings.
+    private static func userExcludedGenres() -> [String] {
+        guard let data = UserDefaults.standard.data(forKey: "excludedGenres"),
+              let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) else { return [] }
+        return Array(decoded)
+    }
+
     // MARK: - Genre Normalization
-    
+
     /// Normalize genre names to match Spotify's exact naming convention
     /// - Parameter genre: User-friendly genre name
     /// - Returns: Spotify-compatible genre name
@@ -1595,375 +1452,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         return Array(shuffled.prefix(max(limit, 0)))
     }
 
-    // MARK: - Simple Genre-Based Discovery (WORKS!)
-    
-    // MARK: - Simple Genre-Based Discovery (WORKS!)
-    
-    private func discoverViaSpotifyHipster(profile: ListeningProfile, activeGenres: [String], token: String) async throws -> [SpotifyTrack] {
-        var candidates: [SpotifyTrack] = []
-        
-        // SPECIAL DnB HANDLING: free-text DnB keywords match track/artist
-        // NAMES, so this path uses pure `genre:` operators only.
-        if self.isDnBMode {
-            // Pure `genre:` operators only — NO free-text keywords. Spotify
-            // matches unquoted words against track/artist NAMES, which is how
-            // "jungle" flooded results with songs *called* "Jungle" (and why
-            // "bassline" had to be omitted: it matched UK bassline-house
-            // tracks literally named "Bassline"). `genre:jungle` is fine —
-            // that's the genre operator filtering Spotify's genre taxonomy,
-            // not a name match.
-            let dnbSearchTerms = [
-                "genre:\"drum and bass\"",
-                "genre:\"liquid funk\"",
-                "genre:neurofunk",
-                "genre:jungle",
-                "genre:breakbeat",
-            ]
-            
-            print("🎵 DnB Mode: Using pure genre: operators (no name-matching keywords)")
-
-            // Year-sliced for the 1,000-result ceiling — same as standard search
-            let dnbYear = Calendar.current.component(.year, from: Date())
-            var dnbSlices: [String] = []
-            for year in (max(dnbYear - 3, 2000)...dnbYear).reversed() {
-                dnbSlices.append("year:\(year)")
-            }
-            dnbSlices.append("year:2020-2022")
-            dnbSlices.append("year:2015-2019")
-
-            for term in dnbSearchTerms.shuffled().prefix(6) {
-                let slice = dnbSlices.randomElement() ?? ""
-                do {
-                    let randomOffset = Int.random(in: 0...200)
-                    let dnbQuery = "\(term) \(slice)"
-                    print("   🎲 DnB Searching '\(dnbQuery)' with offset \(randomOffset)")
-                    
-                    let tracks = try await spotifyAPI.searchTracks(
-                        query: dnbQuery,
-                        limit: 50,
-                        offset: randomOffset,
-                        market: "from_token",
-                        token: token
-                    )
-                    
-                    candidates.append(contentsOf: tracks)
-                    try await Task.sleep(nanoseconds: 200_000_000) // 0.2s
-                } catch {
-                    print("⚠️ DnB search error for \(term): \(error)")
-                    continue
-                }
-            }
-            
-            print("✅ DnB search found \(candidates.count) candidates")
-            return candidates
-        }
-        
-        // Standard genre search for non-DnB
-        // YEAR-SLICED QUERY PLANNING: Spotify caps search offset at 1000, so
-        // one query string can only ever reach ~1,000 results. Slicing each
-        // genre by release year gives every slice its own 1,000-result window —
-        // reach goes from ~1,000 to ~4,000 per genre. Year ranges are
-        // randomized per run (weighted toward recent uploads where the
-        // untouched long tail lives), so no two runs search the same windows.
-        let searchGenres = activeGenres.prefix(10)
-        print("🎯 Using genres: \(Array(searchGenres))")
-
-        // Build year slices: SINGLE YEARS (narrow = fewer results per slice =
-        // any offset goes proportionally deeper into the tail). Bias toward
-        // recent uploads where obscure new music lives, but cover the full
-        // catalog for variety.
-        func yearSlices(count: Int) -> [String] {
-            let currentYear = Calendar.current.component(.year, from: Date())
-            var slices: [String] = []
-            // Every single year from current back to 1990 (narrow slices)
-            for year in (1990...currentYear).reversed() {
-                slices.append("year:\(year)")
-                // Double-weight recent years (more obscure uploads)
-                if year >= currentYear - 5 {
-                    slices.append("year:\(year)")
-                }
-            }
-            // Older decades as single ranges (catalog is smaller there anyway)
-            slices.append("year:1980-1989")
-            slices.append("year:1970-1979")
-            return Array(slices.shuffled().prefix(count))
-        }
-
-        for genre in searchGenres {
-            var genreHits = 0
-            // 12 slices per genre (was 4): the popularity<=15 filter has a
-            // low yield on Spotify's popularity-sorted results, so we need
-            // 3x the raw candidates to net 50 obscure tracks.
-            let slices = yearSlices(count: 12)
-            for (index, slice) in slices.enumerated() {
-                do {
-                    let query = "genre:\"\(genre)\" \(slice)"
-                    // Offsets 0-1000 (was 0-200): Spotify sorts by popularity,
-                    // so low offsets are the popular head. Deep offsets reach
-                    // the obscure tail where hidden jams live.
-                    let randomOffset = Int.random(in: 0...1000)
-
-                    print("   🎲 Searching '\(genre)' \(slice) (slice \(index + 1)/12, offset \(randomOffset))")
-
-                    let tracks = try await spotifyAPI.searchTracks(
-                        query: query,
-                        limit: 50,
-                        offset: randomOffset,
-                        market: "from_token",
-                        token: token
-                    )
-
-                    candidates.append(contentsOf: tracks)
-                    genreHits += tracks.count
-                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-
-                } catch {
-                    print("⚠️ Search error for \(genre) \(slice): \(error)")
-                    continue
-                }
-            }
-            // FALLBACK: if the quoted genre: operator returned nothing,
-            // Spotify's taxonomy may not include this exact string. Try
-            // unquoted, then free-text, before giving up on the genre.
-            if genreHits == 0 {
-                let fallbacks = ["genre:\(genre)", genre]
-                for fb in fallbacks {
-                    do {
-                        print("   🔄 Fallback search: '\(fb)'")
-                        let tracks = try await spotifyAPI.searchTracks(
-                            query: fb,
-                            limit: 50,
-                            offset: Int.random(in: 0...1000),
-                            market: "from_token",
-                            token: token
-                        )
-                        if !tracks.isEmpty {
-                            print("   ✅ Fallback '\(fb)' found \(tracks.count)")
-                            candidates.append(contentsOf: tracks)
-                            break
-                        }
-                    } catch {
-                        print("⚠️ Fallback search error for '\(fb)': \(error)")
-                        continue
-                    }
-                }
-            }
-        }
-
-        print("✅ Found \(candidates.count) candidates from year-sliced genre searches")
-        return candidates
-    }
-    
-    // MARK: - Branch C: Micro-Genre Discovery
-    
-    // MARK: - Branch C: Micro-Genre Discovery
-    
-    private func discoverViaMicroGenres(profile: ListeningProfile, activeGenres: [String], token: String, limit: Int = 50) async throws -> [SpotifyTrack] {
-        var candidates: [SpotifyTrack] = []
-        
-        // Use passed active genres (already strict filtered) — shuffled per
-        // session so the same selection explores different corners
-        let seedGenres = activeGenres.shuffled().prefix(5)
-        
-        
-        // Expand to micro-genres
-        let microGenres = everyNoiseService.getMicroGenres(fromGenres: Array(seedGenres))
-        print("🎵 Exploring \(microGenres.count) micro-genres from seed: \(seedGenres)")
-        
-        // Search a per-session random subset of micro-genres (not the same
-        // fixed first 5) for cross-session variety
-        for genre in microGenres.shuffled().prefix(5) {
-            // Skip if micro-genre is seasonal
-            let lower = genre.lowercased()
-            if seasonalGenres.contains(where: { lower.contains($0) }) {
-                continue
-            }
-            
-            do {
-                print("🔍 Searching Spotify: genre:\"\(genre)\"")
-                let tracks = try await spotifyAPI.searchTracks(
-                    query: "genre:\"\(genre)\"", 
-                    limit: 30, // Increased depth per genre
-                    offset: Int.random(in: 0...100), // Increased range for more diversity
-                    token: token
-                )
-                
-                candidates.append(contentsOf: tracks)
-                
-                // Rate limiting
-                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-            } catch {
-                print("⚠️ Micro-genre search error for \(genre): \(error)")
-                continue
-            }
-        }
-        
-        return candidates
-    }
-    
-    // MARK: - Recommendations API Discovery
-    
-    private func discoverViaRecommendations(
-        profile: ListeningProfile,
-        activeGenres: [String],
-        token: String
-    ) async throws -> [SpotifyTrack] {
-        // Taste-seeded ARTIST recommendations. The old genre-seed call was
-        // deterministic — identical genre seeds gave every user the same 50
-        // tracks, which is a direct cause of identical queues. Seeding with
-        // a per-session sample of the user's own artists makes results
-        // personal and non-repeatable.
-        let seedNames = DiscoveryRandomization.weightedSample(
-            profile.topArtists,
-            count: min(5, profile.topArtists.count),
-            weight: { max(0.2, $0.influence) }
-        ).map { $0.name }
-
-        var seedIds: [String] = []
-        for name in seedNames {
-            if let artist = try? await spotifyAPI.searchArtist(name: name, token: token).first {
-                seedIds.append(artist.id)
-            }
-            if seedIds.count >= 5 { break }
-        }
-
-        if !seedIds.isEmpty {
-            do {
-                return try await spotifyAPI.getRecommendations(
-                    seedArtists: seedIds,
-                    limit: 50,
-                    token: token
-                )
-            } catch {
-                print("⚠️ Artist-seeded recommendations failed: \(error)")
-            }
-        }
-
-        // Fallback: genre seeds (deterministic, but better than nothing).
-        do {
-            return try await spotifyAPI.getRecommendations(
-                seedGenres: Array(activeGenres.prefix(5)),
-                limit: 50,
-                token: token
-            )
-        } catch {
-            print("⚠️ Recommendations API error: \(error)")
-            return []
-        }
-    }
-    
-    // MARK: - Artist-Based Discovery
-    
-    private func discoverViaKnownArtists(
-        genre: String,
-        token: String
-    ) async throws -> [SpotifyTrack] {
-        // Known drum and bass artists to seed discovery
-        let dnbArtists = [
-            "Goldie", "LTJ Bukem", "Noisia", "High Contrast",
-            "Calibre", "dBridge", "Alix Perez", "Skeptical"
-        ]
-        
-        let electronicArtists = [
-            "Aphex Twin", "Boards of Canada", "Four Tet", "Jon Hopkins"
-        ]
-        
-        // Folk/Indie Folk artists for seeding obscure folk discovery
-        let folkArtists = [
-            "Joanna Newsom", "Devendra Banhart", "Iron & Wine",
-            "Fleet Foxes", "Bon Iver", "Sufjan Stevens",
-            "Nick Drake", "Vashti Bunyan", "Bert Jansch",
-            "Linda Perhacs", "Sibylle Baier", "Judee Sill"
-        ]
-        
-        // Select seed artists based on genre
-        let seedArtists: [String]
-        let lowerGenre = genre.lowercased()
-        if lowerGenre.contains("drum") || lowerGenre.contains("bass") || lowerGenre.contains("dnb") {
-            seedArtists = dnbArtists
-        } else if lowerGenre.contains("electronic") {
-            seedArtists = electronicArtists
-        } else if lowerGenre.contains("folk") || lowerGenre.contains("acoustic") || lowerGenre.contains("singer") {
-            seedArtists = folkArtists
-        } else {
-            return []  // Not applicable for this genre
-        }
-        
-        var allTracks: [SpotifyTrack] = []
-        
-        // Pick 2-3 random seed artists to avoid always getting the same results
-        let selectedArtists = seedArtists.shuffled().prefix(3)
-        
-        for artistName in selectedArtists {
-            do {
-                // 1. Find the artist
-                let artists = try await spotifyAPI.searchArtist(name: artistName, token: token)
-                guard let artist = artists.first else { continue }
-                
-                // 2. Get related artists
-                let relatedArtists = try await spotifyAPI.getRelatedArtists(
-                    artistId: artist.id,
-                    token: token
-                )
-                
-                // 3. Filter for obscure related artists
-                let obscureArtists = relatedArtists.filter { relatedArtist in
-                    let followers = relatedArtist.followers?.total ?? 0
-                    return followers < followerThreshold
-                }
-                
-                print("🔍 Found \(obscureArtists.count) obscure artists related to \(artistName)")
-                
-                // 4. Get tracks for obscure artists (limit to 10 artists to ensure volume)
-                // ALBUM-DIG VARIETY: ~35% of the time, dig into a random album
-                // instead of top tracks. Top tracks are the same every run;
-                // album digs surface different songs from the same artist.
-                for obscureArtist in obscureArtists.prefix(10) {
-                    do {
-                        if Double.random(in: 0...1) < 0.35 {
-                            // Album dig: random album → random track
-                            let albums = try await spotifyAPI.getArtistAlbums(
-                                artistId: obscureArtist.id,
-                                limit: 20,
-                                token: token
-                            )
-                            if let album = albums.randomElement() {
-                                let albumTracks = try await spotifyAPI.getAlbumTracks(
-                                    albumId: album.id,
-                                    token: token
-                                )
-                                if let track = albumTracks.randomElement() {
-                                    allTracks.append(track)
-                                    print("   💿 Album dig: '\(track.name)' from '\(album.name)'")
-                                }
-                            }
-                        } else {
-                            // Top tracks, but randomized which one (not always #1)
-                            let topTracks = try await spotifyAPI.getArtistTopTracks(
-                                artistId: obscureArtist.id,
-                                token: token
-                            )
-                            if let track = topTracks.prefix(5).randomElement() {
-                                allTracks.append(track)
-                            }
-                        }
-                    } catch {
-                        print("⚠️ Failed to get tracks for \(obscureArtist.name): \(error)")
-                        continue
-                    }
-                }
-                
-                // Rate limiting
-                try await Task.sleep(nanoseconds: 200_000_000)  // 0.2s
-            } catch {
-                print("⚠️ Artist discovery error for \(artistName): \(error)")
-                continue
-            }
-        }
-        
-        print("✅ Artist-based discovery found \(allTracks.count) tracks")
-        return allTracks
-    }
     
     // MARK: - Check Preview URLs (Fast)
     
@@ -2085,16 +1573,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     ///   track/artist history is ignored (the user's own library and this
     ///   session's seen sets still apply). Used as a last resort so discovery
     ///   recycles older gems instead of serving nothing.
-    internal func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil, ignoringHistory: Bool = false, searchVerifiedIds: Set<String> = []) async throws -> [SpotifyTrack] {
-        // Strict Mode Flag - DISABLED for DnB mode!
-        // In DnB mode, we want to allow tracks from neurofunk, liquid funk, etc without strict validation
-        let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty) && !self.isDnBMode
+    internal func applyFastFilters(tracks: [SpotifyTrack], selectedGenres: Set<String>?, activeGenres: [String], token: String? = nil, ignoringHistory: Bool = false) async throws -> [SpotifyTrack] {
+        // Strict mode: the user picked genres, so every artist must match them.
+        let strictMode = (selectedGenres != nil && !selectedGenres!.isEmpty)
         let allowedKeywords = strictMode ? selectedGenres! : []
-        
-        if self.isDnBMode {
-            print("🎵 DnB Filter Mode: Strict genre validation DISABLED")
-        }
-        
+
         // Get excluded genres (Standard Blacklist)
         var excludedGenres = getExcludedGenres()
         
@@ -2164,8 +1647,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             // Filter 2: Popularity < Threshold (user-controlled via slider)
             // Use the slider's popularityThreshold instead of hardcoded values
-            let effectiveThreshold = self.isDnBMode ? max(self.popularityThreshold, 70) : self.popularityThreshold
-            guard track.popularity < effectiveThreshold else { 
+            guard track.popularity < self.popularityThreshold else {
                 rejectionStats["too_popular"] = (rejectionStats["too_popular"] ?? 0) + 1
                 return false 
             }
@@ -2276,31 +1758,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // CHECK 2: Positive genre gate (strict mode only).
             // When the user explicitly picked genres, the artist must VERIFIABLY
             // belong to the selection -- "Indie" plays indie, not trance. Trust
-            // chain: Spotify artist genres first; if Spotify has none (common
-            // for obscure/EDM artists), Last.fm crowd tags; if neither verifies,
-            // the artist is out. Unverifiable is not a pass.
-            //
-            // LENIENT EXCEPTION: tracks from Spotify genre: searches
-            // (searchVerifiedIds) are trusted -- Spotify's own taxonomy
-            // returned them for the genre query. If the artist has genre data
-            // we still verify it; if they have NO genre data (common for
-            // obscure artists), we accept rather than rejecting for
-            // "unverifiable." This is the yield fix: the strict gate was
-            // starving the deck by rejecting obscure artists with empty
-            // genre arrays.
+            // chain: the artist's own genres first; if there are none, Last.fm
+            // crowd tags; if neither verifies, the artist is out. Unverifiable
+            // is not a pass.
             if strictMode {
                 let spotifyGenres = artist.genres ?? []
-                let isSearchVerified = searchVerifiedIds.contains(track.id)
                 var genreOK = artistMatchesSelectedGenres(spotifyGenres, selectedGenres: allowedKeywords)
                 if !genreOK && spotifyGenres.isEmpty {
-                    // Lenient: search-sourced tracks with no genre data pass.
-                    // Spotify's genre: operator already classified them.
-                    if isSearchVerified {
-                        genreOK = true
-                    } else {
-                        let tags = await lastFmGenreTags(for: artist.name)
-                        genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
-                    }
+                    let tags = await lastFmGenreTags(for: artist.name)
+                    genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
                 }
                 if !genreOK {
                     print("   Genre rejected \(artist.name): \(spotifyGenres) not in \(allowedKeywords)")

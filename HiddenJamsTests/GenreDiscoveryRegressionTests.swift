@@ -54,30 +54,23 @@ struct GenreDiscoveryRegressionTests {
         #expect(merged == existing)
     }
 
-    // MARK: - DnB mode gating (EnhancedHiddenGemsDiscovery)
+    // MARK: - Select All stays broad (GenreMatcher)
+    //
+    // Discovery used to have a special "Drum & Bass mode". It's gone: every
+    // selection, DnB included, now goes through the same strict matcher.
 
-    @Test func dnbModeTriggersForDnBOnlySelection() {
-        #expect(EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(["drum and bass"]))
-        #expect(EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(["Drum and Bass", "JUNGLE"]))
-        #expect(EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(["dnb", "neurofunk", "liquid funk"]))
-    }
-
-    @Test func dnbModeDoesNotTriggerForSelectAll() {
-        // Reproduces the "all baseline tracks" bug: "Select All" includes
-        // "Drum and Bass" among dozens of genres and must stay in normal mode.
-        let selectAll: Set<String> = [
+    @MainActor @Test func selectAllKeepsEveryGenreAsItsOwnFamily() {
+        let selectAll = [
             "pop", "rock", "hip hop", "country", "r&b", "electronic", "dance",
             "indie", "alternative", "classical", "jazz", "blues", "metal", "punk",
             "folk", "reggae", "soul", "funk", "latin", "drum and bass", "jungle",
             "house", "techno", "ambient"
         ]
-        #expect(!EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(selectAll))
-    }
-
-    @Test func dnbModeDoesNotTriggerForMixedSelection() {
-        #expect(!EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(["drum and bass", "house"]))
-        #expect(!EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(["pop"]))
-        #expect(!EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection([]))
-        #expect(!EnhancedHiddenGemsDiscovery.isDnBExclusiveSelection(nil))
+        let matcher = GenreMatcher(selections: selectAll)
+        #expect(matcher.families.count == selectAll.count)
+        // A rock band is welcome in a Select All deck...
+        #expect(matcher.match(["indie rock"]) != nil)
+        // ...but never in a Drum and Bass-only deck.
+        #expect(GenreMatcher(selections: ["drum and bass"]).match(["indie rock"]) == nil)
     }
 }
