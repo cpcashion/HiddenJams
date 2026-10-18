@@ -2265,19 +2265,21 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 return artist
             })
             if !artistsNeedingTags.isEmpty {
+                // Convert to Sendable tuples before the task group.
+                let tagRequests = artistsNeedingTags.map { ($0.id, $0.name) }
                 let tagsResults = await withTaskGroup(of: (String, [String]).self) { group in
-                    for artist in artistsNeedingTags {
+                    for (artistId, artistName) in tagRequests {
                         group.addTask {
                             // New service per task: LastFmService isn't Sendable.
                             let lfm = LastFmService()
                             let tags: [String]
                             do {
-                                let info = try await lfm.getArtistInfo(name: artist.name)
+                                let info = try await lfm.getArtistInfo(name: artistName)
                                 tags = info.tagNames
                             } catch {
                                 tags = []
                             }
-                            return (artist.id, tags)
+                            return (artistId, tags)
                         }
                     }
                     var map: [String: [String]] = [:]
