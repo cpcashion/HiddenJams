@@ -85,7 +85,12 @@ nonisolated struct GenreMatcher {
     /// itself, tier 1 = only its parent family. The preferred family (the one
     /// whose search found the track) wins ties. Nil when nothing matches.
     func match(_ genres: [String], preferring preferred: Int? = nil) -> (family: Int, tier: Int)? {
-        let labels = genres.map(Self.tokens).filter { !$0.isEmpty }
+        match(labels: genres.map(Self.tokens), preferring: preferred)
+    }
+
+    /// `match` for labels already run through `tokens`.
+    func match(labels allLabels: [[String]], preferring preferred: Int? = nil) -> (family: Int, tier: Int)? {
+        let labels = allLabels.filter { !$0.isEmpty }
         guard !labels.isEmpty, !families.isEmpty else { return nil }
         var order = Array(families.indices)
         if let preferred, families.indices.contains(preferred) {
@@ -105,8 +110,12 @@ nonisolated struct GenreMatcher {
     /// keeps out by default (holiday, kids, soundtracks, anime, religious,
     /// Latin), or one the user excluded in settings.
     func isExcluded(_ genres: [String]) -> Bool {
-        let labels = genres.map(Self.tokens)
-        return labels.contains { label in
+        isExcluded(labels: genres.map(Self.tokens))
+    }
+
+    /// `isExcluded` for labels already run through `tokens`.
+    func isExcluded(labels: [[String]]) -> Bool {
+        labels.contains { label in
             exclusions.contains { group in
                 group.phrases.contains { Self.contains(label, $0) }
                     && !group.except.contains { Self.contains(label, $0) }
@@ -140,29 +149,52 @@ nonisolated struct GenreMatcher {
     /// equal ("Drum & Bass", "drum-and-bass", "DnB" -> ["dnb"];
     /// "Hip-Hop" -> ["hiphop"]; "R&B" -> ["rnb"]; "K-Pop" -> ["kpop"]).
     static func tokens(_ raw: String) -> [String] {
-        var text = raw.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
-            .lowercased()
-        text = text.replacingOccurrences(of: "&", with: " and ")
-        text = text.replacingOccurrences(of: "'", with: "")
-        text = text.replacingOccurrences(of: "\u{2019}", with: "")
-        let cleaned = String(text.unicodeScalars.map { scalar -> Character in
-            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
-        })
-        // A lone "n" means "and": drum n bass, rock n roll, r n b.
-        var words: [String] = cleaned.split(separator: " ").map { $0 == "n" ? "and" : String($0) }
+        // Called for every genre of every candidate, so it's one pass over
+        // the text; accents are folded only when there are any.
+        let source = raw.allSatisfy(\.isASCII)
+            ? raw
+            : raw.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+        var words: [String] = []
+        var word = String.UnicodeScalarView()
+        func endWord() {
+            guard !word.isEmpty else { return }
+            let text = String(word)
+            // A lone "n" means "and": drum n bass, rock n roll, r n b.
+            words.append(text == "n" ? "and" : text)
+            word = String.UnicodeScalarView()
+        }
+        for scalar in source.unicodeScalars {
+            switch scalar.value {
+            case 0x41...0x5A:                    // A-Z
+                if let lower = Unicode.Scalar(scalar.value + 0x20) { word.append(lower) }
+            case 0x61...0x7A, 0x30...0x39:       // a-z, 0-9
+                word.append(scalar)
+            case 0x27, 0x2019:                   // apostrophes: children's -> childrens
+                continue
+            case 0x26:                           // & -> and
+                endWord()
+                words.append("and")
+            case 0x00...0x7F:                    // other ASCII punctuation and spaces
+                endWord()
+            default:
+                if scalar.properties.isAlphabetic || scalar.properties.numericType != nil {
+                    word.append(contentsOf: scalar.properties.lowercaseMapping.unicodeScalars)
+                } else {
+                    endWord()
+                }
+            }
+        }
+        endWord()
 
         var collapsed: [String] = []
         var i = 0
         while i < words.count {
             var matched = false
-            for rule in phraseRules {
-                let end = i + rule.pattern.count
-                if end <= words.count, Array(words[i..<end]) == rule.pattern {
-                    collapsed.append(rule.replacement)
-                    i = end
-                    matched = true
-                    break
-                }
+            for rule in phraseRules where matches(words, at: i, rule.pattern) {
+                collapsed.append(rule.replacement)
+                i += rule.pattern.count
+                matched = true
+                break
             }
             if !matched {
                 collapsed.append(words[i])
@@ -190,11 +222,20 @@ nonisolated struct GenreMatcher {
     /// True when `phrase` appears in `label` as whole consecutive words.
     static func contains(_ label: [String], _ phrase: [String]) -> Bool {
         guard !phrase.isEmpty, phrase.count <= label.count else { return false }
-        for start in 0...(label.count - phrase.count)
-        where Array(label[start..<(start + phrase.count)]) == phrase {
+        if phrase.count == 1 { return label.contains(phrase[0]) }
+        for start in 0...(label.count - phrase.count) where matches(label, at: start, phrase) {
             return true
         }
         return false
+    }
+
+    /// `phrase` sits in `words` starting at `start` (no copies made).
+    private static func matches(_ words: [String], at start: Int, _ phrase: [String]) -> Bool {
+        guard start + phrase.count <= words.count else { return false }
+        for offset in phrase.indices where words[start + offset] != phrase[offset] {
+            return false
+        }
+        return true
     }
 
     /// Does `label` contain `phrase` as whole words, after canonicalization?
@@ -226,8 +267,8 @@ nonisolated struct GenreMatcher {
         if let spec = curated[key] {
             return Family(
                 key: spec.key,
-                accepts: spec.accepts.map(tokens),
-                rejects: spec.rejects.map(tokens),
+                accepts: spec.acceptTokens,
+                rejects: spec.rejectTokens,
                 broader: [],
                 broaderRejects: [],
                 searches: spec.searches,
@@ -240,19 +281,19 @@ nonisolated struct GenreMatcher {
         // A genre from the user's own profile: match its exact phrase, and
         // fall back to the most specific picker family it belongs to
         // ("uk drum and bass" -> Drum and Bass, not all of Electronic).
-        let parent = specs
+        let parent = tokenizedSpecs
             .filter { spec in
-                spec.accepts.map(tokens).contains { contains(selectionTokens, $0) }
-                    && !spec.rejects.map(tokens).contains { contains(selectionTokens, $0) }
+                spec.acceptTokens.contains { contains(selectionTokens, $0) }
+                    && !spec.rejectTokens.contains { contains(selectionTokens, $0) }
             }
-            .min { $0.accepts.count < $1.accepts.count }
+            .min { $0.acceptTokens.count < $1.acceptTokens.count }
         let trimmed = selection.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         return Family(
             key: key,
             accepts: selectionTokens.isEmpty ? [] : [selectionTokens],
             rejects: [],
-            broader: parent?.accepts.map(tokens) ?? [],
-            broaderRejects: parent?.rejects.map(tokens) ?? [],
+            broader: parent?.acceptTokens ?? [],
+            broaderRejects: parent?.rejectTokens ?? [],
             searches: trimmed.isEmpty ? [] : [trimmed],
             broaderSearches: parent?.searches ?? [],
             allowsNonLatinScript: selectionTokens.contains { regionalWords.contains($0) },
@@ -278,15 +319,32 @@ nonisolated struct GenreMatcher {
         let rejects: [String]
         let searches: [String]
         var nonLatin = false
-
-        var key: String { GenreMatcher.tokens(names[0]).joined(separator: " ") }
     }
 
-    private static let curated: [String: Spec] = {
-        var map: [String: Spec] = [:]
-        for spec in specs {
+    /// A Spec with its phrases already canonicalized (done once, not per use).
+    private struct TokenizedSpec {
+        let key: String
+        let acceptTokens: [[String]]
+        let rejectTokens: [[String]]
+        let searches: [String]
+        let nonLatin: Bool
+    }
+
+    private static let tokenizedSpecs: [TokenizedSpec] = specs.map { spec in
+        TokenizedSpec(
+            key: tokens(spec.names[0]).joined(separator: " "),
+            acceptTokens: spec.accepts.map(tokens),
+            rejectTokens: spec.rejects.map(tokens),
+            searches: spec.searches,
+            nonLatin: spec.nonLatin
+        )
+    }
+
+    private static let curated: [String: TokenizedSpec] = {
+        var map: [String: TokenizedSpec] = [:]
+        for (spec, tokenized) in zip(specs, tokenizedSpecs) {
             for name in spec.names {
-                map[tokens(name).joined(separator: " ")] = spec
+                map[tokens(name).joined(separator: " ")] = tokenized
             }
         }
         return map

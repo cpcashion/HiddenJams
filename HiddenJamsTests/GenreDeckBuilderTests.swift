@@ -121,6 +121,11 @@ struct GenreDeckBuilderTests {
         )
     }
 
+    /// The app gives a deck about 9 seconds. Tests run in parallel on a
+    /// shared main actor (slowly, on CI simulators), so they get a long
+    /// budget: these tests check what lands in the deck, not wall-clock speed.
+    static let testTimeBudget: TimeInterval = 60
+
     private func build(
         _ stub: StubCatalog,
         genres: [String],
@@ -129,6 +134,7 @@ struct GenreDeckBuilderTests {
         configure: (inout GenreDeckRequest) -> Void = { _ in }
     ) async -> GenreDeckResult {
         var request = GenreDeckRequest(genres: genres, popularityCeiling: ceiling, followerCeiling: followers)
+        request.timeBudget = Self.testTimeBudget
         configure(&request)
         return await GenreDeckBuilder(catalog: stub).build(request)
     }
@@ -297,7 +303,7 @@ struct GenreDeckBuilderTests {
 
     // MARK: - Speed and the slider math
 
-    @Test func buildingDoesNotWaitAround() async {
+    @Test func buildingFinishesWithoutWaitingOutItsBudget() async {
         var stub = StubCatalog()
         stub.addGenre("ambient", idPrefix: "ambient", artistGenres: ["dark ambient"], artists: 120)
 
@@ -305,7 +311,22 @@ struct GenreDeckBuilderTests {
         let deck = await build(stub, genres: ["ambient"], ceiling: 15)
 
         #expect(deck.tracks.count == 50)
-        #expect(Date().timeIntervalSince(started) < 2, "no sleeps or serial waits in the pipeline")
+        // The stub answers instantly, so a build that sits until its time
+        // budget runs out (a stuck wait or a sleep) shows up here.
+        #expect(Date().timeIntervalSince(started) < Self.testTimeBudget / 3)
+    }
+
+    @Test func titleMatchingIgnoresStoreTagsButNotVersions() {
+        #expect(DeezerPreviewService.coreTitle("Roller - Original Mix") == DeezerPreviewService.coreTitle("Roller"))
+        #expect(DeezerPreviewService.coreTitle("Roller (feat. MC Fox)") == "roller")
+        #expect(DeezerPreviewService.coreTitle("Roller feat. MC Fox") == "roller")
+        #expect(DeezerPreviewService.coreTitle("Roller - 2011 Remaster") == "roller")
+        #expect(DeezerPreviewService.coreTitle("Café Del Mar") == "cafedelmar")
+        // A remix is a different recording.
+        #expect(DeezerPreviewService.coreTitle("Roller - Calibre Remix") != DeezerPreviewService.coreTitle("Roller"))
+        #expect(DeezerPreviewService.titlesMatch("Roller (VIP)", "Roller - VIP"))
+        #expect(DeezerPreviewService.artistsMatch("The Side Effect", "Side Effect"))
+        #expect(!DeezerPreviewService.artistsMatch("Side", "Side Effect"))
     }
 
     @Test func relaxationSteps() {

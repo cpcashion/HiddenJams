@@ -136,16 +136,48 @@ class DeezerPreviewService {
     /// store-specific version tags ("Original Mix", "Radio Edit",
     /// "2011 Remaster") are dropped; real versions ("VIP", "X Remix") stay.
     static func coreTitle(_ raw: String) -> String {
-        var text = raw.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
+        // Runs for every deck candidate, so plain string scanning, no regex.
+        var text = raw.lowercased()
+        if !text.allSatisfy(\.isASCII) {
+            text = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        }
         // "Song - Radio Edit" -> "Song (Radio Edit)"
-        text = text.replacingOccurrences(of: #"\s+-\s+(.+)$"#, with: " ($1)", options: .regularExpression)
-        text = text.replacingOccurrences(
-            of: #"[\(\[](feat|ft|featuring|with)\b[^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"\b(feat|ft|featuring)\b.*$"#, with: "", options: .regularExpression)
-        text = text.replacingOccurrences(
-            of: #"[\(\[][^\)\]]*(original mix|radio edit|album version|single version|remaster|explicit|clean version|mono|stereo)[^\)\]]*[\)\]]"#,
-            with: "", options: .regularExpression)
-        return text.filter { $0.isLetter || $0.isNumber }
+        if let dash = text.range(of: " - ") {
+            text = String(text[..<dash.lowerBound]) + " (" + String(text[dash.upperBound...]) + ")"
+        }
+        // Drop bracketed credits and version tags.
+        var kept = ""
+        var index = text.startIndex
+        while index < text.endIndex {
+            let char = text[index]
+            if char == "(" || char == "[",
+               let end = text[index...].firstIndex(of: char == "(" ? ")" : "]"),
+               isCreditOrVersionTag(text[text.index(after: index)..<end]) {
+                index = text.index(after: end)
+                continue
+            }
+            kept.append(char)
+            index = text.index(after: index)
+        }
+        // A trailing "feat. Someone" outside brackets.
+        for marker in [" feat.", " feat ", " ft.", " ft ", " featuring "] {
+            if let range = kept.range(of: marker) {
+                kept = String(kept[..<range.lowerBound])
+            }
+        }
+        return kept.filter { $0.isLetter || $0.isNumber }
+    }
+
+    private static func isCreditOrVersionTag(_ inner: Substring) -> Bool {
+        let tag = inner.trimmingCharacters(in: .whitespaces)
+        for credit in ["feat.", "feat ", "featuring", "ft.", "ft ", "with "] where tag.hasPrefix(credit) {
+            return true
+        }
+        for version in ["original mix", "radio edit", "album version", "single version", "remaster",
+                        "explicit", "clean version", "mono", "stereo"] where tag.contains(version) {
+            return true
+        }
+        return false
     }
 
     static func titlesMatch(_ a: String, _ b: String) -> Bool {
@@ -154,25 +186,42 @@ class DeezerPreviewService {
     }
 
     static func artistsMatch(_ a: String, _ b: String) -> Bool {
-        func core(_ s: String) -> String {
-            var text = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
-            if text.hasPrefix("the ") { text.removeFirst(4) }
-            return text.filter { $0.isLetter || $0.isNumber }
+        func words(_ s: String) -> [String] {
+            var text = s.lowercased()
+            if !text.allSatisfy(\.isASCII) {
+                text = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+            }
+            var list = text.replacingOccurrences(of: "&", with: " and ")
+                .split { !($0.isLetter || $0.isNumber) }
+                .map(String.init)
+            if list.first == "the" { list.removeFirst() }
+            return list
         }
-        let x = core(a)
-        let y = core(b)
+        let x = words(a)
+        let y = words(b)
         guard !x.isEmpty, !y.isEmpty else { return false }
-        if x == y { return true }
-        // "Artist" vs "Artist & Friend"
+        if x.joined() == y.joined() { return true }
+        // "Artist" vs "Artist & Friend" (but not "Side" vs "Side Effect")
         let (short, long) = x.count <= y.count ? (x, y) : (y, x)
-        return short.count >= 4 && long.hasPrefix(short)
+        guard long.count > short.count, Array(long.prefix(short.count)) == short else { return false }
+        return ["and", "x", "feat", "ft", "featuring", "with", "vs"].contains(long[short.count])
     }
 
-    /// Title for the search query: version tags and credits removed.
+    /// Title for the search query: anything after " - " and anything in
+    /// brackets removed.
     private static func searchTitle(_ raw: String) -> String {
-        var text = raw.replacingOccurrences(of: #"\s+-\s+.*$"#, with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"\s*[\(\[][^\)\]]*[\)\]]"#, with: "", options: .regularExpression)
-        return text.trimmingCharacters(in: .whitespaces)
+        var text = raw
+        if let dash = text.range(of: " - ") {
+            text = String(text[..<dash.lowerBound])
+        }
+        var kept = ""
+        var depth = 0
+        for char in text {
+            if char == "(" || char == "[" { depth += 1; continue }
+            if char == ")" || char == "]" { depth = max(0, depth - 1); continue }
+            if depth == 0 { kept.append(char) }
+        }
+        return kept.trimmingCharacters(in: .whitespaces)
     }
 
     private static func encode(_ text: String) -> String {

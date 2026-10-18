@@ -72,6 +72,7 @@ final class GenreDeckBuilder {
     /// Progress messages for the loading screen.
     var onProgress: ((String) async -> Void)?
     private var artistCache: [String: SpotifyArtist] = [:]
+    private var labelCache: [String: [[String]]] = [:]
 
     init(catalog: any GenreDeckCatalog) {
         self.catalog = catalog
@@ -413,20 +414,21 @@ final class GenreDeckBuilder {
         // The main artist decides the genre. Only when Spotify lists no
         // genres for them can a featured artist vouch for the track.
         let primary = artistCache[artistId] ?? credited
-        let primaryGenres = primary.genres ?? []
+        let primaryLabels = labels(primary.genres)
         var matched: (family: Int, tier: Int)?
-        if !primaryGenres.isEmpty {
-            guard let match = matcher.match(primaryGenres, preferring: source) else {
+        if !primaryLabels.isEmpty {
+            guard let match = matcher.match(labels: primaryLabels, preferring: source) else {
                 return .rejected("wrong_genre")
             }
-            guard !matcher.isExcluded(primaryGenres) else { return .rejected("excluded_genre") }
+            guard !matcher.isExcluded(labels: primaryLabels) else { return .rejected("excluded_genre") }
             matched = match
         } else {
             for other in track.artists.dropFirst() {
-                guard let id = other.spotifyId, let genres = artistCache[id]?.genres, !genres.isEmpty else {
-                    continue
-                }
-                if let match = matcher.match(genres, preferring: source), !matcher.isExcluded(genres) {
+                guard let id = other.spotifyId else { continue }
+                let otherLabels = labels(artistCache[id]?.genres)
+                guard !otherLabels.isEmpty else { continue }
+                if let match = matcher.match(labels: otherLabels, preferring: source),
+                   !matcher.isExcluded(labels: otherLabels) {
                     matched = match
                     break
                 }
@@ -456,6 +458,17 @@ final class GenreDeckBuilder {
             artistKey: artistId,
             closeness: abs(Double(track.popularity) - targetPopularity) + Double.random(in: 0..<3)
         ))
+    }
+
+    /// Canonical labels for a genre list, cached: many artists share the same
+    /// genre list, and every candidate needs them.
+    private func labels(_ genres: [String]?) -> [[String]] {
+        guard let genres, !genres.isEmpty else { return [] }
+        let key = genres.joined(separator: "\u{1F}")
+        if let cached = labelCache[key] { return cached }
+        let computed = genres.map(GenreMatcher.tokens).filter { !$0.isEmpty }
+        labelCache[key] = computed
+        return computed
     }
 
     /// 0 when the track fits the slider. Each step above allows +10
