@@ -89,6 +89,7 @@ struct ExpandedPlayerView: View {
                     RarityPill(rarity: artistRarity)
                         .onTapGesture { showRaritySheet = true }
                         .padding(.top, 8)
+                        .padding(.bottom, 12)
                 }
                 .onAppear { loadRarity(for: track) }
                 .onChange(of: track.id) { _ in loadRarity(for: track) }

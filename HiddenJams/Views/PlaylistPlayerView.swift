@@ -292,6 +292,7 @@ struct PlaylistPlayerView: View {
                     RarityPill(rarity: artistRarity)
                         .onTapGesture { showRaritySheet = true }
                         .padding(.top, 4)
+                        .padding(.bottom, 16)
                 }
                 .padding(.top, 32)
                 .padding(.horizontal, Theme.Spacing.md)

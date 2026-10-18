@@ -199,9 +199,9 @@ private struct AnimatedRockHandView: View {
                 .frame(width: 78, height: 78)
                 .blur(radius: 24)
 
-            // Rock-hand emoji — Chris's own PNG (the checkerboard baked into
-            // the JPEG he sent was stripped to transparency; the hand is his
-            // pixels, byte-for-byte). Static, no rotation, per Chris.
+            // Rock-hand emoji — Chris's own hand PNG, processed to strip the
+            // checkerboard background baked into the JPEG he sent.
+            // Static, no rotation, per Chris.
             Image("RockHand")
                 .resizable()
                 .aspectRatio(contentMode: .fit)

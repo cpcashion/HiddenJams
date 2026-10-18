@@ -120,7 +120,9 @@ struct RaritySheet: View {
 
             Spacer(minLength: 0)
         }
-        .padding(24)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+        .padding(.top, 28)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
