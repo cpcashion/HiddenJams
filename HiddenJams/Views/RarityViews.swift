@@ -10,7 +10,6 @@ struct RarityPill: View {
     var body: some View {
         HStack(spacing: 6) {
             if let rarity {
-                Text(rarity.tier.emoji)
                 Text(rarity.tier.label)
                     .font(.caption2)
                     .fontWeight(.bold)
@@ -47,8 +46,6 @@ struct RaritySheet: View {
         VStack(spacing: 20) {
             // Tier header
             VStack(spacing: 8) {
-                Text(rarity.tier.emoji)
-                    .font(.system(size: 48))
                 Text(rarity.tier.label)
                     .font(.title2)
                     .fontWeight(.bold)
@@ -98,16 +95,16 @@ struct RaritySheet: View {
             // Stat rows
             VStack(spacing: 14) {
                 if let followers = rarity.formattedFollowers {
-                    statRow(icon: "👥", label: "Spotify followers", value: followers)
+                    statRow(label: "Spotify followers", value: followers)
                 }
                 if let popularity = rarity.popularity {
-                    statRow(icon: "📊", label: "Spotify popularity", value: "\(popularity)/100")
+                    statRow(label: "Spotify popularity", value: "\(popularity)/100")
                 }
                 if let listeners = rarity.lastFmListeners {
-                    statRow(icon: "🎧", label: "Last.fm listeners", value: formatNumber(listeners))
+                    statRow(label: "Last.fm listeners", value: formatNumber(listeners))
                 }
                 if let plays = rarity.lastFmPlaycount {
-                    statRow(icon: "🔁", label: "Last.fm plays", value: formatNumber(plays))
+                    statRow(label: "Last.fm plays", value: formatNumber(plays))
                 }
                 if !rarity.genres.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -136,9 +133,8 @@ struct RaritySheet: View {
         )
     }
 
-    private func statRow(icon: String, label: String, value: String) -> some View {
+    private func statRow(label: String, value: String) -> some View {
         HStack {
-            Text(icon)
             Text(label)
                 .font(.subheadline)
                 .foregroundColor(Theme.Colors.textSecondary)
