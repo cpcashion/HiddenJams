@@ -253,6 +253,24 @@ struct RecommendedTrack: Identifiable, Equatable {
             popularity: track.popularity
         )
     }
+
+    /// Same recommendation with a different preview URL (the player fills
+    /// in previews it looks up on demand).
+    func withPreview(_ url: String?) -> RecommendedTrack {
+        RecommendedTrack(
+            id: id,
+            spotifyURI: spotifyURI,
+            track: track.withPreview(url),
+            matchScore: matchScore,
+            obscurityScore: obscurityScore,
+            recencyScore: recencyScore,
+            totalScore: totalScore,
+            obscurityReason: obscurityReason,
+            matchExplanation: matchExplanation,
+            similarToTrack: similarToTrack,
+            similarityReasons: similarityReasons
+        )
+    }
 }
 
 // MARK: - Last.fm Tag Top Tracks (fallback discovery seeds)

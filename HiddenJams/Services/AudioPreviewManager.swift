@@ -61,6 +61,14 @@ class AudioPreviewManager: ObservableObject {
     /// becomes ready. Prevents infinite skip loops when every URL is dead.
     private var consecutiveFailures = 0
 
+    /// Finds previews the deck doesn't have yet, and refreshes expired ones.
+    private let previewLookup = DeezerPreviewService()
+    private var previewLookupTask: Task<Void, Never>?
+    /// Tracks with no preview anywhere (looked up on demand and missed).
+    private var unplayableTrackIds = Set<String>()
+    /// Tracks whose preview was already re-fetched once after failing.
+    private var refreshedTrackIds = Set<String>()
+
     init() {
         configureAudioSession()
         setupInterruptionHandling()
@@ -359,25 +367,33 @@ class AudioPreviewManager: ObservableObject {
     // MARK: - Queue Management
 
     func loadQueue(_ tracks: [RecommendedTrack], autoPlay: Bool = true) {
+        previewLookupTask?.cancel()
         queue = tracks
         currentIndex = 0
         consecutiveFailures = 0
+        unplayableTrackIds.removeAll()
+        refreshedTrackIds.removeAll()
         if autoPlay && !queue.isEmpty {
             playTrackAtIndex(0)
         }
     }
 
-    /// Nearest index >= `index` whose track has a usable preview URL.
-    /// Returns nil when nothing from `index` to the end of the queue is playable.
+    private static func usablePreviewURL(_ track: RecommendedTrack) -> String? {
+        guard let urlString = track.track.previewUrl,
+              !urlString.isEmpty,
+              URL(string: urlString) != nil else { return nil }
+        return urlString
+    }
+
+    /// Nearest index >= `index` that can play: it has a preview, or it's a
+    /// Spotify track whose preview can still be looked up. Returns nil when
+    /// nothing from `index` to the end of the queue qualifies.
     private func nextPlayableIndex(from index: Int) -> Int? {
         var i = index
         while i < queue.count {
             let track = queue[i]
-            if let urlString = track.track.previewUrl,
-               !urlString.isEmpty,
-               URL(string: urlString) != nil {
-                return i
-            }
+            if Self.usablePreviewURL(track) != nil { return i }
+            if track.track.isSpotifyOrigin && !unplayableTrackIds.contains(track.id) { return i }
             i += 1
         }
         return nil
@@ -385,6 +401,7 @@ class AudioPreviewManager: ObservableObject {
 
     func playTrackAtIndex(_ index: Int) {
         exitFullSong()
+        previewLookupTask?.cancel()
         guard !queue.isEmpty else { return }
         guard index < queue.count else {
             print("📭 No more tracks in playlist")
@@ -392,7 +409,7 @@ class AudioPreviewManager: ObservableObject {
             return
         }
 
-        // Skip tracks with missing/unusable preview URLs instead of dead-stopping.
+        // Skip tracks with no preview instead of dead-stopping.
         guard let playableIndex = nextPlayableIndex(from: max(index, 0)) else {
             print("📭 No playable tracks remaining in queue")
             stop()
@@ -405,9 +422,48 @@ class AudioPreviewManager: ObservableObject {
         let track = queue[playableIndex]
         currentIndex = playableIndex
         currentTrack = track
-        hasPreview = true
 
-        startPlayback(urlString: track.track.previewUrl!, trackId: track.id)
+        guard let urlString = Self.usablePreviewURL(track) else {
+            // The deck didn't get a preview for this one in time: look it up
+            // now rather than skipping it.
+            lookUpPreview(at: playableIndex, refreshing: false)
+            return
+        }
+        hasPreview = true
+        startPlayback(urlString: urlString, trackId: track.id)
+    }
+
+    /// Finds a preview for the track at `index` (or a fresh link when the old
+    /// one stopped working), then plays it — or moves on if there's none.
+    private func lookUpPreview(at index: Int, refreshing: Bool) {
+        let item = queue[index]
+        teardownPlayer()
+        previewLookupTask?.cancel()
+        previewLookupTask = Task { [weak self] in
+            guard let self else { return }
+            let track = item.track
+            let url = await self.previewLookup.findPreview(
+                isrc: track.isrc,
+                title: track.name,
+                artist: track.artists.first?.name ?? ""
+            )
+            // The user may have moved on while we were looking.
+            guard !Task.isCancelled,
+                  self.currentIndex == index,
+                  index < self.queue.count,
+                  self.queue[index].id == item.id else { return }
+            if let url, !(refreshing && url == track.previewUrl) {
+                let updated = item.withPreview(url)
+                self.queue[index] = updated
+                self.currentTrack = updated
+                self.hasPreview = true
+                self.startPlayback(urlString: url, trackId: updated.id)
+            } else {
+                print("⏭️ No preview found for \(track.name), skipping")
+                self.unplayableTrackIds.insert(item.id)
+                self.playTrackAtIndex(index + 1)
+            }
+        }
     }
 
     /// Starts playback of a preview URL, or skips forward on failure.
@@ -488,6 +544,16 @@ class AudioPreviewManager: ObservableObject {
     /// Advances past an unplayable track. Gives up gracefully if the whole
     /// queue is dead instead of looping forever.
     private func skipAfterFailure() {
+        // Deezer preview links expire after a while: fetch a fresh one once
+        // before giving up on the track.
+        if queue.indices.contains(currentIndex) {
+            let failed = queue[currentIndex]
+            if failed.track.isSpotifyOrigin, !refreshedTrackIds.contains(failed.id) {
+                refreshedTrackIds.insert(failed.id)
+                lookUpPreview(at: currentIndex, refreshing: true)
+                return
+            }
+        }
         consecutiveFailures += 1
         if consecutiveFailures > queue.count {
             print("📭 Too many consecutive playback failures, stopping")
@@ -594,6 +660,9 @@ class AudioPreviewManager: ObservableObject {
             }
             return
         }
+        // Pausing while a preview is being looked up: don't start it after.
+        // (Resume restarts the lookup, since there's no player yet.)
+        previewLookupTask?.cancel()
         player?.pause()
         isPlaying = false
         refreshNowPlayingPlaybackState()
@@ -672,6 +741,7 @@ class AudioPreviewManager: ObservableObject {
     }
 
     func stop() {
+        previewLookupTask?.cancel()
         exitFullSong()
         teardownPlayer()
         isPlaying = false
