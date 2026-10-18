@@ -475,7 +475,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 )
                 print("✅ Micro-genre searches: Found \(microCandidates.count) candidates")
                 telemetry["microgenres"] = microCandidates.count
-                searchVerifiedIds.formUnion(microCandidates.map { $0.id })
                 allCandidates.append(contentsOf: microCandidates)
 
                 // BRANCH F: Long-tail graph walk. Spotify's search and
@@ -608,7 +607,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 var relaxationIdx = -1  // -1 = user's threshold
                 var deepPass = 0
                 var passesAtLevel = 0
-                while filteredCandidates.count < 50 && deepPass < 8 {
+                while filteredCandidates.count < 50 && deepPass < 12 {
                     deepPass += 1
                     passesAtLevel += 1
                     print("[deep] pass \(deepPass): \(filteredCandidates.count)/50, fresh search")
@@ -637,8 +636,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     print("[deep] pass \(deepPass): +\(refiltered.count) (total \(filteredCandidates.count)) at pop<=\(levelDesc)")
                     telemetry["deep_\(deepPass)_pop\(levelDesc)"] = refiltered.count
 
-                    // After 2 passes at a level still short of 50, relax popularity.
-                    if filteredCandidates.count < 50 && passesAtLevel >= 2 {
+                    // After 3 passes at a level still short of 50, relax popularity.
+                    if filteredCandidates.count < 50 && passesAtLevel >= 3 {
                         if relaxationIdx + 1 < relaxationSteps.count {
                             relaxationIdx += 1
                             self.popularityThreshold = relaxationSteps[relaxationIdx]
@@ -1691,41 +1690,38 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
 
         for genre in searchGenres {
-            // 12 slices per genre, run IN PARALLEL via task group.
-            // Sequential was 12 x ~0.5s = 6s per genre; parallel is ~0.5s.
-            // This is the key to the 10-second discovery budget.
+            var genreHits = 0
+            // 12 slices per genre (was 4): the popularity<=15 filter has a
+            // low yield on Spotify's popularity-sorted results, so we need
+            // 3x the raw candidates to net 50 obscure tracks.
             let slices = yearSlices(count: 12)
-            let api = self.spotifyAPI
-            let sliceResults = await withTaskGroup(of: [SpotifyTrack].self) { group in
-                for slice in slices {
-                    group.addTask {
-                        do {
-                            let query = "genre:\"\(genre)\" \(slice)"
-                            // Offsets 0-1000: Spotify sorts by popularity,
-                            // so deep offsets reach the obscure tail.
-                            let randomOffset = Int.random(in: 0...1000)
-                            let tracks = try await api.searchTracks(
-                                query: query,
-                                limit: 50,
-                                offset: randomOffset,
-                                market: "from_token",
-                                token: token
-                            )
-                            return tracks
-                        } catch {
-                            return []
-                        }
-                    }
+            for (index, slice) in slices.enumerated() {
+                do {
+                    let query = "genre:\"\(genre)\" \(slice)"
+                    // Offsets 0-1000 (was 0-200): Spotify sorts by popularity,
+                    // so low offsets are the popular head. Deep offsets reach
+                    // the obscure tail where hidden jams live.
+                    let randomOffset = Int.random(in: 0...1000)
+
+                    print("   🎲 Searching '\(genre)' \(slice) (slice \(index + 1)/12, offset \(randomOffset))")
+
+                    let tracks = try await spotifyAPI.searchTracks(
+                        query: query,
+                        limit: 50,
+                        offset: randomOffset,
+                        market: "from_token",
+                        token: token
+                    )
+
+                    candidates.append(contentsOf: tracks)
+                    genreHits += tracks.count
+                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+
+                } catch {
+                    print("⚠️ Search error for \(genre) \(slice): \(error)")
+                    continue
                 }
-                var all: [SpotifyTrack] = []
-                for await tracks in group {
-                    all.append(contentsOf: tracks)
-                }
-                return all
             }
-            let genreHits = sliceResults.count
-            candidates.append(contentsOf: sliceResults)
-            print("   🎲 '\(genre)': \(genreHits) candidates from 12 parallel slices")
             // FALLBACK: if the quoted genre: operator returned nothing,
             // Spotify's taxonomy may not include this exact string. Try
             // unquoted, then free-text, before giving up on the genre.
@@ -2221,65 +2217,25 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let artistIds = Set(preFiltered.compactMap { $0.artists.first?.id })
         let artistIdList = Array(artistIds)
         
-        // Batch fetch artists (50 at a time) IN PARALLEL and store FULL objects
+        // Batch fetch artists (50 at a time) and store FULL objects
         // (Spotify only — Apple Music candidates carry their artist info inline)
-        // Sequential was N/50 x ~0.6s; parallel is ~0.6s total.
         var artistMap: [String: SpotifyArtist] = [:]
 
         if let token = token {
-            let api = self.spotifyAPI
-            let chunks = artistIdList.chunked(into: 50)
-            let batchResults = await withTaskGroup(of: [SpotifyArtist].self) { group in
-                for chunk in chunks {
-                    group.addTask {
-                        do {
-                            return try await api.getArtists(ids: chunk, token: token)
-                        } catch {
-                            print("⚠️ Failed to fetch artist batch: \(error)")
-                            return []
-                        }
+            for chunk in artistIdList.chunked(into: 50) {
+                do {
+                    let artists = try await spotifyAPI.getArtists(ids: chunk, token: token)
+                    for artist in artists {
+                        artistMap[artist.id] = artist
                     }
+                    // Small delay to be nice to API
+                    try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                } catch {
+                    print("⚠️ Failed to fetch artist batch: \(error)")
                 }
-                var all: [SpotifyArtist] = []
-                for await artists in group {
-                    all.append(contentsOf: artists)
-                }
-                return all
-            }
-            for artist in batchResults {
-                artistMap[artist.id] = artist
             }
         }
-
-        // Pre-fetch Last.fm tags IN PARALLEL for artists with empty Spotify
-        // genres (needed for the genre gate). Sequential was N x ~0.3s.
-        var lastFmTagsMap: [String: [String]] = [:]
-        if strictMode {
-            let artistsNeedingTags = Set(preFiltered.compactMap { track -> SpotifyArtist? in
-                guard let artistId = track.artists.first?.id,
-                      !searchVerifiedIds.contains(track.id),
-                      let artist = artistMap[artistId],
-                      (artist.genres ?? []).isEmpty else { return nil }
-                return artist
-            })
-            if !artistsNeedingTags.isEmpty {
-                let tagsResults = await withTaskGroup(of: (String, [String]).self) { group in
-                    for artist in artistsNeedingTags {
-                        group.addTask {
-                            let tags = await self.lastFmGenreTags(for: artist.name)
-                            return (artist.id, tags)
-                        }
-                    }
-                    var map: [String: [String]] = [:]
-                    for await (id, tags) in group {
-                        map[id] = tags
-                    }
-                    return map
-                }
-                lastFmTagsMap = tagsResults
-            }
-        }
-
+        
         // 3. Final filter: Followers, Own Genres, and DEEP SCAN
         for track in preFiltered {
             guard let artistId = track.artists.first?.id else { continue }
@@ -2342,8 +2298,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     if isSearchVerified {
                         genreOK = true
                     } else {
-                        // Use pre-fetched Last.fm tags (parallel, not per-track).
-                        let tags = lastFmTagsMap[artist.id] ?? []
+                        let tags = await lastFmGenreTags(for: artist.name)
                         genreOK = artistMatchesSelectedGenres(tags, selectedGenres: allowedKeywords)
                     }
                 }
