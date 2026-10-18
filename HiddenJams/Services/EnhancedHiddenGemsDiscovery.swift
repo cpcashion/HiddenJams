@@ -1695,12 +1695,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // Sequential was 12 x ~0.5s = 6s per genre; parallel is ~0.5s.
             // This is the key to the 10-second discovery budget.
             let slices = yearSlices(count: 12)
+            let api = self.spotifyAPI
             let sliceResults = await withTaskGroup(of: [SpotifyTrack].self) { group in
                 for slice in slices {
                     group.addTask {
-                        // New API instance per task: SpotifyAPIService isn't
-                        // Sendable, so we can't capture self.spotifyAPI.
-                        let api = SpotifyAPIService()
                         do {
                             let query = "genre:\"\(genre)\" \(slice)"
                             // Offsets 0-1000: Spotify sorts by popularity,
@@ -2229,11 +2227,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         var artistMap: [String: SpotifyArtist] = [:]
 
         if let token = token {
+            let api = self.spotifyAPI
             let chunks = artistIdList.chunked(into: 50)
             let batchResults = await withTaskGroup(of: [SpotifyArtist].self) { group in
                 for chunk in chunks {
                     group.addTask {
-                        let api = SpotifyAPIService()
                         do {
                             return try await api.getArtists(ids: chunk, token: token)
                         } catch {
@@ -2265,21 +2263,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 return artist
             })
             if !artistsNeedingTags.isEmpty {
-                // Convert to Sendable tuples before the task group.
-                let tagRequests = artistsNeedingTags.map { ($0.id, $0.name) }
                 let tagsResults = await withTaskGroup(of: (String, [String]).self) { group in
-                    for (artistId, artistName) in tagRequests {
+                    for artist in artistsNeedingTags {
                         group.addTask {
-                            // New service per task: LastFmService isn't Sendable.
-                            let lfm = LastFmService()
-                            let tags: [String]
-                            do {
-                                let info = try await lfm.getArtistInfo(name: artistName)
-                                tags = info.tagNames
-                            } catch {
-                                tags = []
-                            }
-                            return (artistId, tags)
+                            let tags = await self.lastFmGenreTags(for: artist.name)
+                            return (artist.id, tags)
                         }
                     }
                     var map: [String: [String]] = [:]

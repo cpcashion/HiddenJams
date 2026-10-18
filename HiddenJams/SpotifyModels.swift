@@ -28,7 +28,7 @@ struct SpotifyUser: Codable {
 }
 
 // MARK: - Track
-struct SpotifyTrack: Codable, Identifiable, Sendable {
+struct SpotifyTrack: Codable, Identifiable {
     let spotifyId: String?
     let name: String
     let artists: [SpotifyArtist]
@@ -72,7 +72,7 @@ struct SpotifyTrack: Codable, Identifiable, Sendable {
 }
 
 // MARK: - Artist
-struct SpotifyArtist: Codable, Identifiable, Sendable {
+struct SpotifyArtist: Codable, Identifiable {
     let spotifyId: String?
     let name: String
     let genres: [String]?
@@ -89,12 +89,12 @@ struct SpotifyArtist: Codable, Identifiable, Sendable {
 }
 
 // MARK: - Followers
-struct SpotifyFollowers: Codable, Sendable {
+struct SpotifyFollowers: Codable {
     let total: Int
 }
 
 // MARK: - Album
-struct SpotifyAlbum: Codable, Identifiable, Sendable {
+struct SpotifyAlbum: Codable, Identifiable {
     let spotifyId: String?
     let name: String
     let images: [SpotifyImage]
@@ -121,7 +121,7 @@ struct SpotifyAlbum: Codable, Identifiable, Sendable {
 }
 
 // MARK: - Image
-struct SpotifyImage: Codable, Sendable {
+struct SpotifyImage: Codable {
     let url: URL
     let height: Int?
     let width: Int?
