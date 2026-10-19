@@ -44,6 +44,13 @@ struct RaritySheet: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            // Custom grabber — part of the layout so it can never overlap
+            // the title (the system drag indicator draws over content).
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.white.opacity(0.35))
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
+
             // Tier header
             VStack(spacing: 8) {
                 Text(rarity.tier.label)
@@ -122,9 +129,8 @@ struct RaritySheet: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
-        .padding(.top, 28)
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 
     private var rarityGradient: LinearGradient {

@@ -91,9 +91,14 @@ final class GenreDeckBuilder {
         /// Distance from the slider's target popularity (plus a little jitter).
         let closeness: Double
 
-        /// Exact genre first, new tracks before repeats, within the slider
-        /// before relaxed, new artists before recently served ones.
-        var sortKey: [Int] { [tier, seenTrack ? 1 : 0, level, seenArtist ? 1 : 0] }
+        /// Slider compliance first, then freshness, then how close the track
+        /// is to the slider's target popularity (in 10-point buckets), then
+        /// genre exactness. This lets the popularity slider actually control
+        /// the deck: at max it surfaces popular tracks, at min the obscure
+        /// ones — instead of genre-exactness always winning.
+        var sortKey: [Int] {
+            [level, seenTrack ? 1 : 0, seenArtist ? 1 : 0, Int(closeness / 10), tier]
+        }
     }
 
     struct PlannedPage {
