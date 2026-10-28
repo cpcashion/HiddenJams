@@ -13,26 +13,26 @@ struct Theme {
     struct Colors {
         // All colors are computed from the current appearance mode so the
         // whole UI re-themes instantly when the user flips the switch.
-        // Dark = signature gold "hidden gems" look.
+        // Dark = navy canvas + system blue accent.
         // Light = monochrome with blue accent pops.
         private static var isLight: Bool { ThemeManager.shared.isLight }
 
         // Brand Colors
-        static var gemGold: Color { // Primary accent: gold in dark, blue pop in light
-            isLight ? Color(hex: "2563EB") : Color(hex: "F59E0B")
+        static var gemGold: Color { // Primary accent: system blue in dark, blue pop in light
+            isLight ? Color(hex: "2563EB") : Color(hex: "0A84FF")
         }
         static var gemGoldLight: Color {
-            isLight ? Color(hex: "60A5FA") : Color(hex: "FBBF24")
+            isLight ? Color(hex: "60A5FA") : Color(hex: "40A0FF")
         }
         static var gemGoldDark: Color {
-            isLight ? Color(hex: "1E40AF") : Color(hex: "D97706")
+            isLight ? Color(hex: "1E40AF") : Color(hex: "0060DF")
         }
         static var spotifyGreen: Color { gemGold } // Alias for compatibility
         static var spotifyBlack: Color { // Primary background
-            isLight ? Color(hex: "FFFFFF") : Color(hex: "000000")
+            isLight ? Color(hex: "FFFFFF") : Color(hex: "0A1628")
         }
         static var spotifyDarkGray: Color { // Secondary background
-            isLight ? Color(hex: "F4F4F5") : Color(hex: "121212")
+            isLight ? Color(hex: "F4F4F5") : Color(hex: "101E32")
         }
 
         // Brand Gradients
@@ -40,7 +40,7 @@ struct Theme {
             LinearGradient(
                 colors: isLight
                     ? [Color(hex: "2563EB"), Color(hex: "60A5FA")]
-                    : [Color(hex: "F59E0B"), Color(hex: "FBBF24")],
+                    : [Color(hex: "0A84FF"), Color(hex: "40A0FF")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -50,7 +50,7 @@ struct Theme {
             LinearGradient(
                 colors: isLight
                     ? [Color(hex: "1E40AF"), Color(hex: "2563EB"), Color(hex: "60A5FA")]
-                    : [Color(hex: "D97706"), Color(hex: "F59E0B"), Color(hex: "FBBF24")],
+                    : [Color(hex: "0060DF"), Color(hex: "0A84FF"), Color(hex: "40A0FF")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -60,7 +60,7 @@ struct Theme {
             LinearGradient(
                 colors: isLight
                     ? [Color(hex: "FFFFFF"), Color(hex: "F4F4F5")]
-                    : [Color(hex: "000000"), Color(hex: "121212")],
+                    : [Color(hex: "0A1628"), Color(hex: "101E32")],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -70,7 +70,7 @@ struct Theme {
             LinearGradient(
                 colors: isLight
                     ? [Color(hex: "FFFFFF"), Color(hex: "F1F1F1")]
-                    : [Color(hex: "181818"), Color(hex: "121212")],
+                    : [Color(hex: "152238"), Color(hex: "101E32")],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -78,13 +78,13 @@ struct Theme {
 
         // Accent Colors
         static var accentGold: Color {
-            isLight ? Color(hex: "2563EB") : Color(hex: "F59E0B")
+            isLight ? Color(hex: "2563EB") : Color(hex: "0A84FF")
         }
         static var accentPurple: Color {
             // Decorative glow only — keep monochrome in light mode
             isLight ? Color(hex: "9CA3AF") : Color(hex: "8B5CF6")
         }
-        static var accentBlue: Color { Color(hex: "3B82F6") } // Blue in both modes
+        static var accentBlue: Color { Color(hex: "0A84FF") } // System blue in both modes
         static var accentPink: Color {
             isLight ? Color(hex: "2563EB") : Color(hex: "EC4899")
         }
@@ -171,7 +171,7 @@ struct Theme {
         }
         static var error: Color { Color(hex: "EF4444") }
         static var buttonText: Color { // Text on accent buttons
-            isLight ? Color(hex: "FFFFFF") : Color(hex: "121212")
+            isLight ? Color(hex: "FFFFFF") : Color(hex: "0A1628")
         }
     }
     
