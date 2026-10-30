@@ -52,8 +52,8 @@ struct ExpandedPlayerView: View {
                 AsyncImage(url: track.track.album.images.first?.url) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Theme.Colors.spotifyDarkGray)
+                    RoundedRectangle(cornerRadius: Theme.CornerRadius.card, style: .continuous)
+                        .fill(Theme.Colors.goldGradient)
                         .overlay(
                             Image(systemName: "music.note")
                                 .font(.system(size: 64))
@@ -62,9 +62,8 @@ struct ExpandedPlayerView: View {
                 }
                 .frame(maxWidth: 340, maxHeight: 340)
                 .aspectRatio(1, contentMode: .fit)
-                .cornerRadius(16)
-                .clipped()
-                .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .shadow(color: Theme.Colors.magentaGlow.opacity(0.35), radius: 32, y: 10)
                 .padding(.horizontal, 32)
 
                 Spacer(minLength: 20)
@@ -114,7 +113,7 @@ struct ExpandedPlayerView: View {
                             }
                         }
                     )
-                    .tint(Theme.Colors.gemGold)
+                    .tint(Theme.Colors.lime)
                     .padding(.horizontal, 32)
                     HStack {
                         Text(formatTime(isScrubbing ? scrubValue : audioManager.currentTime))
@@ -129,23 +128,33 @@ struct ExpandedPlayerView: View {
                 Spacer(minLength: 12)
 
                 // Transport controls
-                HStack(spacing: 40) {
+                // Liquid-glass transport capsule with a lime play disc.
+                HStack(spacing: 28) {
                     Button(action: { audioManager.playPrevious() }) {
                         Image(systemName: "backward.fill")
-                            .font(.system(size: 28))
+                            .font(.system(size: 24))
                             .foregroundColor(Theme.Colors.textPrimary)
+                            .frame(width: 52, height: 52)
                     }
                     Button(action: { audioManager.togglePlayPause() }) {
-                        Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 64))
-                            .foregroundColor(Theme.Colors.textPrimary)
+                        Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Theme.Colors.textOnPastel)
+                            .frame(width: 76, height: 76)
+                            .background(Circle().fill(Theme.Colors.lime))
+                            .shadow(color: Theme.Colors.lime.opacity(0.35), radius: 18, y: 6)
                     }
                     Button(action: { audioManager.playNext() }) {
                         Image(systemName: "forward.fill")
-                            .font(.system(size: 28))
+                            .font(.system(size: 24))
                             .foregroundColor(Theme.Colors.textPrimary)
+                            .frame(width: 52, height: 52)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(.ultraThinMaterial))
+                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
                 .padding(.bottom, 24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

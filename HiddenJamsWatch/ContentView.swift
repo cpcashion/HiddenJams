@@ -62,12 +62,14 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button { bridge.send(action: .togglePlay) } label: {
+                        // Lime play disc (build 76 redesign — matches iPhone).
                         Image(systemName: bridge.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 15))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color(red: 0.043, green: 0.043, blue: 0.059))
                             .frame(width: 36, height: 36)
+                            .background(Circle().fill(Self.lime))
                     }
                     .clipShape(Circle())
-                    .liquidGlass()
                     .buttonStyle(.plain)
                 }
                 .frame(height: 44)
@@ -119,7 +121,35 @@ struct ContentView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
+        .background(ambientBackground.ignoresSafeArea())
         .preferredColorScheme(bridge.theme == "light" ? .light : .dark)
+    }
+
+    // MARK: - Build 76 palette (near-black + plum glow, lime accent)
+
+    static let lime = Color(red: 0xC8 / 255, green: 0xE8 / 255, blue: 0x6B / 255)
+
+    /// Plum → near-black with a soft magenta bloom (warm paper in light mode).
+    private var ambientBackground: some View {
+        let light = bridge.theme == "light"
+        return ZStack {
+            LinearGradient(
+                colors: light
+                    ? [Color(red: 0.984, green: 0.965, blue: 0.941), Color(red: 0.969, green: 0.953, blue: 0.933)]
+                    : [Color(red: 0.110, green: 0.063, blue: 0.141), Color(red: 0.043, green: 0.043, blue: 0.059)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            RadialGradient(
+                colors: [
+                    (light ? Color(red: 0.976, green: 0.788, blue: 0.659) : Color(red: 0.878, green: 0.337, blue: 0.710)).opacity(light ? 0.45 : 0.35),
+                    .clear
+                ],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 140
+            )
+        }
     }
 
     private var statusText: String {

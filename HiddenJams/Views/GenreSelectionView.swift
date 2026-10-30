@@ -52,8 +52,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Theme.Colors.textPrimary.opacity(0.1))
-                                    .cornerRadius(12)
+                                    .background(Capsule().fill(Theme.Colors.chipFill))
                             }
                             
                             Button(action: {
@@ -64,8 +63,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Theme.Colors.textPrimary.opacity(0.1))
-                                    .cornerRadius(12)
+                                    .background(Capsule().fill(Theme.Colors.chipFill))
                             }
                         }
                     }
@@ -128,9 +126,9 @@ struct GenreSelectionView: View {
                                 .padding(.horizontal, 60)
                                 .padding(.vertical, 14)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Theme.Colors.spotifyGreen)
-                                        .shadow(color: Theme.Colors.spotifyGreen.opacity(0.4), radius: 12, x: 0, y: 6)
+                                    Capsule()
+                                        .fill(Theme.Colors.lime)
+                                        .shadow(color: Theme.Colors.lime.opacity(0.35), radius: 12, x: 0, y: 6)
                                 )
                         }
                         .padding(.bottom, 30)
@@ -206,19 +204,12 @@ struct GenrePillContent: View {
         Text(genre.capitalized)
             .font(Theme.Typography.body2)
             .fontWeight(isSelected ? .semibold : .medium)
-            .foregroundColor(isSelected ? Theme.Colors.textOnGenreColor(pillColor) : Theme.Colors.textSecondary)
+            .foregroundColor(isSelected ? Theme.Colors.textOnGenreColor(pillColor) : Theme.Colors.textPrimary)
             .padding(.vertical, 10)
             .padding(.horizontal, 16)
             .background(
                 Capsule()
-                    .fill(isSelected ? pillColor : Color.clear)
-            )
-            .overlay(
-                Capsule()
-                    .stroke(
-                        isSelected ? pillColor : Theme.Colors.textPrimary.opacity(0.3),
-                        lineWidth: 1
-                    )
+                    .fill(isSelected ? pillColor : Theme.Colors.chipFill)
             )
             .shadow(color: isSelected ? pillColor.opacity(0.45) : .clear, radius: 8, x: 0, y: 2)
             .scaleEffect(isSelected ? 1.02 : 1.0)

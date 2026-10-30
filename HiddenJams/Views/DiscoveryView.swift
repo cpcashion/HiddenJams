@@ -221,11 +221,11 @@ struct TrackCard: View {
         }
         .padding(Theme.Spacing.md)
         .background(
-            RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
+            RoundedRectangle(cornerRadius: Theme.CornerRadius.card, style: .continuous)
                 .fill(Theme.Colors.cardGradient)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
+            RoundedRectangle(cornerRadius: Theme.CornerRadius.card, style: .continuous)
                 .stroke(isPlaying ? Theme.Colors.spotifyGreen : Theme.Colors.textPrimary.opacity(0.08), lineWidth: isPlaying ? 2 : 1)
         )
         .applyShadow(Theme.Shadows.medium)

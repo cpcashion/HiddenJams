@@ -21,16 +21,15 @@ struct MiniPlayerView: View {
                 AsyncImage(url: track.track.album.images.first?.url) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Theme.Colors.spotifyDarkGray)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.Colors.goldGradient)
                         .overlay(
                             Image(systemName: "music.note")
                                 .foregroundColor(Theme.Colors.textSecondary)
                         )
                 }
                 .frame(width: 48, height: 48)
-                .cornerRadius(8)
-                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 // Track info — tapping anywhere on the mini player expands
                 // it (build 50). The expanded player handles tap-to-source.
@@ -49,8 +48,10 @@ struct MiniPlayerView: View {
                 // Playback controls
                 Button(action: { audioManager.togglePlayPause() }) {
                     Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(Theme.Colors.textPrimary)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(Theme.Colors.textOnPastel)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Theme.Colors.lime))
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -73,18 +74,23 @@ struct MiniPlayerView: View {
                             .fill(Theme.Colors.textSecondary.opacity(0.25))
                             .frame(height: 3)
                         Rectangle()
-                            .fill(Theme.Colors.gemGold)
+                            .fill(Theme.Colors.lime)
                             .frame(width: geo.size.width * progress, height: 3)
                     }
                 }
                 .frame(height: 3)
             }
+            // Frosted liquid-glass shelf (build 76).
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Theme.Colors.cardGradient)
-                    .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .onTapGesture(perform: onTapTrack)
