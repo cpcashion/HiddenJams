@@ -61,9 +61,9 @@ struct OnboardingView: View {
                             .foregroundStyle(Theme.Colors.buttonText) // Dark grey text
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(AnyShapeStyle(Theme.Colors.gemGold))
-                            .cornerRadius(12)
-                            .shadow(color: Theme.Colors.gemGold.opacity(0.3), radius: 10, x: 0, y: 5)
+                            .background(AnyShapeStyle(Theme.Colors.ctaFill))
+                            .cornerRadius(28)
+                            .shadow(color: Theme.Colors.ctaFill.opacity(0.3), radius: 10, x: 0, y: 5)
                     }
                     .padding(.horizontal, 32)
                     .padding(.bottom, 50)

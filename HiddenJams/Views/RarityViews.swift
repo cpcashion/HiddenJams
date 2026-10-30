@@ -135,7 +135,7 @@ struct RaritySheet: View {
 
     private var rarityGradient: LinearGradient {
         LinearGradient(
-            colors: [Color.purple, Color.blue, Color.cyan],
+            colors: [Theme.Colors.lavender, Theme.Colors.pink, Theme.Colors.peach],
             startPoint: .leading,
             endPoint: .trailing
         )

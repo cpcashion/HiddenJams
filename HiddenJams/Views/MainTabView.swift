@@ -336,11 +336,17 @@ struct LiquidTabBar: View {
                     selectedTab = .profile
                 }
             }
-            .padding(.horizontal, 60)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 10)
         }
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+        // Dark translucent liquid-glass capsule (build 76 references).
+        .glassEffect(
+            .regular
+                .tint(ThemeManager.shared.isLight ? Color.white.opacity(0.25) : Color.black.opacity(0.45))
+                .interactive(),
+            in: .capsule
+        )
+        .shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 10)
     }
 }
 
@@ -356,21 +362,22 @@ struct LiquidTabButton: View {
             generator.impactOccurred()
             action()
         }) {
+            // Selected tab = lime disc with a black glyph; others are
+            // plain glyphs on the glass capsule.
             Image(systemName: isSelected ? activeIcon : inactiveIcon)
-                .font(.system(size: 26, weight: isSelected ? .semibold : .regular))
-                // Theme-aware: white pops on the dark bar, but is invisible
-                // on the light glass capsule — there the accent color marks
-                // the active tab.
-                .foregroundStyle(isSelected ? selectedTabColor : .secondary)
-                .frame(width: 60, height: 44)
+                .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Theme.Colors.textOnPastel : Theme.Colors.textSecondary)
+                .frame(width: 56, height: 56)
+                .background(
+                    Circle()
+                        .fill(Theme.Colors.lime)
+                        .opacity(isSelected ? 1 : 0)
+                )
+                .frame(width: 64, height: 56)
                 .contentShape(Rectangle())
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
         }
         .buttonStyle(.plain)
-    }
-
-    private var selectedTabColor: Color {
-        ThemeManager.shared.isLight ? Theme.Colors.gemGold : .white
     }
 }
 
@@ -402,8 +409,7 @@ struct EmptyPlayerStateView: View {
                         .foregroundColor(Theme.Colors.buttonText)
                         .padding(.horizontal, 32)
                         .padding(.vertical, 16)
-                        .background(Theme.Colors.spotifyGreen)
-                        .cornerRadius(30)
+                        .background(Capsule().fill(Theme.Colors.lime))
                 }
             }
         }

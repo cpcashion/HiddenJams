@@ -201,9 +201,9 @@ struct AnimatedGradientBackground: View {
     var body: some View {
         LinearGradient(
             colors: [
-                Color(hex: "0A0E1A"),
-                Color(hex: "191414"),
-                Color(hex: "1DB954").opacity(0.1)
+                Theme.Colors.plum,
+                Theme.Colors.ink,
+                Theme.Colors.magentaGlow.opacity(0.18)
             ],
             startPoint: animateGradient ? .topLeading : .bottomLeading,
             endPoint: animateGradient ? .bottomTrailing : .topTrailing

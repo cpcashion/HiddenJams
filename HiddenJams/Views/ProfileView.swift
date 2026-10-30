@@ -28,7 +28,7 @@ struct ProfileView: View {
     
     var body: some View {
         ZStack {
-            Theme.Colors.spotifyBlack.ignoresSafeArea()
+            Theme.Colors.backgroundGradient.ignoresSafeArea()
             
             if profileDataService.isLoading && !hasLoadedData {
                 loadingView
@@ -130,7 +130,7 @@ struct ProfileView: View {
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Theme.Colors.gemGold)
+                                .background(Theme.Colors.ctaFill)
                                 .cornerRadius(4)
                         }
                     }
@@ -184,7 +184,7 @@ struct ProfileView: View {
         }
         .padding(12)
         .background(Theme.Colors.cardGradient)
-        .cornerRadius(16)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous))
     }
 
     private func linkAppleID() {
@@ -211,26 +211,31 @@ struct ProfileView: View {
     // MARK: - Stats
     
     private var statsSection: some View {
-        HStack(spacing: 0) {
-            statItem(value: "\(profileDataService.stats.uniqueTracksCount)", label: "Tracks")
-            statItem(value: "\(profileDataService.stats.uniqueArtistsCount)", label: "Artists")
-            statItem(value: profileDataService.stats.formattedListeningTime, label: "Recent")
+        // Pastel stat tiles (build 76 redesign).
+        HStack(spacing: 10) {
+            statItem(value: "\(profileDataService.stats.uniqueTracksCount)", label: "Tracks", tile: Theme.Colors.lavender)
+            statItem(value: "\(profileDataService.stats.uniqueArtistsCount)", label: "Artists", tile: Theme.Colors.peach)
+            statItem(value: profileDataService.stats.formattedListeningTime, label: "Recent", tile: Theme.Colors.mint)
         }
-        .padding(.vertical, 20)
-        .background(Theme.Colors.textPrimary.opacity(0.05))
-        .cornerRadius(12)
     }
     
-    private func statItem(value: String, label: String) -> some View {
-        VStack(spacing: 4) {
+    private func statItem(value: String, label: String, tile: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(Theme.Colors.textPrimary)
+                .font(.system(size: 24, weight: .heavy))
+                .foregroundColor(Theme.Colors.textOnPastel)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(Theme.Colors.textSecondary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Theme.Colors.textOnPastelSecondary)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
+                .fill(tile)
+        )
     }
     
     // MARK: - Recently Played
@@ -319,7 +324,7 @@ struct ProfileView: View {
                         .padding(.vertical, 6)
                         .background(
                             selectedTimeRange == range ?
-                            Capsule().fill(Theme.Colors.gemGold) :
+                            Capsule().fill(Theme.Colors.ctaFill) :
                             Capsule().fill(Color.clear)
                         )
                 }
@@ -471,7 +476,7 @@ struct ProfileView: View {
                         .fill(Theme.Colors.textPrimary.opacity(0.1))
                         .cornerRadius(2)
                     Rectangle()
-                        .fill(Theme.Colors.textPrimary.opacity(0.8))
+                        .fill(Theme.Colors.lime)
                         .cornerRadius(2)
                         .frame(width: geo.size.width * value)
                 }
@@ -509,20 +514,19 @@ struct ProfileView: View {
             FlowLayout(spacing: 8) {
                 ForEach(profileDataService.stats.topGenres.indices, id: \.self) { index in
                     let genre = profileDataService.stats.topGenres[index]
-                    genreChip(genre.name.capitalized)
+                    genreChip(genre.name.capitalized, color: Theme.Colors.pastel(index))
                 }
             }
         }
     }
     
-    private func genreChip(_ name: String) -> some View {
+    private func genreChip(_ name: String, color: Color) -> some View {
         Text(name)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundColor(Theme.Colors.textSecondary)
-            .padding(.horizontal, 12)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(Theme.Colors.textOnPastel)
+            .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Theme.Colors.textPrimary.opacity(0.08))
-            .cornerRadius(16)
+            .background(Capsule().fill(color))
     }
     
     // MARK: - Appearance
@@ -553,16 +557,15 @@ struct ProfileView: View {
                         .padding(.vertical, 12)
                         .background(
                             themeManager.mode == theme
-                            ? Theme.Colors.gemGold
+                            ? Theme.Colors.ctaFill
                             : Color.clear
                         )
-                        .cornerRadius(10)
+                        .clipShape(Capsule())
                     }
                 }
             }
             .padding(4)
-            .background(Theme.Colors.textPrimary.opacity(0.08))
-            .cornerRadius(14)
+            .background(Capsule().fill(Theme.Colors.chipFill))
         }
     }
 
@@ -647,7 +650,7 @@ struct ProfileView: View {
                     .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(Theme.Colors.gemGold)
+                    .background(Theme.Colors.ctaFill)
                     .cornerRadius(16)
                     .disabled(isConnectingAppleMusic)
             }

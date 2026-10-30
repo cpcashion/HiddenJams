@@ -38,8 +38,8 @@ struct DashboardView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                // Solid black background
-                Theme.Colors.spotifyBlack.ignoresSafeArea()
+                // Near-black + plum canvas with pink/purple ambient glow
+                Theme.Colors.backgroundGradient.ignoresSafeArea()
                 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
@@ -137,8 +137,8 @@ struct DashboardView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(timeBasedGreeting)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(Theme.Colors.textPrimary)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundColor(Theme.Colors.textPrimary.opacity(0.85))
                 
                 if let name = userFirstName {
                     Text(name)
@@ -205,16 +205,16 @@ struct DashboardView: View {
     private var analyzePromptCard: some View {
         VStack(spacing: 20) {
             Image(systemName: "waveform.and.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(Theme.Colors.gemGold)
+                .font(.system(size: 44))
+                .foregroundColor(Theme.Colors.plumButton)
             
             Text("Analyze Your Library")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(Theme.Colors.textPrimary)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(Theme.Colors.textOnPastel)
             
             Text("We'll analyze your music to find tracks that match your taste")
                 .font(.system(size: 14))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.Colors.textOnPastelSecondary)
                 .multilineTextAlignment(.center)
             
             Button(action: {
@@ -223,20 +223,19 @@ struct DashboardView: View {
                     await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: authManager.accessToken)
                 }
             }) {
-                Text("Start Analysis")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Theme.Colors.gemGold)
-                    .cornerRadius(12)
+                HStack(spacing: 10) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Start Analysis")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Capsule().fill(Theme.Colors.plumButton))
             }
         }
-        .padding(24)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Theme.Colors.textPrimary.opacity(0.05))
-        )
+        .pastelCard(Theme.Colors.lavender, padding: 24)
     }
     
     // MARK: - Analysis Progress
@@ -252,7 +251,7 @@ struct DashboardView: View {
                 .foregroundColor(.gray)
             
             ProgressView(value: profileAnalyzer.analysisProgress)
-                .tint(.green)
+                .tint(Theme.Colors.lime)
                 .scaleEffect(x: 1, y: 1.5)
             
             Text("\(Int(profileAnalyzer.analysisProgress * 100))%")
@@ -263,10 +262,7 @@ struct DashboardView: View {
                 .padding(.top, 8)
         }
         .padding(24)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Theme.Colors.textPrimary.opacity(0.05))
-        )
+        .surfaceCard(radius: Theme.CornerRadius.card)
     }
     
     // MARK: - Genre Selection
@@ -308,28 +304,30 @@ struct DashboardView: View {
                     HStack(spacing: 6) {
                 Text(firstGenre)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Theme.Colors.textPrimary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(chipColor.opacity(0.25)))
+                            .foregroundColor(Theme.Colors.textOnGenreColor(chipColor))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(chipColor))
                         
                         if selectedGenres.count > 1 {
                             Text("+\(selectedGenres.count - 1)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Theme.Colors.gemGold)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Theme.Colors.textPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Theme.Colors.chipFill))
                         }
                     }
                 }
                 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Theme.Colors.textOnPastel)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Theme.Colors.lime))
             }
             .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.Colors.textPrimary.opacity(0.05))
-            )
+            .surfaceCard(radius: Theme.CornerRadius.card)
         }
         .buttonStyle(.plain)
     }
@@ -377,7 +375,7 @@ struct DashboardView: View {
             HStack {
                 if discoveryEngine.isDiscovering {
                     ProgressView()
-                        .tint(.black)
+                        .tint(Theme.Colors.textOnPastel)
                         .scaleEffect(0.9)
                 } else {
                     Image(systemName: "sparkles")
@@ -387,17 +385,11 @@ struct DashboardView: View {
                 Text(discoveryEngine.isDiscovering ? "Discovering..." : "Discover")
                     .font(.system(size: 16, weight: .semibold))
             }
-            .foregroundColor(.black)
+            .foregroundColor(Theme.Colors.textOnPastel)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(
-                LinearGradient(
-                    colors: [Theme.Colors.gemGold, Theme.Colors.gemGold.opacity(0.8)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .cornerRadius(14)
+            .padding(.vertical, 18)
+            .background(Capsule().fill(Theme.Colors.lime))
+            .shadow(color: Theme.Colors.lime.opacity(0.25), radius: 16, y: 6)
         }
         .disabled(discoveryEngine.isDiscovering)
         .opacity(discoveryEngine.isDiscovering ? 0.7 : 1.0)
@@ -406,26 +398,11 @@ struct DashboardView: View {
     // MARK: - Quick Stats
     
     private var quickStatsRow: some View {
-        HStack(spacing: 0) {
-            QuickStat(value: "\(profileAnalyzer.profile.totalTracksAnalyzed)", label: "Tracks")
-            
-            Rectangle()
-                .fill(Theme.Colors.textPrimary.opacity(0.1))
-                .frame(width: 1, height: 40)
-            
-            QuickStat(value: "\(discoveryEngine.discoveredGems.count)", label: "Gems Found")
-            
-            Rectangle()
-                .fill(Theme.Colors.textPrimary.opacity(0.1))
-                .frame(width: 1, height: 40)
-            
-            QuickStat(value: "\(profileAnalyzer.profile.genreWeights.count)", label: "Genres")
+        HStack(spacing: 10) {
+            QuickStat(value: "\(profileAnalyzer.profile.totalTracksAnalyzed)", label: "Tracks", tile: Theme.Colors.pink)
+            QuickStat(value: "\(discoveryEngine.discoveredGems.count)", label: "Gems Found", tile: Theme.Colors.mint)
+            QuickStat(value: "\(profileAnalyzer.profile.genreWeights.count)", label: "Genres", tile: Theme.Colors.butter)
         }
-        .padding(.vertical, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Theme.Colors.textPrimary.opacity(0.05))
-        )
     }
     
     // MARK: - Recently Discovered
@@ -452,17 +429,38 @@ struct DashboardView: View {
 struct QuickStat: View {
     let value: String
     let label: String
+    /// Pastel tile color (build 76). nil = plain, on the canvas.
+    var tile: Color? = nil
     
     var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Theme.Colors.textPrimary)
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.gray)
+        if let tile {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 26, weight: .heavy))
+                    .foregroundColor(Theme.Colors.textOnPastel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Theme.Colors.textOnPastelSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
+                    .fill(tile)
+            )
+        } else {
+            VStack(spacing: 4) {
+                Text(value)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textPrimary)
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Colors.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -477,7 +475,7 @@ struct CompactGemCard: View {
                 Rectangle().fill(Color.gray.opacity(0.2))
             }
             .frame(width: 100, height: 100)
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(gem.track.name)

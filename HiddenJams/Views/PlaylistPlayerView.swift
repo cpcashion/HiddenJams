@@ -178,8 +178,7 @@ struct PlaylistPlayerView: View {
                     .foregroundColor(Theme.Colors.textSecondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(8)
+                    .background(Capsule().fill(Theme.Colors.chipFill))
             }
             
             Spacer()
@@ -253,7 +252,7 @@ struct PlaylistPlayerView: View {
                         .fill(Theme.Colors.spotifyDarkGray)
                 }
                 .frame(width: 320, height: 320)
-                .cornerRadius(Theme.CornerRadius.lg)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 
                 // Only show overlays on current card being swiped
                 if isCurrentCard {
@@ -342,22 +341,17 @@ struct PlaylistPlayerView: View {
             }) {
                 Text("Refresh")
                     .font(Theme.Typography.headline)
-                    .foregroundColor(Theme.Colors.textPrimary)
+                    .foregroundColor(Theme.Colors.textOnPastel)
                     .frame(width: 200)
                     .padding(.vertical, Theme.Spacing.md)
-                    .background(
-                        LinearGradient(
-                            colors: [Theme.Colors.accentPurple.opacity(0.5), Theme.Colors.accentPink.opacity(0.5)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(Theme.CornerRadius.md)
+                    .background(Capsule().fill(Theme.Colors.lime))
             }
         }
         .frame(width: 320, height: 320)
-        .background(Theme.Colors.spotifyDarkGray.opacity(0.3))
-        .cornerRadius(Theme.CornerRadius.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Theme.Colors.lavender.opacity(0.18))
+        )
     }
     
     // MARK: - Overlays
@@ -366,8 +360,8 @@ struct PlaylistPlayerView: View {
         Group {
             if cardOffset.width > 30 {
                 ZStack {
-                    RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                        .fill(Theme.Colors.gemGold.opacity(0.5))
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(Theme.Colors.lime.opacity(0.55))
                     
                     VStack(spacing: 6) {
                         Image(systemName: "heart.fill")
@@ -388,8 +382,8 @@ struct PlaylistPlayerView: View {
         Group {
             if cardOffset.width < -30 {
                 ZStack {
-                    RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                        .fill(Color.red.opacity(0.5))
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(Color(hex: "FF7A85").opacity(0.55))
                     
                     VStack(spacing: 6) {
                         Image(systemName: "xmark")
@@ -546,8 +540,7 @@ struct PlaylistPlayerView: View {
                     .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, Theme.Spacing.lg)
                     .padding(.vertical, Theme.Spacing.sm)
-                    .background(Theme.Colors.spotifyGreen)
-                    .cornerRadius(Theme.CornerRadius.circle)
+                    .background(Capsule().fill(Theme.Colors.lime))
                 }
             }
             // Refresh button removed - shown in empty state only
@@ -579,17 +572,10 @@ struct PlaylistPlayerView: View {
                     Text("Refresh")
                 }
                 .font(Theme.Typography.headline)
-                .foregroundColor(Theme.Colors.textPrimary)
+                .foregroundColor(Theme.Colors.textOnPastel)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.Spacing.md)
-                .background(
-                    LinearGradient(
-                        colors: [Theme.Colors.accentPurple.opacity(0.4), Theme.Colors.accentPink.opacity(0.4)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .cornerRadius(Theme.CornerRadius.md)
+                .background(Capsule().fill(Theme.Colors.lime))
             }
             .padding(.top, Theme.Spacing.md)
         }

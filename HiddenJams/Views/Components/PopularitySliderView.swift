@@ -59,8 +59,8 @@ struct PopularitySliderView: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Theme.Colors.gemGold.opacity(0.5),
-                                        Theme.Colors.gemGold
+                                        Theme.Colors.lavender,
+                                        Theme.Colors.lime
                                     ],
                                     startPoint: .leading,
                                     endPoint: .trailing
@@ -70,9 +70,9 @@ struct PopularitySliderView: View {
                         
                         // Thumb
                         Circle()
-                            .fill(Theme.Colors.gemGold)
+                            .fill(Theme.Colors.ctaFill)
                             .frame(width: 24, height: 24)
-                            .shadow(color: Theme.Colors.gemGold.opacity(0.5), radius: 4, x: 0, y: 2)
+                            .shadow(color: Theme.Colors.ctaFill.opacity(0.5), radius: 4, x: 0, y: 2)
                             .offset(x: (geometry.size.width - 24) * popularityLevel)
                             .gesture(
                                 DragGesture(minimumDistance: 0)
@@ -106,7 +106,7 @@ struct PopularitySliderView: View {
         }
         .padding(16)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous))
     }
 }
 
