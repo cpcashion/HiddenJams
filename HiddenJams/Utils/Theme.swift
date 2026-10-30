@@ -140,17 +140,6 @@ struct Theme {
             Color(hex: "A78BFA"), // violet
             Color(hex: "E879F9"), // orchid
             Color(hex: "7FE0C4"), // seafoam
-        ] = [
-            Color(hex: "FF4D8D"), // hot pink
-            Color(hex: "3B82F6"), // electric blue
-            Color(hex: "22D3EE"), // cyan
-            Color(hex: "A3E635"), // lime
-            Color(hex: "FACC15"), // golden yellow
-            Color(hex: "FB923C"), // orange
-            Color(hex: "EF4444"), // red
-            Color(hex: "A855F7"), // violet
-            Color(hex: "34D399"), // emerald
-            Color(hex: "D946EF"), // fuchsia
         ]
 
         /// Assigns every genre in the set a palette color.
