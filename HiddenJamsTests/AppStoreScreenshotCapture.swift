@@ -235,7 +235,9 @@ struct AppStoreScreenshotCapture {
 
         // Rewind the deck so the player behind the sheet shows the same track the sheet describes.
         env.audio.loadQueue(gems, autoPlay: true, isDiscoveryDeck: true)
-        let first = gems[0]
+        try await Task.sleep(for: .seconds(6))
+        // Describe whichever track the deck actually settled on (an unplayable preview auto-skips).
+        let first = env.audio.currentTrack ?? gems[0]
         let rarity = await RarityService.shared.rarity(for: first.track.artists[0], spotifyToken: nil)
         try await capture("03-rarity", wait: 8, {
             TabChrome(tab: .player) {
