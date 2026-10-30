@@ -18,7 +18,7 @@ struct OnboardingView: View {
         ),
         OnboardingItem(
             title: "Swipe to Playlist",
-            description: "Swipe right to save. We automatically build a \"Hidden Gems\" playlist in your Spotify library with every like.",
+            description: "Swipe right to save. Every save lands in one \"Hidden Jams\" playlist in your music app.",
             systemImage: "hand.draw.fill"
         ),
         OnboardingItem(

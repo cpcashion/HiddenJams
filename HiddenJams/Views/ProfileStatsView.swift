@@ -19,6 +19,31 @@ enum ProfileStatFocus: String, Hashable {
 
     /// ScrollViewReader anchor id.
     var anchorId: String { "profile-stats-\(rawValue)" }
+
+    /// Build 79: title of the pushed stat detail screen.
+    var title: String {
+        switch self {
+        case .tracks: return "Tracks"
+        case .gems: return "Gems"
+        case .genres: return "Genres"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .tracks: return "music.note.list"
+        case .gems: return "sparkles"
+        case .genres: return "square.grid.2x2"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .tracks: return Theme.Colors.pink
+        case .gems: return Theme.Colors.mint
+        case .genres: return Theme.Colors.butter
+        }
+    }
 }
 
 struct ProfileStatsView: View {
@@ -30,18 +55,27 @@ struct ProfileStatsView: View {
     let deckGemCount: Int
     /// Section to briefly highlight after a pill tap.
     let highlighted: ProfileStatFocus?
+    /// Build 79: show just one section (the pushed stat detail screen,
+    /// whose navigation title replaces the section header).
+    var only: ProfileStatFocus? = nil
 
     var body: some View {
         VStack(spacing: 32) {
-            tracksSection
-                .modifier(StatHighlight(on: highlighted == .tracks, color: Theme.Colors.pink))
-                .id(ProfileStatFocus.tracks.anchorId)
-            gemsSection
-                .modifier(StatHighlight(on: highlighted == .gems, color: Theme.Colors.mint))
-                .id(ProfileStatFocus.gems.anchorId)
-            genresSection
-                .modifier(StatHighlight(on: highlighted == .genres, color: Theme.Colors.butter))
-                .id(ProfileStatFocus.genres.anchorId)
+            if only == nil || only == .tracks {
+                tracksSection
+                    .modifier(StatHighlight(on: highlighted == .tracks, color: Theme.Colors.pink))
+                    .id(ProfileStatFocus.tracks.anchorId)
+            }
+            if only == nil || only == .gems {
+                gemsSection
+                    .modifier(StatHighlight(on: highlighted == .gems, color: Theme.Colors.mint))
+                    .id(ProfileStatFocus.gems.anchorId)
+            }
+            if only == nil || only == .genres {
+                genresSection
+                    .modifier(StatHighlight(on: highlighted == .genres, color: Theme.Colors.butter))
+                    .id(ProfileStatFocus.genres.anchorId)
+            }
         }
     }
 
@@ -262,14 +296,17 @@ struct ProfileStatsView: View {
 
     // MARK: - Building blocks
 
+    @ViewBuilder
     private func header(_ title: String, icon: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-            Text(title)
-                .font(.system(size: 18, weight: .semibold))
+        if only == nil {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            .foregroundColor(Theme.Colors.textPrimary)
         }
-        .foregroundColor(Theme.Colors.textPrimary)
     }
 
     private func caption(_ text: String) -> some View {

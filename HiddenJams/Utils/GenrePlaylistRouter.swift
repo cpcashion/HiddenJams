@@ -2,6 +2,10 @@
 //  GenrePlaylistRouter.swift
 //  HiddenJams
 //
+//  Build 79: saves go to ONE "Hidden Jams" playlist by default; the
+//  per-genre routing below only applies when the user turns on
+//  "Separate playlists by genre" in Profile.
+//
 //  Routes swipe-right saves into per-genre playlists ("HJ - Rock",
 //  "HJ - Drum and Bass", ...) instead of a single bucket. Genre is resolved
 //  from the discovery session first (the user's own genre pick — the most
@@ -19,6 +23,31 @@ enum GenrePlaylistRouter {
 
     /// The catch-all playlist when no genre bucket maps.
     static let fallbackPlaylistName = "Hidden Gems"
+
+    // MARK: - Build 79: one playlist by default
+
+    /// Default destination: every save (swipe right, Watch thumbs-up,
+    /// auto-save) goes to ONE playlist in the user's music service.
+    static let singlePlaylistName = "Hidden Jams"
+
+    /// UserDefaults key for the Profile toggle "Separate playlists by
+    /// genre". Off by default (absent key reads false).
+    static let separateByGenreKey = "hiddenjams_separate_genre_playlists"
+
+    /// True when the user opted into per-genre playlists ("HJ - Rock", ...).
+    static var separatesByGenre: Bool {
+        UserDefaults.standard.bool(forKey: separateByGenreKey)
+    }
+
+    /// Where a save should land, honoring the Profile setting. Existing
+    /// playlists are never renamed, merged or deleted — new saves just
+    /// follow the current setting.
+    static func destinationPlaylistName(for track: RecommendedTrack,
+                                        sessionGenres: Set<String>,
+                                        separateByGenre: Bool) -> String {
+        guard separateByGenre else { return singlePlaylistName }
+        return playlistName(for: track, sessionGenres: sessionGenres)
+    }
 
     /// Playlist name prefix for genre buckets: "HJ - Rock".
     static func playlistName(forBucket bucket: String?) -> String {
