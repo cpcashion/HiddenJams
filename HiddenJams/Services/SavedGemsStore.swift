@@ -18,9 +18,31 @@ class SavedGemsStore: ObservableObject {
     @Published private(set) var savedTracks: [SpotifyTrack] = []
 
     private let storageKey = "hiddenjams_saved_gems"
+    private let savedIdsKey = "hiddenjams_saved_track_ids"
+
+    /// IDs of every track ever saved to a Hidden Jams playlist (Spotify,
+    /// Apple Music, or in-app), by swipe right, watch thumbs up, or
+    /// auto-save. Used so an auto-save never duplicates a track the user
+    /// already saved — Spotify's add-to-playlist doesn't dedupe.
+    private(set) var savedTrackIds: Set<String> = []
 
     private init() {
         load()
+        if let ids = UserDefaults.standard.stringArray(forKey: savedIdsKey) {
+            savedTrackIds = Set(ids)
+        }
+        savedTrackIds.formUnion(savedTracks.map(\.id))
+    }
+
+    /// True if this track has already been saved anywhere by Hidden Jams.
+    func hasSaved(trackId: String) -> Bool {
+        savedTrackIds.contains(trackId)
+    }
+
+    /// Records that a track was saved (any destination).
+    func markSaved(trackId: String) {
+        guard savedTrackIds.insert(trackId).inserted else { return }
+        UserDefaults.standard.set(Array(savedTrackIds), forKey: savedIdsKey)
     }
 
     func save(_ track: RecommendedTrack) {
@@ -37,6 +59,10 @@ class SavedGemsStore: ObservableObject {
     func remove(_ track: SpotifyTrack) {
         savedTracks.removeAll { $0.id == track.id }
         persist()
+        // Removing a gem means it may be saved (or auto-saved) again later.
+        if savedTrackIds.remove(track.id) != nil {
+            UserDefaults.standard.set(Array(savedTrackIds), forKey: savedIdsKey)
+        }
     }
 
     func contains(_ track: SpotifyTrack) -> Bool {

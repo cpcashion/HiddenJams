@@ -2,7 +2,9 @@
 //  PlaylistPlayerView.swift
 //  HiddenJams
 //
-//  Premium stacked card player - swipe right to like, left to skip
+//  Premium stacked card player - swipe right to like, left to skip.
+//  No swipe at all = auto-save: a track that plays to its natural end
+//  un-swiped is saved exactly like a swipe right.
 //
 
 import SwiftUI
@@ -26,6 +28,9 @@ struct PlaylistPlayerView: View {
     var refreshProgress: String = ""
     
     @State private var savedTracks: Set<String> = []
+    /// Tracks swiped left (or thumbs-down) this session — never auto-saved,
+    /// even if the user goes back to one and lets it play out.
+    @State private var skippedTracks: Set<String> = []
     
     // Card swipe state
     @State private var cardOffset: CGSize = .zero
@@ -95,14 +100,14 @@ struct PlaylistPlayerView: View {
             let newIDs = recommendations.map { $0.id }
             
             if currentIDs != newIDs {
-                audioPlayer.loadQueue(recommendations)
+                audioPlayer.loadQueue(recommendations, isDiscoveryDeck: true)
             }
         }
         .onChange(of: recommendations.map(\.id)) { newIDs in
             let currentIDs = audioPlayer.queue.map { $0.id }
             if currentIDs != newIDs {
                 print("🔄 Recommendations changed, reloading queue...")
-                audioPlayer.loadQueue(recommendations)
+                audioPlayer.loadQueue(recommendations, isDiscoveryDeck: true)
             }
         }
         .onAppear { pushCurrentGemToWatch() }
@@ -114,6 +119,9 @@ struct PlaylistPlayerView: View {
             if let rarity = artistRarity, let track = currentTrack {
                 RaritySheet(rarity: rarity, trackName: track.track.name)
             }
+        }
+        .onReceive(audioPlayer.trackPlayedThrough) { track in
+            autoSaveIfUnswiped(track)
         }
         .onChange(of: watchBridge.pendingCommand) { command in
             guard let command else { return }
@@ -128,6 +136,27 @@ struct PlaylistPlayerView: View {
             case .thumbsDown:
                 swipeCardOff(direction: .left)
             }
+        }
+    }
+
+    /// Auto-save: a deck track that plays to its natural end with no swipe
+    /// (no swipe right/left on the phone, no thumbs on the watch) is saved
+    /// exactly like a swipe right — the user didn't skip it, so they're
+    /// probably enjoying it. Never re-saves a track already saved, and
+    /// never saves one the user skipped.
+    private func autoSaveIfUnswiped(_ track: RecommendedTrack) {
+        // A swipe that is mid-animation decides this card's fate.
+        guard !isAnimatingOut else { return }
+        guard !skippedTracks.contains(track.id),
+              !savedTracks.contains(track.id),
+              !SavedGemsStore.shared.hasSaved(trackId: track.id) else { return }
+        print("💚 Auto-saving un-swiped track '\(track.track.name)'")
+        savedTracks.insert(track.id)
+        SavedGemsStore.shared.markSaved(trackId: track.id)
+        onSave(track)
+        // Same light haptic as a swipe — only when the user is looking.
+        if UIApplication.shared.applicationState == .active {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 
@@ -490,8 +519,14 @@ struct PlaylistPlayerView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             // Handle like/skip action
             if direction == .right, let track = currentTrack {
+                // Already auto-saved or saved before: don't add it twice.
+                let alreadySaved = savedTracks.contains(track.id)
+                    || SavedGemsStore.shared.hasSaved(trackId: track.id)
                 savedTracks.insert(track.id)
-                onSave(track)
+                SavedGemsStore.shared.markSaved(trackId: track.id)
+                if !alreadySaved { onSave(track) }
+            } else if direction == .left, let track = currentTrack {
+                skippedTracks.insert(track.id)
             }
             
             // Check if there's a next track
