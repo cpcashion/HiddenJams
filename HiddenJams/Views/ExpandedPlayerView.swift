@@ -129,19 +129,21 @@ struct ExpandedPlayerView: View {
 
                 // Transport controls
                 // Liquid-glass transport capsule with a lime play disc.
+                GlassEffectContainer {
                 HStack(spacing: 28) {
                     Button(action: { audioManager.playPrevious() }) {
                         Image(systemName: "backward.fill")
                             .font(.system(size: 24))
                             .foregroundColor(Theme.Colors.textPrimary)
                             .frame(width: 52, height: 52)
+                            .subtleGlass(in: Circle())
                     }
                     Button(action: { audioManager.togglePlayPause() }) {
                         Image(systemName: audioManager.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(Theme.Colors.textOnPastel)
                             .frame(width: 76, height: 76)
-                            .background(Circle().fill(Theme.Colors.lime))
+                            .brandGlass(Theme.Colors.lime, in: Circle())
                             .shadow(color: Theme.Colors.lime.opacity(0.35), radius: 18, y: 6)
                     }
                     Button(action: { audioManager.playNext() }) {
@@ -149,7 +151,9 @@ struct ExpandedPlayerView: View {
                             .font(.system(size: 24))
                             .foregroundColor(Theme.Colors.textPrimary)
                             .frame(width: 52, height: 52)
+                            .subtleGlass(in: Circle())
                     }
+                }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)

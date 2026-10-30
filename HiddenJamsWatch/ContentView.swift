@@ -8,6 +8,9 @@
 //  on watchOS 26+, graceful fallback below. Mirrors the iPhone's
 //  light/dark theme.
 //
+//  Build 78: tap the artwork/title (or double-tap) to open the song in
+//  its source app on the iPhone.
+//
 //  Layout is overflow-safe: compact player, fixed thumb sizes, spacers
 //  absorb extra space so nothing overlaps on 40mm screens.
 //
@@ -41,25 +44,38 @@ struct ContentView: View {
             // Compact fixed height so it never pushes the thumbs around.
             if bridge.hasTrack {
                 HStack(spacing: 8) {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                        .liquidGlass()
+                    // Build 78: tap the artwork or title (or double-tap on
+                    // supported watches) to open this song in its source
+                    // app on the iPhone. Open only — nothing is liked or
+                    // queued in Spotify.
+                    Button { bridge.openInSourceApp() } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 32, height: 32)
+                                .clipShape(Circle())
+                                .liquidGlass()
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(bridge.trackTitle)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Text(bridge.trackArtist)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(bridge.trackTitle)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                Text(bridge.trackArtist)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .buttonStyle(.plain)
+                    .handGestureShortcut(.primaryAction)
+                    .accessibilityLabel("Open \(bridge.trackTitle) on iPhone")
+                    .accessibilityHint("Opens this song in Spotify or Apple Music")
 
                     Button { bridge.send(action: .togglePlay) } label: {
                         // Lime play disc (build 76 redesign — matches iPhone).
@@ -117,6 +133,8 @@ struct ContentView: View {
             Text(statusText)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .frame(height: 16)
         }
         .padding(.horizontal, 8)
@@ -153,6 +171,7 @@ struct ContentView: View {
     }
 
     private var statusText: String {
+        if let open = bridge.openStatus { return open }
         guard let action = bridge.lastSentAction else { return "" }
         switch action {
         case .thumbsUp: return "Saved ✓"

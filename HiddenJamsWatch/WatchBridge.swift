@@ -8,6 +8,7 @@
 
 import Foundation
 import WatchConnectivity
+import WatchKit
 import Combine
 
 /// Thumbs actions the watch can send. Raw values are the wire format —
@@ -16,6 +17,9 @@ enum WatchAction: String {
     case thumbsUp
     case thumbsDown
     case togglePlay
+    /// Build 78: open the current track in its source app on the iPhone
+    /// (Spotify / Apple Music). Open only — nothing is liked or queued.
+    case openInSource
 }
 
 final class WatchBridge: NSObject, ObservableObject {
@@ -27,6 +31,9 @@ final class WatchBridge: NSObject, ObservableObject {
     @Published var theme: String = "dark"
     /// Briefly shows a confirmation after a tap ("Saved ✓" / "Skipped").
     @Published var lastSentAction: WatchAction?
+    /// Short confirmation after an "open in source" tap, e.g.
+    /// "Opened in Spotify" or "Tap the alert on iPhone".
+    @Published var openStatus: String?
 
     override init() {
         super.init()
@@ -46,6 +53,62 @@ final class WatchBridge: NSObject, ObservableObject {
         lastSentAction = action
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             if self?.lastSentAction == action { self?.lastSentAction = nil }
+        }
+    }
+
+    /// Tap on the artwork/title: ask the iPhone to open the current track in
+    /// the app it came from. The phone replies with what it did so we can
+    /// confirm with a haptic + a short label.
+    func openInSourceApp() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        WKInterfaceDevice.current().play(.click)
+        guard session.isReachable else {
+            showOpenStatus("Open iPhone to connect", success: false)
+            return
+        }
+        showOpenStatus("Opening…", success: nil)
+        session.sendMessage(
+            ["action": WatchAction.openInSource.rawValue],
+            replyHandler: { [weak self] reply in
+                let result = reply["result"] as? String ?? ""
+                let service = reply["service"] as? String ?? ""
+                let label: String
+                var success = true
+                switch result {
+                case "opened": label = "Opened in \(service)"
+                case "notified": label = "Tap the alert on iPhone"
+                case "notificationsOff":
+                    label = "Allow alerts in Hidden Jams"
+                    success = false
+                case "noLink":
+                    label = "No link for this song"
+                    success = false
+                case "noTrack":
+                    label = "Nothing playing"
+                    success = false
+                default:
+                    label = "Couldn't reach iPhone"
+                    success = false
+                }
+                DispatchQueue.main.async { self?.showOpenStatus(label, success: success) }
+            },
+            errorHandler: { [weak self] error in
+                print("⌚️ openInSource failed: \(error)")
+                DispatchQueue.main.async { self?.showOpenStatus("Couldn't reach iPhone", success: false) }
+            }
+        )
+    }
+
+    /// success: true → success haptic, false → failure haptic, nil → none.
+    private func showOpenStatus(_ text: String, success: Bool?) {
+        openStatus = text
+        if let success {
+            WKInterfaceDevice.current().play(success ? .success : .failure)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            if self?.openStatus == text { self?.openStatus = nil }
         }
     }
 

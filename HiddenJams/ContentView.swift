@@ -48,6 +48,13 @@ struct ContentView: View {
             ExpandedPlayerView()
                 .environmentObject(audioManager)
         }
+        .onAppear {
+            // The watch's "open in source app" tap reads the live player.
+            let manager = audioManager
+            SourceAppOpener.shared.currentTrackProvider = { [weak manager] in
+                manager?.currentTrack
+            }
+        }
         .onOpenURL { url in
             // Handle OAuth callback
             authManager.handleCallback(url: url)

@@ -376,7 +376,8 @@ struct ChipStyle: ViewModifier {
             .foregroundColor(isSelected ? Theme.Colors.textOnPastel : Theme.Colors.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
-            .background(Capsule().fill(isSelected ? Theme.Colors.lime : Theme.Colors.chipFill))
+            // Build 78: subtle Liquid Glass tinted with the chip's color.
+            .brandGlass(isSelected ? Theme.Colors.lime : Theme.Colors.chipFill, in: Capsule())
     }
 }
 
@@ -403,7 +404,7 @@ struct LimeCTAButtonStyle: ButtonStyle {
             .foregroundColor(Theme.Colors.textOnPastel)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(Capsule().fill(Theme.Colors.lime))
+            .brandGlass(Theme.Colors.lime, in: Capsule())
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }

@@ -51,7 +51,7 @@ struct MiniPlayerView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(Theme.Colors.textOnPastel)
                         .frame(width: 40, height: 40)
-                        .background(Circle().fill(Theme.Colors.lime))
+                        .brandGlass(Theme.Colors.lime, in: Circle())
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -60,6 +60,8 @@ struct MiniPlayerView: View {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 18))
                         .foregroundColor(Theme.Colors.textSecondary)
+                        .frame(width: 36, height: 36)
+                        .subtleGlass(in: Circle())
                         .frame(width: 36, height: 44)
                 }
                 .buttonStyle(.plain)
