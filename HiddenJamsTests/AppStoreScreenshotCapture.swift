@@ -105,7 +105,10 @@ struct AppStoreScreenshotCapture {
         let b64 = data.base64EncodedString()
         // Hosted-test stdout isn't forwarded by xcodebuild (parallel clones),
         // so the capture rides in recorded issue messages, which are.
-        func emit(_ s: String) { Issue.record(Comment(rawValue: s)) }
+        func emit(_ s: String) {
+            FileHandle.standardOutput.write((s + "\n").data(using: .utf8)!)
+            Issue.record(Comment(rawValue: s))
+        }
         emit("HJSHOT-BEGIN \(name) \(Int(bounds.width))x\(Int(bounds.height))@\(window.screen.scale) bytes=\(data.count)")
         var idx = 0
         var start = b64.startIndex
