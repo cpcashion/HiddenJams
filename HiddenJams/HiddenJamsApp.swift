@@ -31,6 +31,9 @@ struct HiddenJamsApp: App {
         // Full-song mode needs the Spotify token for the Premium check.
         audio.spotifyTokenProvider = { [weak auth] in auth?.accessToken }
         _audioManager = StateObject(wrappedValue: audio)
+        // Tapping the watch's "Open in Spotify / Apple Music" alert opens
+        // the track (build 78).
+        SourceAppOpener.shared.configure()
     }
 
     var body: some Scene {

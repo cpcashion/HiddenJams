@@ -70,8 +70,10 @@ struct PopularitySliderView: View {
                         
                         // Thumb
                         Circle()
-                            .fill(Theme.Colors.ctaFill)
+                            .fill(Color.clear)
                             .frame(width: 24, height: 24)
+                            .brandGlass(Theme.Colors.ctaFill, in: Circle())
+                            .contentShape(Circle())
                             .shadow(color: Theme.Colors.ctaFill.opacity(0.5), radius: 4, x: 0, y: 2)
                             .offset(x: (geometry.size.width - 24) * popularityLevel)
                             .gesture(

@@ -111,7 +111,13 @@ struct PlaylistPlayerView: View {
             }
         }
         .onAppear { pushCurrentGemToWatch() }
-        .onChange(of: audioPlayer.currentTrack?.id) { _ in pushCurrentGemToWatch() }
+        .onChange(of: audioPlayer.currentTrack?.id) { _ in
+            pushCurrentGemToWatch()
+            // Profile stats (build 78): log each deck track that comes up.
+            if audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack {
+                ListeningStatsStore.shared.recordPlay(track)
+            }
+        }
         .onChange(of: audioPlayer.isPlaying) { _ in pushCurrentGemToWatch() }
         .onAppear { loadRarity() }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in loadRarity() }
@@ -132,9 +138,12 @@ struct PlaylistPlayerView: View {
             case .thumbsUp:
                 // Thumbs up = the exact same save as a swipe right (genre
                 // playlist routing included); thumbs down = skip.
-                swipeCardOff(direction: .right)
+                swipeCardOff(direction: .right, saveMethod: .watch)
             case .thumbsDown:
                 swipeCardOff(direction: .left)
+            case .openInSource:
+                // Handled by WatchBridge → SourceAppOpener (open only).
+                break
             }
         }
     }
@@ -153,6 +162,7 @@ struct PlaylistPlayerView: View {
         print("💚 Auto-saving un-swiped track '\(track.track.name)'")
         savedTracks.insert(track.id)
         SavedGemsStore.shared.markSaved(trackId: track.id)
+        ListeningStatsStore.shared.recordSave(track, method: .auto)
         onSave(track)
         // Same light haptic as a swipe — only when the user is looking.
         if UIApplication.shared.applicationState == .active {
@@ -207,7 +217,7 @@ struct PlaylistPlayerView: View {
                     .foregroundColor(Theme.Colors.textSecondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Capsule().fill(Theme.Colors.chipFill))
+                    .brandGlass(Theme.Colors.chipFill, in: Capsule(), interactive: false)
             }
             
             Spacer()
@@ -373,7 +383,7 @@ struct PlaylistPlayerView: View {
                     .foregroundColor(Theme.Colors.textOnPastel)
                     .frame(width: 200)
                     .padding(.vertical, Theme.Spacing.md)
-                    .background(Capsule().fill(Theme.Colors.lime))
+                    .brandGlass(Theme.Colors.lime, in: Capsule())
             }
         }
         .frame(width: 320, height: 320)
@@ -500,7 +510,8 @@ struct PlaylistPlayerView: View {
         case left, right
     }
     
-    private func swipeCardOff(direction: SwipeDirection) {
+    private func swipeCardOff(direction: SwipeDirection,
+                              saveMethod: ListeningStatsStore.SaveMethod = .swipe) {
         isAnimatingOut = true
         
         let screenWidth = UIScreen.main.bounds.width
@@ -524,7 +535,10 @@ struct PlaylistPlayerView: View {
                     || SavedGemsStore.shared.hasSaved(trackId: track.id)
                 savedTracks.insert(track.id)
                 SavedGemsStore.shared.markSaved(trackId: track.id)
-                if !alreadySaved { onSave(track) }
+                if !alreadySaved {
+                    ListeningStatsStore.shared.recordSave(track, method: saveMethod)
+                    onSave(track)
+                }
             } else if direction == .left, let track = currentTrack {
                 skippedTracks.insert(track.id)
             }
@@ -575,7 +589,7 @@ struct PlaylistPlayerView: View {
                     .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, Theme.Spacing.lg)
                     .padding(.vertical, Theme.Spacing.sm)
-                    .background(Capsule().fill(Theme.Colors.lime))
+                    .brandGlass(Theme.Colors.lime, in: Capsule())
                 }
             }
             // Refresh button removed - shown in empty state only
@@ -610,7 +624,7 @@ struct PlaylistPlayerView: View {
                 .foregroundColor(Theme.Colors.textOnPastel)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.Spacing.md)
-                .background(Capsule().fill(Theme.Colors.lime))
+                .brandGlass(Theme.Colors.lime, in: Capsule())
             }
             .padding(.top, Theme.Spacing.md)
         }

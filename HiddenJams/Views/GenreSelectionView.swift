@@ -52,7 +52,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Capsule().fill(Theme.Colors.chipFill))
+                                    .brandGlass(Theme.Colors.chipFill, in: Capsule())
                             }
                             
                             Button(action: {
@@ -63,7 +63,7 @@ struct GenreSelectionView: View {
                                     .foregroundColor(Theme.Colors.textSecondary)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Capsule().fill(Theme.Colors.chipFill))
+                                    .brandGlass(Theme.Colors.chipFill, in: Capsule())
                             }
                         }
                     }
@@ -125,11 +125,8 @@ struct GenreSelectionView: View {
                                 .foregroundColor(Theme.Colors.buttonText)
                                 .padding(.horizontal, 60)
                                 .padding(.vertical, 14)
-                                .background(
-                                    Capsule()
-                                        .fill(Theme.Colors.lime)
-                                        .shadow(color: Theme.Colors.lime.opacity(0.35), radius: 12, x: 0, y: 6)
-                                )
+                                .brandGlass(Theme.Colors.lime, in: Capsule())
+                                .shadow(color: Theme.Colors.lime.opacity(0.35), radius: 12, x: 0, y: 6)
                         }
                         .padding(.bottom, 30)
                     }

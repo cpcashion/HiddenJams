@@ -18,6 +18,11 @@ enum WatchPlayerAction: String {
     case thumbsUp
     case thumbsDown
     case togglePlay
+    /// Build 78: tap the artwork/title on the watch to open the current
+    /// track in its source app (Spotify / Apple Music). Open only — never
+    /// likes, queues, or saves anything. Sent with a reply handler so the
+    /// watch can show what happened.
+    case openInSource
 }
 
 final class WatchBridge: NSObject, ObservableObject {
@@ -109,6 +114,20 @@ extension WatchBridge: WCSessionDelegate {
                  activationDidCompleteWith activationState: WCSessionActivationState,
                  error: Error?) {
         if let error { print("⌚️ WCSession activation error: \(error)") }
+        // Watch users get a one-time, foreground-only ask for notification
+        // permission — the "Open in Spotify" alert needs it when the phone
+        // is locked or Hidden Jams is in the background.
+        guard activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
+        DispatchQueue.main.async {
+            SourceAppOpener.shared.requestNotificationPermissionIfNeeded()
+        }
+    }
+
+    func sessionWatchStateDidChange(_ session: WCSession) {
+        guard session.isPaired, session.isWatchAppInstalled else { return }
+        DispatchQueue.main.async {
+            SourceAppOpener.shared.requestNotificationPermissionIfNeeded()
+        }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
@@ -122,6 +141,35 @@ extension WatchBridge: WCSessionDelegate {
         guard let raw = message["action"] as? String,
               let action = WatchPlayerAction(rawValue: raw) else { return }
         print("⌚️ Watch tapped: \(raw)")
+        if action == .openInSource {
+            DispatchQueue.main.async {
+                SourceAppOpener.shared.openCurrentTrack { _ in }
+            }
+            return
+        }
         DispatchQueue.main.async { self.pendingCommand = action }
+    }
+
+    /// Messages sent with a reply handler (the watch's "open in source"
+    /// tap) — reply with the outcome so the watch can confirm it.
+    func session(_ session: WCSession,
+                 didReceiveMessage message: [String: Any],
+                 replyHandler: @escaping ([String: Any]) -> Void) {
+        guard let raw = message["action"] as? String,
+              let action = WatchPlayerAction(rawValue: raw) else {
+            replyHandler([:])
+            return
+        }
+        print("⌚️ Watch tapped (reply): \(raw)")
+        guard action == .openInSource else {
+            DispatchQueue.main.async { self.pendingCommand = action }
+            replyHandler([:])
+            return
+        }
+        DispatchQueue.main.async {
+            SourceAppOpener.shared.openCurrentTrack { outcome in
+                replyHandler(["result": outcome.code, "service": outcome.serviceName])
+            }
+        }
     }
 }

@@ -14,6 +14,9 @@ struct MainTabView: View {
     // Cache Spotify playlist IDs by name ("HJ - Rock", ...)
     @State private var playlistIdsByName: [String: String] = [:]
     
+    /// Build 78: which Profile stats section a Home pill asked to show.
+    @State private var profileFocus: ProfileStatFocus?
+    
     
     enum Tab {
         case home, player, profile
@@ -34,7 +37,11 @@ struct MainTabView: View {
                 DashboardView(
                     discoveryEngine: discoveryEngine,
                     onShowPlayer: { selectedTab = .player },
-                    onShowProfile: { selectedTab = .profile }
+                    onShowProfile: { selectedTab = .profile },
+                    onShowStat: { stat in
+                        profileFocus = stat
+                        selectedTab = .profile
+                    }
                 )
                 .opacity(selectedTab == .home ? 1 : 0)
                 .zIndex(selectedTab == .home ? 1 : 0)
@@ -96,7 +103,7 @@ struct MainTabView: View {
                 .zIndex(selectedTab == .player ? 1 : 0)
                 
                 // Profile tab - always exists, visibility controlled by opacity
-                ProfileView()
+                ProfileView(statFocus: $profileFocus, deckGemCount: discoveryEngine.discoveredGems.count)
                     .environmentObject(profileAnalyzer)
                     .opacity(selectedTab == .profile ? 1 : 0)
                     .zIndex(selectedTab == .profile ? 1 : 0)
@@ -368,6 +375,12 @@ struct LiquidTabButton: View {
                 .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? Theme.Colors.textOnPastel : Theme.Colors.textSecondary)
                 .frame(width: 56, height: 56)
+                // Build 78: the selected lime disc is tinted Liquid Glass
+                // (same lime), merging with the bar's glass capsule.
+                .glassEffect(
+                    isSelected ? .regular.tint(Theme.Colors.lime.opacity(0.55)).interactive() : .identity,
+                    in: Circle()
+                )
                 .background(
                     Circle()
                         .fill(Theme.Colors.lime)
@@ -409,7 +422,7 @@ struct EmptyPlayerStateView: View {
                         .foregroundColor(Theme.Colors.buttonText)
                         .padding(.horizontal, 32)
                         .padding(.vertical, 16)
-                        .background(Capsule().fill(Theme.Colors.lime))
+                        .brandGlass(Theme.Colors.lime, in: Capsule())
                 }
             }
         }

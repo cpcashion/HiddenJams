@@ -25,6 +25,18 @@ struct ProfileView: View {
     @State private var isConnectingAppleMusic = false
     @State private var isLinkingAppleID = false
     @State private var appleIDError: String?
+
+    /// Build 78: set by a Home stat pill; Profile scrolls to that section,
+    /// highlights it briefly, then clears it.
+    @Binding var statFocus: ProfileStatFocus?
+    /// Gems in the current discovery deck (Home's "Gems Found").
+    var deckGemCount: Int = 0
+    @State private var highlightedStat: ProfileStatFocus?
+
+    init(statFocus: Binding<ProfileStatFocus?> = .constant(nil), deckGemCount: Int = 0) {
+        self._statFocus = statFocus
+        self.deckGemCount = deckGemCount
+    }
     
     var body: some View {
         ZStack {
@@ -33,9 +45,11 @@ struct ProfileView: View {
             if profileDataService.isLoading && !hasLoadedData {
                 loadingView
             } else {
+                ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
                         headerSection
+                        ProfileStatsView(deckGemCount: deckGemCount, highlighted: highlightedStat)
                         musicSourcesSection
                         if !savedGems.savedTracks.isEmpty {
                             savedGemsSection
@@ -58,6 +72,9 @@ struct ProfileView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 60) // Account for status bar
                 }
+                .onAppear { scrollToFocus(proxy) }
+                .onChange(of: statFocus) { _ in scrollToFocus(proxy) }
+                }
             }
         }
         .edgesIgnoringSafeArea(.bottom) // Only ignore bottom safe area for tab bar
@@ -69,6 +86,23 @@ struct ProfileView: View {
         }
     }
     
+    // MARK: - Stat focus (Home pills)
+
+    private func scrollToFocus(_ proxy: ScrollViewProxy) {
+        guard let focus = statFocus else { return }
+        // Let the tab switch land first, then glide to the section.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            withAnimation(.easeInOut(duration: 0.45)) {
+                proxy.scrollTo(focus.anchorId, anchor: .top)
+            }
+            highlightedStat = focus
+            statFocus = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                if highlightedStat == focus { highlightedStat = nil }
+            }
+        }
+    }
+
     // MARK: - Loading
     
     private var loadingView: some View {
@@ -555,6 +589,12 @@ struct ProfileView: View {
                                          : Theme.Colors.textSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .glassEffect(
+                            themeManager.mode == theme
+                            ? .regular.tint(Theme.Colors.ctaFill.opacity(0.55)).interactive()
+                            : .identity,
+                            in: Capsule()
+                        )
                         .background(
                             themeManager.mode == theme
                             ? Theme.Colors.ctaFill
@@ -650,8 +690,7 @@ struct ProfileView: View {
                     .foregroundColor(Theme.Colors.buttonText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(Theme.Colors.ctaFill)
-                    .cornerRadius(16)
+                    .brandGlass(Theme.Colors.ctaFill, in: Capsule())
                     .disabled(isConnectingAppleMusic)
             }
         }

@@ -24,15 +24,21 @@ struct DashboardView: View {
     
     var onShowPlayer: () -> Void = {}
     var onShowProfile: () -> Void = {}
+    /// Build 78: a stat pill was tapped — open Profile at that stat.
+    var onShowStat: (ProfileStatFocus) -> Void = { _ in }
     
     private var selectedGenres: Set<String> {
         (try? JSONDecoder().decode(Set<String>.self, from: selectedGenresData)) ?? []
     }
     
-    init(discoveryEngine: EnhancedHiddenGemsDiscovery, onShowPlayer: @escaping () -> Void = {}, onShowProfile: @escaping () -> Void = {}) {
+    init(discoveryEngine: EnhancedHiddenGemsDiscovery,
+         onShowPlayer: @escaping () -> Void = {},
+         onShowProfile: @escaping () -> Void = {},
+         onShowStat: @escaping (ProfileStatFocus) -> Void = { _ in }) {
         self.discoveryEngine = discoveryEngine
         self.onShowPlayer = onShowPlayer
         self.onShowProfile = onShowProfile
+        self.onShowStat = onShowStat
     }
     
     var body: some View {
@@ -232,8 +238,9 @@ struct DashboardView: View {
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(Capsule().fill(Theme.Colors.plumButton))
+                .brandGlass(Theme.Colors.plumButton, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .pastelCard(Theme.Colors.lavender, padding: 24)
     }
@@ -324,7 +331,9 @@ struct DashboardView: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(Theme.Colors.textOnPastel)
                     .frame(width: 32, height: 32)
-                    .background(Circle().fill(Theme.Colors.lime))
+                    // Glass on the control affordance only — the card stays
+                    // a plain surface (non-interactive: the whole card is the button).
+                    .brandGlass(Theme.Colors.lime, in: Circle(), interactive: false)
             }
             .padding(16)
             .surfaceCard(radius: Theme.CornerRadius.card)
@@ -388,9 +397,10 @@ struct DashboardView: View {
             .foregroundColor(Theme.Colors.textOnPastel)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .background(Capsule().fill(Theme.Colors.lime))
+            .brandGlass(Theme.Colors.lime, in: Capsule())
             .shadow(color: Theme.Colors.lime.opacity(0.25), radius: 16, y: 6)
         }
+        .buttonStyle(.plain)
         .disabled(discoveryEngine.isDiscovering)
         .opacity(discoveryEngine.isDiscovering ? 0.7 : 1.0)
     }
@@ -399,9 +409,16 @@ struct DashboardView: View {
     
     private var quickStatsRow: some View {
         HStack(spacing: 10) {
-            QuickStat(value: "\(profileAnalyzer.profile.totalTracksAnalyzed)", label: "Tracks", tile: Theme.Colors.pink)
-            QuickStat(value: "\(discoveryEngine.discoveredGems.count)", label: "Gems Found", tile: Theme.Colors.mint)
-            QuickStat(value: "\(profileAnalyzer.profile.genreWeights.count)", label: "Genres", tile: Theme.Colors.butter)
+            // Build 78: each pill opens its stats section in Profile.
+            QuickStat(value: "\(profileAnalyzer.profile.totalTracksAnalyzed)", label: "Tracks", tile: Theme.Colors.pink) {
+                onShowStat(.tracks)
+            }
+            QuickStat(value: "\(discoveryEngine.discoveredGems.count)", label: "Gems Found", tile: Theme.Colors.mint) {
+                onShowStat(.gems)
+            }
+            QuickStat(value: "\(profileAnalyzer.profile.genreWeights.count)", label: "Genres", tile: Theme.Colors.butter) {
+                onShowStat(.genres)
+            }
         }
     }
     
@@ -431,9 +448,41 @@ struct QuickStat: View {
     let label: String
     /// Pastel tile color (build 76). nil = plain, on the canvas.
     var tile: Color? = nil
+    /// Build 78: when set, the tile is a button (with subtle Liquid Glass).
+    var action: (() -> Void)? = nil
     
     var body: some View {
-        if let tile {
+        if let tile, let action {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                action()
+            } label: {
+                tileContent(showsChevron: true)
+                    .brandGlass(tile, in: RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(value) \(label)")
+            .accessibilityHint("Shows your \(label.lowercased()) stats in Profile")
+        } else if let tile {
+            tileContent(showsChevron: false)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
+                        .fill(tile)
+                )
+        } else {
+            VStack(spacing: 4) {
+                Text(value)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textPrimary)
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Colors.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func tileContent(showsChevron: Bool) -> some View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
                     .font(.system(size: 26, weight: .heavy))
@@ -446,21 +495,14 @@ struct QuickStat: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
-                    .fill(tile)
-            )
-        } else {
-            VStack(spacing: 4) {
-                Text(value)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(Theme.Colors.textPrimary)
-                Text(label)
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.Colors.textSecondary)
+            .overlay(alignment: .topTrailing) {
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(Theme.Colors.textOnPastelSecondary)
+                        .padding(10)
+                }
             }
-            .frame(maxWidth: .infinity)
-        }
     }
 }
 
