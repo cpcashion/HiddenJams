@@ -235,9 +235,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     private var knownTrackIds: Set<String> = []
     private var userLibrary: [SpotifyTrack] = []  // For AI explanations
 
-    // MARK: - Session-Based Deduplication (for "Discover More" within same session)
+    // MARK: - Session-Based Deduplication
+    // A Discover session is the life of this engine (the app run). Every
+    // Discover tap starts a fresh deck but keeps this memory, so no song and
+    // no artist is ever served twice in a session.
     private var sessionSeenTracks: Set<String> = []  // Tracks seen in THIS discovery session only
     private var sessionSeenArtists: Set<String> = []  // Artists seen in THIS discovery session only
+    /// Spotify decks: tracks (id + artist/title) and artists already served.
+    private var spotifySession = DiscoverySessionMemory()
     
     
     init() {
@@ -301,9 +306,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // Only clear if not appending
             if !appendResults {
                 discoveredGems = []
-                // Clear session-based deduplication for fresh discovery
-                sessionSeenTracks.removeAll()
-                sessionSeenArtists.removeAll()
+                // Session memory is deliberately NOT cleared here: clearing it
+                // on every Discover tap is what let songs and artists repeat.
             }
             knownTrackIds = Set(userTracks)
             self.userLibrary = userLibrary
@@ -592,7 +596,6 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let picked = (selectedGenres ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let genres = picked.isEmpty ? Self.openModeGenres(profile: profile) : picked.sorted()
         let history = DiscoveryHistoryManager.shared
-        let sessionArtists = sessionSeenArtists
         var excluded = knownTrackIds.union(sessionSeenTracks)
         if appendResults { excluded.formUnion(discoveredGems.map { $0.track.id }) }
 
@@ -603,8 +606,11 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             followerCeiling: followerThreshold
         )
         request.excludedTrackIds = excluded
+        // Session repeats are hard exclusions (track id, artist + title, any
+        // credited artist); longer-term history stays a ranking signal.
+        spotifySession.apply(to: &request)
         request.isTrackSeen = { history.isSeen(trackId: $0) }
-        request.isArtistSeen = { sessionArtists.contains($0) || history.isArtistSeen(artistId: $0) }
+        request.isArtistSeen = { history.isArtistSeen(artistId: $0) }
         request.userExcludedGenres = Self.userExcludedGenres()
         request.target = max(1, count)
 
@@ -617,15 +623,15 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let summary = deck.stats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
         print("🎛️ Genre deck \(genres): \(deck.tracks.count) tracks, \(deck.playableCount) playable, \(deck.relaxedCount) relaxed [\(summary)]")
 
-        let recommendations = deck.tracks.map { makeRecommendation(for: $0, profile: profile) }
+        // Final gate + record: nothing that repeats this session gets through.
+        let fresh = spotifySession.admit(deck.tracks)
+        let recommendations = fresh.map { makeRecommendation(for: $0, profile: profile) }
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
         DiscoveryQuotaManager.shared.recordDiscovered(count: recommendations.count)
 
         for gem in recommendations {
             sessionSeenTracks.insert(gem.track.id)
-            if let artistId = gem.track.artists.first?.spotifyId {
-                sessionSeenArtists.insert(artistId)
-            }
+            sessionSeenArtists.formUnion(gem.track.artists.compactMap { $0.spotifyId })
         }
         DiscoveryHistoryManager.shared.addToHistory(
             trackIds: recommendations.map { $0.track.id },

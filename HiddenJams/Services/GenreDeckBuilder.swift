@@ -30,6 +30,12 @@ struct GenreDeckRequest {
     var followerCeiling: Int
     /// Never served: the user's library and tracks already shown this session.
     var excludedTrackIds: Set<String> = []
+    /// Never served: artists (Spotify artist ids) already shown this Discover
+    /// session. A track is out if ANY of its credited artists is in here.
+    var excludedArtistIds: Set<String> = []
+    /// Never served: songs already shown this session, by normalized
+    /// artist name + title (catches the same song under another track id).
+    var excludedSongKeys: Set<String> = []
     /// Served recently: only repeated when nothing new is left.
     var isTrackSeen: (String) -> Bool = { _ in false }
     /// Artists served recently: ranked after new artists.
@@ -37,7 +43,9 @@ struct GenreDeckRequest {
     /// Genres the user excluded in settings.
     var userExcludedGenres: [String] = []
     var target = 50
-    var maxTracksPerArtist = 2
+    /// One track per artist per deck, so an artist can never play twice
+    /// (or back to back). Counted over every credited artist.
+    var maxTracksPerArtist = 1
     var timeBudget: TimeInterval = 9
 }
 
@@ -88,6 +96,8 @@ final class GenreDeckBuilder {
         let seenTrack: Bool
         let seenArtist: Bool
         let artistKey: String
+        /// Every credited artist's Spotify id (main artist first).
+        let artistIds: [String]
         /// Distance from the slider's target popularity (plus a little jitter).
         let closeness: Double
 
@@ -198,10 +208,13 @@ final class GenreDeckBuilder {
                     stats[reason, default: 0] += 1
                 case .accepted(let candidate):
                     let titleKey = candidate.artistKey + "|" + DeezerPreviewService.coreTitle(candidate.track.name)
-                    guard titleKeys.insert(titleKey).inserted else {
+                    let songKey = Self.songKey(for: candidate.track)
+                    guard !titleKeys.contains(titleKey), !titleKeys.contains(songKey) else {
                         stats["duplicate", default: 0] += 1
                         continue
                     }
+                    titleKeys.insert(titleKey)
+                    titleKeys.insert(songKey)
                     candidates[id] = candidate
                 }
             }
@@ -250,14 +263,17 @@ final class GenreDeckBuilder {
             }
         }
         // Still short (tiny genre, or previews unavailable): use what's left
-        // so the deck has its full count.
+        // so the deck has its full count -- but never an artist the deck
+        // already has (this fill used to count artists from scratch, which
+        // let a second track by a deck artist in).
         if deck.count < request.target {
             let inDeck = Set(deck.map { $0.track.id })
             deck += Self.selectDeck(
                 pool.filter { missing.contains($0.track.id) && !inDeck.contains($0.track.id) },
                 count: request.target - deck.count,
                 maxPerArtist: perArtist,
-                familyOrder: familyOrder
+                familyOrder: familyOrder,
+                alreadyChosen: deck
             )
         }
 
@@ -409,6 +425,10 @@ final class GenreDeckBuilder {
     ) -> Verdict {
         guard let trackId = track.spotifyId, !trackId.isEmpty else { return .rejected("no_id") }
         if request.excludedTrackIds.contains(trackId) { return .rejected("known_track") }
+        if track.artists.contains(where: { artist in artist.spotifyId.map { request.excludedArtistIds.contains($0) } ?? false }) {
+            return .rejected("session_artist")
+        }
+        if request.excludedSongKeys.contains(Self.songKey(for: track)) { return .rejected("session_song") }
         if track.durationMs > 0 && track.durationMs < 45_000 { return .rejected("too_short") }
         if Self.isCompilation(track.album.name) { return .rejected("compilation") }
         guard let credited = track.artists.first, let artistId = credited.spotifyId else {
@@ -461,6 +481,7 @@ final class GenreDeckBuilder {
             seenTrack: request.isTrackSeen(trackId),
             seenArtist: request.isArtistSeen(artistId),
             artistKey: artistId,
+            artistIds: Self.artistIds(of: track),
             closeness: abs(Double(track.popularity) - targetPopularity) + Double.random(in: 0..<3)
         ))
     }
@@ -498,13 +519,16 @@ final class GenreDeckBuilder {
     // MARK: - Deck selection
 
     /// Picks `count` tracks: best tiers first, each selected genre gets its
-    /// share, at most `maxPerArtist` per artist (relaxed only as a last
-    /// resort). Ordered most-fitting first, alternating between genres.
+    /// share, at most `maxPerArtist` per artist (counted over every credited
+    /// artist, including `alreadyChosen`). The artist limit is never relaxed:
+    /// a short deck beats a repeated artist. Ordered most-fitting first,
+    /// alternating between genres.
     private static func selectDeck(
         _ pool: [Candidate],
         count: Int,
         maxPerArtist: Int,
-        familyOrder: [Int]
+        familyOrder: [Int],
+        alreadyChosen: [Candidate] = []
     ) -> [Candidate] {
         guard count > 0, !pool.isEmpty else { return [] }
         let ordered = pool.sorted { a, b in
@@ -518,26 +542,28 @@ final class GenreDeckBuilder {
         var chosenIds = Set<String>()
         var perFamily: [Int: Int] = [:]
         var perArtistCount: [String: Int] = [:]
+        for earlier in alreadyChosen {
+            for id in earlier.artistIds { perArtistCount[id, default: 0] += 1 }
+        }
+        func artistRoom(_ candidate: Candidate) -> Bool {
+            candidate.artistIds.allSatisfy { perArtistCount[$0, default: 0] < max(maxPerArtist, 1) }
+        }
         func take(_ candidate: Candidate) {
             chosen.append(candidate)
             chosenIds.insert(candidate.track.id)
             perFamily[candidate.family, default: 0] += 1
-            perArtistCount[candidate.artistKey, default: 0] += 1
+            for id in candidate.artistIds { perArtistCount[id, default: 0] += 1 }
         }
 
         for candidate in ordered where chosen.count < count {
-            if perFamily[candidate.family, default: 0] < quota,
-               perArtistCount[candidate.artistKey, default: 0] < maxPerArtist {
+            if perFamily[candidate.family, default: 0] < quota, artistRoom(candidate) {
                 take(candidate)
             }
         }
         for candidate in ordered where chosen.count < count && !chosenIds.contains(candidate.track.id) {
-            if perArtistCount[candidate.artistKey, default: 0] < maxPerArtist {
+            if artistRoom(candidate) {
                 take(candidate)
             }
-        }
-        for candidate in ordered where chosen.count < count && !chosenIds.contains(candidate.track.id) {
-            take(candidate)
         }
         return interleave(chosen, familyOrder: familyOrder)
     }
@@ -566,6 +592,28 @@ final class GenreDeckBuilder {
             }
         }
         return out
+    }
+
+    // MARK: - Repeat keys
+
+    /// Every credited artist's Spotify id, main artist first.
+    static func artistIds(of track: SpotifyTrack) -> [String] {
+        var seen = Set<String>()
+        return track.artists.compactMap { $0.spotifyId }.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// The same song regardless of Spotify track id: normalized main artist
+    /// name + core title ("The Band - Song (Radio Edit)" == "band|song").
+    static func songKey(for track: SpotifyTrack) -> String {
+        var artist = (track.artists.first?.name ?? "").lowercased()
+        if !artist.allSatisfy(\.isASCII) {
+            artist = artist.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        }
+        var words = artist.replacingOccurrences(of: "&", with: " and ")
+            .split { !($0.isLetter || $0.isNumber) }
+            .map(String.init)
+        if words.first == "the" { words.removeFirst() }
+        return "song:" + words.joined() + "|" + DeezerPreviewService.coreTitle(track.name)
     }
 
     // MARK: - Concurrency
@@ -645,5 +693,40 @@ final class GenreDeckBuilder {
             if (0xAC00...0xD7AF).contains(value) { return false }   // Hangul
         }
         return true
+    }
+}
+
+/// What one Discover session has already served, so nothing repeats: no
+/// track (by Spotify id or by artist + title) and no artist (by Spotify id,
+/// any credited artist) comes back, however many times Discover is tapped.
+/// Lives as long as the discovery engine (the app session).
+struct DiscoverySessionMemory {
+    private(set) var trackIds = Set<String>()
+    private(set) var songKeys = Set<String>()
+    private(set) var artistIds = Set<String>()
+
+    /// Adds the session's exclusions to a deck request.
+    func apply(to request: inout GenreDeckRequest) {
+        request.excludedTrackIds.formUnion(trackIds)
+        request.excludedSongKeys.formUnion(songKeys)
+        request.excludedArtistIds.formUnion(artistIds)
+    }
+
+    /// Final gate: keeps only tracks that repeat nothing already served this
+    /// session or earlier in `tracks`, and records the ones it keeps.
+    mutating func admit(_ tracks: [SpotifyTrack]) -> [SpotifyTrack] {
+        var kept: [SpotifyTrack] = []
+        for track in tracks {
+            let artists = GenreDeckBuilder.artistIds(of: track)
+            let songKey = GenreDeckBuilder.songKey(for: track)
+            guard !trackIds.contains(track.id),
+                  !songKeys.contains(songKey),
+                  !artists.contains(where: { artistIds.contains($0) }) else { continue }
+            trackIds.insert(track.id)
+            songKeys.insert(songKey)
+            artistIds.formUnion(artists)
+            kept.append(track)
+        }
+        return kept
     }
 }

@@ -210,7 +210,7 @@ struct GenreDeckBuilderTests {
 
     // MARK: - Variety and playability
 
-    @Test func noArtistGetsMoreThanTwoTracksWhenOthersAreAvailable() async {
+    @Test func noArtistGetsMoreThanOneTrack() async {
         var stub = StubCatalog()
         stub.addGenre("house", idPrefix: "house", artistGenres: ["deep house"], artists: 120)
         let prolific = Self.artist("prolific", genres: ["house"])
@@ -222,7 +222,130 @@ struct GenreDeckBuilderTests {
         let deck = await build(stub, genres: ["house"], ceiling: 15)
 
         #expect(deck.tracks.count == 50)
-        #expect(deck.tracks.filter { $0.artists.first?.spotifyId == "prolific" }.count <= 2)
+        #expect(deck.tracks.filter { $0.artists.first?.spotifyId == "prolific" }.count <= 1)
+        Self.expectNoRepeats(deck.tracks)
+    }
+
+    // MARK: - Never repeat a song or an artist in a Discover session
+
+    /// No duplicate track ids, no duplicate songs (artist + title), no artist
+    /// (any credited artist) twice, and so never the same artist back to back.
+    static func expectNoRepeats(_ tracks: [SpotifyTrack], _ note: String = "") {
+        let ids = tracks.map(\.id)
+        #expect(Set(ids).count == ids.count, "duplicate track ids \(note)")
+        let songs = tracks.map(GenreDeckBuilder.songKey(for:))
+        #expect(Set(songs).count == songs.count, "duplicate songs \(note)")
+        let artists = tracks.flatMap { GenreDeckBuilder.artistIds(of: $0) }
+        #expect(Set(artists).count == artists.count, "an artist repeats \(note)")
+        for (a, b) in zip(tracks, tracks.dropFirst()) {
+            let shared = Set(GenreDeckBuilder.artistIds(of: a)).intersection(GenreDeckBuilder.artistIds(of: b))
+            #expect(shared.isEmpty, "same artist back to back: \(a.id) then \(b.id) \(note)")
+        }
+    }
+
+    /// One Discover tap, the way the app runs it: session exclusions in,
+    /// final gate + record out.
+    private func tap(
+        _ stub: StubCatalog,
+        _ memory: inout DiscoverySessionMemory,
+        genres: [String],
+        ceiling: Int = 15,
+        followers: Int = 2_000
+    ) async -> [SpotifyTrack] {
+        let snapshot = memory
+        let deck = await build(stub, genres: genres, ceiling: ceiling, followers: followers) {
+            snapshot.apply(to: &$0)
+        }
+        // The builder alone must already honor the session...
+        #expect(deck.tracks.allSatisfy { !snapshot.trackIds.contains($0.id) })
+        #expect(deck.tracks.allSatisfy { track in
+            GenreDeckBuilder.artistIds(of: track).allSatisfy { !snapshot.artistIds.contains($0) }
+        })
+        Self.expectNoRepeats(deck.tracks, "within one deck")
+        // ...and the final gate drops nothing it let through.
+        let admitted = memory.admit(deck.tracks)
+        #expect(admitted.map(\.id) == deck.tracks.map(\.id))
+        return admitted
+    }
+
+    @Test func severalDiscoverTapsInOneGenreNeverRepeatASongOrArtist() async {
+        var stub = StubCatalog()
+        stub.addGenre("house", idPrefix: "house", artistGenres: ["deep house"], artists: 200, perArtist: 3)
+        // A featured artist who also has their own track.
+        let guest = Self.artist("guest", genres: ["deep house"])
+        let host = Self.artist("host", genres: ["deep house"])
+        stub.artistsById["guest"] = guest
+        stub.artistsById["host"] = host
+        stub.addEverywhere(Self.track("guest-solo", artist: guest, popularity: 1), for: "house")
+        stub.addEverywhere(Self.track("host-feat-guest", artist: host, popularity: 1, featuring: [guest]),
+                           for: "house")
+
+        var memory = DiscoverySessionMemory()
+        var session: [SpotifyTrack] = []
+        for _ in 0..<4 {
+            session += await tap(stub, &memory, genres: ["house"])
+        }
+
+        #expect(session.count >= 50, "taps keep finding new music (got \(session.count))")
+        Self.expectNoRepeats(session, "across taps")
+        #expect(session.filter { ["guest-solo", "host-feat-guest"].contains($0.id) }.count <= 1)
+    }
+
+    @Test func aSmallGenreGivesAShortDeckRatherThanARepeat() async {
+        var stub = StubCatalog()
+        // 12 jungle artists with 4 tracks each, only the first playable.
+        stub.addGenre("jungle", idPrefix: "jungle", artistGenres: ["jungle"], artists: 12, perArtist: 4,
+                      playable: { $0 < 12 })
+
+        var memory = DiscoverySessionMemory()
+        let first = await tap(stub, &memory, genres: ["jungle"], ceiling: 90, followers: 500_000)
+        #expect(first.count == 12, "one track per artist, never padded with repeats")
+
+        let second = await tap(stub, &memory, genres: ["jungle"], ceiling: 90, followers: 500_000)
+        #expect(second.isEmpty, "every artist was already played this session")
+        Self.expectNoRepeats(first + second)
+    }
+
+    @Test func theSameSongUnderAnotherTrackIdIsARepeat() async {
+        var stub = StubCatalog()
+        stub.addGenre("house", idPrefix: "house", artistGenres: ["deep house"], artists: 120)
+        // Two Spotify profiles for one artist, each with the same song.
+        let original = Self.artist("dup-a", genres: ["deep house"])
+        let duplicate = SpotifyArtist(spotifyId: "dup-b", name: "The Artist dup-a", genres: ["deep house"],
+                                      popularity: 10, images: nil, followers: SpotifyFollowers(total: 500))
+        stub.artistsById["dup-a"] = original
+        stub.artistsById["dup-b"] = duplicate
+        stub.addEverywhere(Self.track("dup-1", artist: original, popularity: 1, name: "Night Drive"), for: "house")
+        stub.addEverywhere(Self.track("dup-2", artist: duplicate, popularity: 1, name: "Night Drive"),
+                           for: "house")
+
+        var memory = DiscoverySessionMemory()
+        var session: [SpotifyTrack] = []
+        for _ in 0..<3 {
+            session += await tap(stub, &memory, genres: ["house"])
+        }
+        #expect(session.filter { $0.id.hasPrefix("dup-") }.count <= 1)
+        Self.expectNoRepeats(session)
+    }
+
+    @Test func sessionMemoryGateDropsEveryKindOfRepeat() {
+        let a = Self.artist("a", genres: ["house"])
+        let b = Self.artist("b", genres: ["house"])
+        let c = Self.artist("c", genres: ["house"])
+        var memory = DiscoverySessionMemory()
+        let first = memory.admit([
+            Self.track("t1", artist: a, popularity: 1, name: "One"),
+            Self.track("t1", artist: a, popularity: 1, name: "One"),     // same id
+            Self.track("t2", artist: a, popularity: 1, name: "Two"),     // same artist
+            Self.track("t3", artist: b, popularity: 1, name: "Three"),
+        ])
+        #expect(first.map(\.id) == ["t1", "t3"])
+        let second = memory.admit([
+            Self.track("t3", artist: c, popularity: 1, name: "Other"),   // served id
+            Self.track("t4", artist: c, popularity: 1, featuring: [b]),  // served featured artist
+            Self.track("t5", artist: c, popularity: 1, name: "Five"),
+        ])
+        #expect(second.map(\.id) == ["t5"])
     }
 
     @Test func tracksWithoutPreviewsAreSwappedOut() async {
