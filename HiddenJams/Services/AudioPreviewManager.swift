@@ -27,6 +27,17 @@ class AudioPreviewManager: ObservableObject {
     /// Which backend is playing the full song, if any.
     @Published var fullSongBackend: FullSongBackend?
 
+    /// True when the current queue is the discovery swipe deck (not, e.g.,
+    /// replaying saved gems from Profile). Only deck tracks are eligible
+    /// for auto-save when they play through un-swiped.
+    @Published private(set) var isDiscoveryDeck: Bool = false
+
+    /// Fires (on main) when a deck track plays all the way to its natural
+    /// end — the 30s preview finishing, or the in-app full song ending —
+    /// with no swipe. Swipes, Next, skips and failures advance via
+    /// `playNext()`/`playTrackAtIndex` directly and never fire this.
+    let trackPlayedThrough = PassthroughSubject<RecommendedTrack, Never>()
+
     /// Provides the Spotify web-API token for the Premium check. Wired up
     /// by the app at launch.
     var spotifyTokenProvider: (() -> String?)?
@@ -241,6 +252,7 @@ class AudioPreviewManager: ObservableObject {
 
     private func fullSongDidEnd() {
         print("✅ Full song ended — back to previews")
+        notifyPlayedThrough()
         exitFullSong()
         playNext()
     }
@@ -366,8 +378,9 @@ class AudioPreviewManager: ObservableObject {
 
     // MARK: - Queue Management
 
-    func loadQueue(_ tracks: [RecommendedTrack], autoPlay: Bool = true) {
+    func loadQueue(_ tracks: [RecommendedTrack], autoPlay: Bool = true, isDiscoveryDeck: Bool = false) {
         previewLookupTask?.cancel()
+        self.isDiscoveryDeck = isDiscoveryDeck
         queue = tracks
         currentIndex = 0
         consecutiveFailures = 0
@@ -568,7 +581,19 @@ class AudioPreviewManager: ObservableObject {
     private func handleTrackEnded() {
         print("✅ Track ended, auto-advancing...")
         consecutiveFailures = 0
+        notifyPlayedThrough()
         playNext()
+    }
+
+    /// Announces that the current deck track played through un-swiped.
+    /// Only for the discovery deck, and only when the track that ended is
+    /// the queue's current track (not a standalone preview).
+    private func notifyPlayedThrough() {
+        guard isDiscoveryDeck,
+              let track = currentTrack,
+              queue.indices.contains(currentIndex),
+              queue[currentIndex].id == track.id else { return }
+        trackPlayedThrough.send(track)
     }
 
     func playNext() {
