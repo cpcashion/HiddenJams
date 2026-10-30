@@ -4,7 +4,7 @@
 //
 //  App Store screenshot capture (build 80). Hosts the app's real SwiftUI
 //  screens with demo data in a full-screen window on the simulator, then
-//  prints each capture as base64 PNG chunks to the test log so it can be
+//  prints each capture as base64 JPEG chunks (as recorded issues) to the test log so it can be
 //  pulled from CI. Lives only on the asc-screenshots branch (not merged).
 //
 
@@ -101,16 +101,17 @@ struct AppStoreScreenshotCapture {
         let image = UIGraphicsImageRenderer(bounds: bounds, format: format).image { _ in
             window.drawHierarchy(in: bounds, afterScreenUpdates: true)
         }
-        let data = image.pngData()!
+        let data = image.jpegData(compressionQuality: 0.93)!
         let b64 = data.base64EncodedString()
-        let out = FileHandle.standardOutput
-        func emit(_ s: String) { out.write((s + "\n").data(using: .utf8)!) }
+        // Hosted-test stdout isn't forwarded by xcodebuild (parallel clones),
+        // so the capture rides in recorded issue messages, which are.
+        func emit(_ s: String) { Issue.record(Comment(rawValue: s)) }
         emit("HJSHOT-BEGIN \(name) \(Int(bounds.width))x\(Int(bounds.height))@\(window.screen.scale) bytes=\(data.count)")
         var idx = 0
         var start = b64.startIndex
         while start < b64.endIndex {
-            let end = b64.index(start, offsetBy: 3000, limitedBy: b64.endIndex) ?? b64.endIndex
-            emit("HJSHOT \(name) \(idx) \(b64[start..<end])")
+            let end = b64.index(start, offsetBy: 6000, limitedBy: b64.endIndex) ?? b64.endIndex
+            emit("HJSHOT \(name) \(idx) \(b64[start..<end]) HJEOL")
             idx += 1
             start = end
         }
@@ -164,7 +165,8 @@ struct AppStoreScreenshotCapture {
 
     @Test(.timeLimit(.minutes(10)))
     func captureAppStoreScreenshots() async throws {
-        print("HJSHOT-INFO screen=\(UIScreen.main.bounds) scale=\(UIScreen.main.scale)")
+        withKnownIssue { Issue.record("HJKNOWN-PROBE") }
+        Issue.record(Comment(rawValue: "HJSHOT-INFO screen=\(UIScreen.main.bounds) scale=\(UIScreen.main.scale)"))
         let gems = try await fetchDeck()
         #expect(gems.count >= 6)
 
