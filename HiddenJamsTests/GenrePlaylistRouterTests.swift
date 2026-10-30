@@ -109,4 +109,25 @@ struct GenrePlaylistRouterTests {
             for: makeTrack(artistGenres: ["medieval chant"]),
             sessionGenres: []) == "Hidden Gems")
     }
+
+    // MARK: - Build 79: single playlist by default
+
+    @Test("default destination is one Hidden Jams playlist")
+    func singlePlaylistByDefault() {
+        let rock = makeTrack(artistGenres: ["indie rock"])
+        #expect(GenrePlaylistRouter.destinationPlaylistName(
+            for: rock, sessionGenres: [], separateByGenre: false) == "Hidden Jams")
+        #expect(GenrePlaylistRouter.destinationPlaylistName(
+            for: rock, sessionGenres: ["Techno"], separateByGenre: false) == "Hidden Jams")
+    }
+
+    @Test("separate-by-genre keeps the HJ genre routing")
+    func separateByGenreRouting() {
+        #expect(GenrePlaylistRouter.destinationPlaylistName(
+            for: makeTrack(artistGenres: ["indie rock"]),
+            sessionGenres: [], separateByGenre: true) == "HJ - Rock")
+        #expect(GenrePlaylistRouter.destinationPlaylistName(
+            for: makeTrack(artistGenres: ["medieval chant"]),
+            sessionGenres: [], separateByGenre: true) == "Hidden Gems")
+    }
 }

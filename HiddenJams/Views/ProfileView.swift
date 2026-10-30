@@ -2,11 +2,25 @@
 //  ProfileView.swift
 //  HiddenJams
 //
-//  Clean, minimalist profile experience with real Spotify data
+//  Build 79: Profile simplified into an iOS-style grouped screen.
+//    • compact header (avatar, name, connected services)
+//    • "Your stats": three summary rows that push detail screens
+//      (Home's stat pills deep-link straight to the matching one)
+//    • "Your music": saved gems + listening detail behind a tap
+//    • Playlists / Music services / Appearance / Disconnect settings
+//  The old duplicate blocks (Spotify stat tiles, Top Genres chips, inline
+//  saved-gems list) were folded into the stat detail screens.
 //
 
 import SwiftUI
 import AuthenticationServices
+
+/// Screens pushed from Profile.
+enum ProfileRoute: Hashable {
+    case stat(ProfileStatFocus)
+    case listening
+    case savedGems
+}
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
@@ -18,176 +32,173 @@ struct ProfileView: View {
     @EnvironmentObject var audioManager: AudioPreviewManager
     @EnvironmentObject var themeManager: ThemeManager
     @StateObject private var userProfile = UserProfileManager.shared
-    @StateObject private var subscriptions = SubscriptionManager.shared
 
-    @State private var selectedTimeRange: TimeRange = .longTerm
+    /// Build 79: off = every save goes to one "Hidden Jams" playlist.
+    @AppStorage(GenrePlaylistRouter.separateByGenreKey) private var separateByGenre = false
+
+    @State private var path: [ProfileRoute] = []
     @State private var hasLoadedData = false
     @State private var isConnectingAppleMusic = false
     @State private var isLinkingAppleID = false
     @State private var appleIDError: String?
+    @State private var confirmDisconnectAll = false
 
-    /// Build 78: set by a Home stat pill; Profile scrolls to that section,
-    /// highlights it briefly, then clears it.
+    /// Build 78: set by a Home stat pill. Build 79: Profile pushes that
+    /// stat's detail screen, then clears it.
     @Binding var statFocus: ProfileStatFocus?
     /// Gems in the current discovery deck (Home's "Gems Found").
     var deckGemCount: Int = 0
-    @State private var highlightedStat: ProfileStatFocus?
 
     init(statFocus: Binding<ProfileStatFocus?> = .constant(nil), deckGemCount: Int = 0) {
         self._statFocus = statFocus
         self.deckGemCount = deckGemCount
     }
-    
+
     var body: some View {
-        ZStack {
-            Theme.Colors.backgroundGradient.ignoresSafeArea()
-            
-            if profileDataService.isLoading && !hasLoadedData {
-                loadingView
-            } else {
-                ScrollViewReader { proxy in
+        NavigationStack(path: $path) {
+            ZStack {
+                Theme.Colors.backgroundGradient.ignoresSafeArea()
+
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 32) {
+                    VStack(spacing: 28) {
                         headerSection
-                        ProfileStatsView(deckGemCount: deckGemCount, highlighted: highlightedStat)
-                        musicSourcesSection
-                        if !savedGems.savedTracks.isEmpty {
-                            savedGemsSection
+                        statsGroup
+                        musicGroup
+                        playlistsGroup
+                        servicesGroup
+                        appearanceGroup
+                        if !sourceManager.connectedSources.isEmpty {
+                            disconnectGroup
                         }
-                        if authManager.isAuthenticated {
-                            statsSection
-                            recentlyPlayedSection
-                            topTracksSection
-                            topArtistsSection
-                            if profileDataService.stats.hasRealAudioFeatures {
-                                audioProfileSection
-                            }
-                            genresSection
-                        } else if sourceManager.appleMusicConnected {
-                            appleMusicSummarySection
-                        }
-                        appearanceSection
-                        logoutSection
-                        Spacer(minLength: 100)                    }
+                        Spacer(minLength: 100)
+                    }
                     .padding(.horizontal, 20)
                     .padding(.top, 60) // Account for status bar
                 }
-                .onAppear { scrollToFocus(proxy) }
-                .onChange(of: statFocus) { _ in scrollToFocus(proxy) }
-                }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: ProfileRoute.self) { route in
+                destination(for: route)
             }
         }
+        .tint(Theme.Colors.textPrimary)
         .edgesIgnoringSafeArea(.bottom) // Only ignore bottom safe area for tab bar
+        .onAppear { applyStatFocus() }
+        .onChange(of: statFocus) { _, _ in applyStatFocus() }
         .task {
             if !hasLoadedData, let token = authManager.accessToken {
                 await profileDataService.fetchAllProfileData(token: token)
                 hasLoadedData = true
             }
         }
+        .confirmationDialog("Disconnect all music services?",
+                            isPresented: $confirmDisconnectAll,
+                            titleVisibility: .visible) {
+            Button("Disconnect All", role: .destructive) {
+                for source in sourceManager.connectedSources {
+                    sourceManager.disconnect(source)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your playlists in Spotify and Apple Music stay as they are.")
+        }
     }
-    
-    // MARK: - Stat focus (Home pills)
 
-    private func scrollToFocus(_ proxy: ScrollViewProxy) {
+    // MARK: - Navigation
+
+    /// Home pill → open that stat's detail screen.
+    private func applyStatFocus() {
         guard let focus = statFocus else { return }
-        // Let the tab switch land first, then glide to the section.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.easeInOut(duration: 0.45)) {
-                proxy.scrollTo(focus.anchorId, anchor: .top)
-            }
-            highlightedStat = focus
-            statFocus = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                if highlightedStat == focus { highlightedStat = nil }
-            }
+        path = [.stat(focus)]
+        statFocus = nil
+    }
+
+    @ViewBuilder
+    private func destination(for route: ProfileRoute) -> some View {
+        switch route {
+        case .stat(let focus):
+            ProfileStatDetailView(focus: focus, deckGemCount: deckGemCount)
+        case .listening:
+            ProfileListeningView(data: profileDataService)
+        case .savedGems:
+            SavedGemsListView()
         }
     }
 
-    // MARK: - Loading
-    
-    private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .tint(Theme.Colors.textPrimary)
-            Text(profileDataService.loadingMessage)
-                .font(.system(size: 13))
-                .foregroundColor(Theme.Colors.textSecondary)
-        }
-    }
-    
     // MARK: - Header
-    
+
     private var headerSection: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                // Avatar: Spotify photo, else monster, else initial.
-                if let imageUrl = userProfile.profile.avatarURL {
-                    AsyncImage(url: imageUrl) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                    }
-                    .frame(width: 64, height: 64)
+            HStack(spacing: 14) {
+                avatar
+                    .frame(width: 56, height: 56)
                     .clipShape(Circle())
-                } else if let monster = userProfile.profile.monsterAvatarName {
-                    Image(monster)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipShape(Circle())
-                } else if appleMusicService.isConnected {
-                    // Apple Music provides no profile photo: show the user's monster.
-                    Image(MonsterAvatar.assignedName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill(Theme.Colors.textPrimary.opacity(0.1))
-                        .frame(width: 64, height: 64)
-                        .overlay(
-                            Text(String(userProfile.profile.effectiveDisplayName.prefix(1)))
-                                .font(.system(size: 24, weight: .medium))
-                                .foregroundColor(Theme.Colors.textPrimary)
-                        )
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
+
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(userProfile.profile.effectiveDisplayName)
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(Theme.Colors.textPrimary)
+                            .lineLimit(1)
                         if userProfile.isPremium {
                             Text("PREMIUM")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.black)
+                                .foregroundColor(Theme.Colors.buttonText)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Theme.Colors.ctaFill)
                                 .cornerRadius(4)
                         }
                     }
-                    
-                    Text("Your listening profile")
+                    Text(connectedSummary)
                         .font(.system(size: 13))
                         .foregroundColor(Theme.Colors.textSecondary)
+                        .lineLimit(1)
                 }
-                
                 Spacer()
             }
 
-            // Apple Music users have no verified identity — offer Sign in
-            // with Apple to complete their profile (needed for Premium).
             // GATED: hidden until the Sign in with Apple capability is
-            // enabled on the App ID + provisioning profile (see
-            // HiddenJams.entitlements). The service code is ready.
+            // enabled on the App ID + provisioning profile.
             #if ENABLE_APPLE_SIGN_IN
             if !userProfile.profile.hasVerifiedIdentity {
                 appleIDLinkCard
             }
             #endif
         }
+    }
+
+    @ViewBuilder
+    private var avatar: some View {
+        // Spotify photo, else monster, else initial.
+        if let imageUrl = userProfile.profile.avatarURL {
+            AsyncImage(url: imageUrl) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
+            }
+        } else if let monster = userProfile.profile.monsterAvatarName {
+            Image(monster).resizable().scaledToFill()
+        } else if appleMusicService.isConnected {
+            // Apple Music provides no profile photo: show the user's monster.
+            Image(MonsterAvatar.assignedName).resizable().scaledToFill()
+        } else {
+            Circle()
+                .fill(Theme.Colors.textPrimary.opacity(0.1))
+                .overlay(
+                    Text(String(userProfile.profile.effectiveDisplayName.prefix(1)))
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                )
+        }
+    }
+
+    private var connectedSummary: String {
+        var names: [String] = []
+        if sourceManager.spotifyConnected { names.append("Spotify") }
+        if sourceManager.appleMusicConnected { names.append("Apple Music") }
+        return names.isEmpty ? "No music service connected" : names.joined(separator: " · ")
     }
 
     // MARK: - Sign in with Apple
@@ -241,408 +252,67 @@ struct ProfileView: View {
             isLinkingAppleID = false
         }
     }
-    
-    // MARK: - Stats
-    
-    private var statsSection: some View {
-        // Pastel stat tiles (build 76 redesign).
-        HStack(spacing: 10) {
-            statItem(value: "\(profileDataService.stats.uniqueTracksCount)", label: "Tracks", tile: Theme.Colors.lavender)
-            statItem(value: "\(profileDataService.stats.uniqueArtistsCount)", label: "Artists", tile: Theme.Colors.peach)
-            statItem(value: profileDataService.stats.formattedListeningTime, label: "Recent", tile: Theme.Colors.mint)
-        }
-    }
-    
-    private func statItem(value: String, label: String, tile: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 24, weight: .heavy))
-                .foregroundColor(Theme.Colors.textOnPastel)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(Theme.Colors.textOnPastelSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
-                .fill(tile)
-        )
-    }
-    
-    // MARK: - Recently Played
 
-    private var recentlyPlayedSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Recently Played")
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(profileDataService.stats.recentlyPlayed.prefix(10)) { play in
-                        recentTrackCard(play.track, in: profileDataService.stats.recentlyPlayed.map(\.track))
-                    }
-                }
-            }
+    // MARK: - Your stats
+
+    private var statsGroup: some View {
+        ProfileGroup("Your stats") {
+            navRow(.stat(.tracks), focus: .tracks, value: "\(profileAnalyzer.profile.totalTracksAnalyzed)")
+            ProfileRowDivider()
+            navRow(.stat(.gems), focus: .gems, value: "\(deckGemCount)")
+            ProfileRowDivider()
+            navRow(.stat(.genres), focus: .genres, value: "\(profileAnalyzer.profile.genreWeights.count)")
         }
     }
-    
-    private func recentTrackCard(_ track: SpotifyTrack, in list: [SpotifyTrack]) -> some View {
-        Button(action: { playTrack(track, from: list) }) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let url = track.album.images.first?.url {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                    }
-                    .frame(width: 100, height: 100)
-                    .cornerRadius(6)
-                }
-                
-                Text(track.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Theme.Colors.textPrimary)
-                    .lineLimit(1)
-                
-                Text(track.artistNames)
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.Colors.textSecondary)
-                    .lineLimit(1)
-            }
-            .frame(width: 100)
+
+    private func navRow(_ route: ProfileRoute, focus: ProfileStatFocus, value: String) -> some View {
+        NavigationLink(value: route) {
+            ProfileRowLabel(icon: focus.iconName, tint: focus.tint, title: focus.title, value: value, showsChevron: true)
         }
         .buttonStyle(.plain)
     }
-    
-    // MARK: - Top Tracks
-    
-    private var topTracksSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                sectionHeader("Top Tracks")
-                Spacer()
-                timeRangePicker
-            }
-            
-            VStack(spacing: 0) {
-                ForEach(Array(tracksForTimeRange.prefix(5).enumerated()), id: \.element.id) { index, track in
-                    trackRow(rank: index + 1, track: track, in: Array(tracksForTimeRange.prefix(5)))
-                    if index < 4 {
-                        Divider().background(Theme.Colors.textPrimary.opacity(0.1))
-                    }
-                }
-            }
-            .background(Theme.Colors.textPrimary.opacity(0.03))
-            .cornerRadius(12)
-        }
-    }
-    
-    private var tracksForTimeRange: [SpotifyTrack] {
-        switch selectedTimeRange {
-        case .shortTerm: return profileDataService.stats.topTracksThisMonth
-        case .mediumTerm: return profileDataService.stats.topTracksSixMonths
-        case .longTerm: return profileDataService.stats.topTracksAllTime
-        }
-    }
-    
-    private var timeRangePicker: some View {
-        HStack(spacing: 4) {
-            ForEach(TimeRange.allCases, id: \.self) { range in
-                Button(action: { selectedTimeRange = range }) {
-                    Text(shortLabel(for: range))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(selectedTimeRange == range ? Theme.Colors.buttonText : Theme.Colors.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            selectedTimeRange == range ?
-                            Capsule().fill(Theme.Colors.ctaFill) :
-                            Capsule().fill(Color.clear)
-                        )
-                }
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(Theme.Colors.textPrimary.opacity(0.1)))
-    }
-    
-    private func shortLabel(for range: TimeRange) -> String {
-        switch range {
-        case .shortTerm: return "4 Weeks"
-        case .mediumTerm: return "6 Mo"
-        case .longTerm: return "All"
-        }
-    }
-    
-    private func trackRow(rank: Int, track: SpotifyTrack, in list: [SpotifyTrack]) -> some View {
-        Button(action: { playTrack(track, from: list) }) {
-            HStack(spacing: 14) {
-                Text("\(rank)")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.Colors.textSecondary)
-                    .frame(width: 24)
-                
-                if let url = track.album.images.first?.url {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                    }
-                    .frame(width: 44, height: 44)
-                    .cornerRadius(4)
-                }
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Theme.Colors.textPrimary)
-                        .lineLimit(1)
-                    Text(track.artistNames)
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.Colors.textSecondary)
-                        .lineLimit(1)
-                }
-                
-                Spacer()
-                
-                Image(systemName: "play.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.Colors.textTertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .buttonStyle(.plain)
-    }
-    
-    // MARK: - Top Artists
-    
-    private var topArtistsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Top Artists")
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(Array(profileDataService.stats.topArtistsAllTime.prefix(8).enumerated()), id: \.element.id) { index, artist in
-                        artistCard(artist, rank: index + 1)
-                    }
-                }
-            }
-        }
-    }
-    
-    private func artistCard(_ artist: SpotifyArtist, rank: Int) -> some View {
-        VStack(spacing: 10) {
-            ZStack(alignment: .bottomTrailing) {
-                if let url = artist.images?.first?.url {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
-                    }
-                    .frame(width: 72, height: 72)
-                    .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill(Theme.Colors.textPrimary.opacity(0.1))
-                        .frame(width: 72, height: 72)
-                        .overlay(
-                            Text(String(artist.name.prefix(1)))
-                                .font(.system(size: 24, weight: .medium))
-                                .foregroundColor(Theme.Colors.textSecondary)
-                        )
-                }
-                
-                if rank <= 3 {
-                    Text("\(rank)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Theme.Colors.spotifyBlack)
-                        .frame(width: 18, height: 18)
-                        .background(Circle().fill(Theme.Colors.textPrimary))
-                }
-            }
-            
-            Text(artist.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Theme.Colors.textPrimary)
-                .lineLimit(1)
-                .frame(width: 72)
-        }
-    }
-    
-    // MARK: - Audio Profile
-    
-    private var audioProfileSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Audio Profile")
-            
-            if let features = profileDataService.stats.audioFeatures {
-                VStack(spacing: 12) {
-                    audioBar("Energy", value: features.energy)
-                    audioBar("Danceability", value: features.danceability)
-                    audioBar("Positivity", value: features.valence)
-                    audioBar("Acoustic", value: features.acousticness)
-                }
-                .padding(16)
-                .background(Theme.Colors.textPrimary.opacity(0.03))
-                .cornerRadius(12)
-                
-                HStack(spacing: 12) {
-                    infoChip("Tempo", value: "\(Int(features.tempo)) BPM")
-                    infoChip("Loudness", value: "\(Int(features.loudness)) dB")
-                }
-            }
-        }
-    }
-    
-    private func audioBar(_ label: String, value: Double) -> some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundColor(Theme.Colors.textSecondary)
-                .frame(width: 90, alignment: .leading)
-            
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Theme.Colors.textPrimary.opacity(0.1))
-                        .cornerRadius(2)
-                    Rectangle()
-                        .fill(Theme.Colors.lime)
-                        .cornerRadius(2)
-                        .frame(width: geo.size.width * value)
-                }
-            }
-            .frame(height: 4)
-            
-            Text("\(Int(value * 100))%")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.Colors.textSecondary)
-                .frame(width: 36, alignment: .trailing)
-        }
-    }
-    
-    private func infoChip(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(Theme.Colors.textSecondary)
-            Text(value)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(Theme.Colors.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Theme.Colors.textPrimary.opacity(0.03))
-        .cornerRadius(8)
-    }
-    
-    // MARK: - Genres
-    
-    private var genresSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Top Genres")
-            
-            FlowLayout(spacing: 8) {
-                ForEach(profileDataService.stats.topGenres.indices, id: \.self) { index in
-                    let genre = profileDataService.stats.topGenres[index]
-                    genreChip(genre.name.capitalized, color: Theme.Colors.pastel(index))
-                }
-            }
-        }
-    }
-    
-    private func genreChip(_ name: String, color: Color) -> some View {
-        Text(name)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(Theme.Colors.textOnPastel)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Capsule().fill(color))
-    }
-    
-    // MARK: - Appearance
 
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Appearance")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Theme.Colors.textPrimary)
+    // MARK: - Your music
 
-            HStack(spacing: 0) {
-                ForEach(AppTheme.allCases, id: \.self) { theme in
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            themeManager.mode = theme
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: theme.iconName)
-                                .font(.system(size: 14, weight: .medium))
-                            Text(theme.displayName)
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                        .foregroundColor(themeManager.mode == theme
-                                         ? Theme.Colors.buttonText
-                                         : Theme.Colors.textSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .glassEffect(
-                            themeManager.mode == theme
-                            ? .regular.tint(Theme.Colors.ctaFill.opacity(0.55)).interactive()
-                            : .identity,
-                            in: Capsule()
-                        )
-                        .background(
-                            themeManager.mode == theme
-                            ? Theme.Colors.ctaFill
-                            : Color.clear
-                        )
-                        .clipShape(Capsule())
-                    }
-                }
+    private var musicGroup: some View {
+        ProfileGroup("Your music") {
+            NavigationLink(value: ProfileRoute.savedGems) {
+                ProfileRowLabel(icon: "heart.fill", tint: Theme.Colors.lime, title: "Saved gems",
+                                value: "\(savedGems.savedTracks.count)", showsChevron: true)
             }
-            .padding(4)
-            .background(Capsule().fill(Theme.Colors.chipFill))
+            .buttonStyle(.plain)
+            if authManager.isAuthenticated || sourceManager.appleMusicConnected {
+                ProfileRowDivider()
+                NavigationLink(value: ProfileRoute.listening) {
+                    ProfileRowLabel(icon: "waveform", tint: Theme.Colors.lavender,
+                                    title: authManager.isAuthenticated ? "Top tracks & artists" : "Your taste",
+                                    value: nil, showsChevron: true)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
-    // MARK: - Logout
-    
-    private var logoutSection: some View {
-        VStack(spacing: 16) {
-            Divider()
-                .background(Theme.Colors.textPrimary.opacity(0.1))
-                .padding(.vertical, 8)
-            
-            Button(action: {
-                for source in sourceManager.connectedSources {
-                    sourceManager.disconnect(source)
-                }
-            }) {
-                HStack {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                    Text("Disconnect All")
-                }
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.red.opacity(0.9))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Theme.Colors.textPrimary.opacity(0.05))
-                .cornerRadius(12)
+    // MARK: - Playlists
+
+    private var playlistsGroup: some View {
+        ProfileGroup("Playlists", footer: separateByGenre
+            ? "Saves go into a playlist per genre, like \"HJ - House\". Existing playlists aren't changed."
+            : "Every save goes into one \"\(GenrePlaylistRouter.singlePlaylistName)\" playlist in your music app. Existing playlists aren't changed.") {
+            Toggle(isOn: $separateByGenre) {
+                ProfileRowLabel(icon: "square.stack.3d.up.fill", tint: Theme.Colors.peach,
+                                title: "Separate playlists by genre", value: nil, showsChevron: false)
             }
+            .tint(Theme.Colors.ctaFill)
+            .padding(.trailing, 16)
         }
-        .padding(.top, 16)
     }
-    
-    // MARK: - Music Sources
 
-    private var musicSourcesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Music Sources")
+    // MARK: - Music services
 
+    private var servicesGroup: some View {
+        ProfileGroup("Music services",
+                     footer: sourceManager.connectedSources.count == 2 ? "Blending both libraries for your recommendations." : nil) {
             sourceRow(
                 icon: "music.note.list",
                 name: "Spotify",
@@ -650,7 +320,7 @@ struct ProfileView: View {
                 connect: { authManager.startAuth() },
                 disconnect: { sourceManager.disconnect(.spotify) }
             )
-
+            ProfileRowDivider()
             sourceRow(
                 icon: "apple.logo",
                 name: "Apple Music",
@@ -658,32 +328,34 @@ struct ProfileView: View {
                 connect: { connectAppleMusic() },
                 disconnect: { sourceManager.disconnect(.appleMusic) }
             )
-
-            if sourceManager.connectedSources.count == 2 {
-                Text("Blending both libraries for analysis")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.Colors.textSecondary)
-            }
         }
     }
 
-    private func sourceRow(icon: String, name: String, connected: Bool, connect: @escaping () -> Void, disconnect: @escaping () -> Void) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .foregroundColor(connected ? .green : Theme.Colors.textTertiary)
-                .frame(width: 28)
-            Text(name)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(Theme.Colors.textPrimary)
+    private func sourceRow(icon: String, name: String, connected: Bool,
+                           connect: @escaping () -> Void, disconnect: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            ProfileIconBadge(icon: icon, tint: connected ? Theme.Colors.lime : Theme.Colors.chipFill,
+                             foreground: connected ? Theme.Colors.textOnPastel : Theme.Colors.textTertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(Theme.Colors.textPrimary)
+                Text(connected ? "Connected" : "Not connected")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.Colors.textSecondary)
+            }
             Spacer()
             if connected {
-                Text("Connected")
-                    .font(.system(size: 12))
-                    .foregroundColor(.green)
-                Button("Disconnect") { disconnect() }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.red.opacity(0.9))
-                    .padding(.leading, 8)
+                Menu {
+                    Button("Disconnect \(name)", role: .destructive) { disconnect() }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .frame(width: 32, height: 32)
+                        .subtleGlass(in: Circle())
+                }
+                .accessibilityLabel("\(name) options")
             } else {
                 Button("Connect") { connect() }
                     .font(.system(size: 13, weight: .semibold))
@@ -694,10 +366,8 @@ struct ProfileView: View {
                     .disabled(isConnectingAppleMusic)
             }
         }
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .background(Theme.Colors.textPrimary.opacity(0.05))
-        .cornerRadius(12)
     }
 
     private func connectAppleMusic() {
@@ -717,59 +387,481 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Saved Gems (in-app collection)
+    // MARK: - Appearance
 
-    private var savedGemsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                sectionHeader("My Saved Gems")
-                Spacer()
-                Text("\(savedGems.savedTracks.count)")
+    private var appearanceGroup: some View {
+        ProfileGroup("Appearance") {
+            HStack(spacing: 0) {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            themeManager.mode = theme
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: theme.iconName)
+                                .font(.system(size: 13, weight: .medium))
+                            Text(theme.displayName)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(themeManager.mode == theme
+                                         ? Theme.Colors.buttonText
+                                         : Theme.Colors.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .glassEffect(
+                            themeManager.mode == theme
+                            ? .regular.tint(Theme.Colors.ctaFill.opacity(0.55)).interactive()
+                            : .identity,
+                            in: Capsule()
+                        )
+                        .background(
+                            themeManager.mode == theme
+                            ? Theme.Colors.ctaFill
+                            : Color.clear
+                        )
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(Theme.Colors.chipFill))
+            .padding(12)
+        }
+    }
+
+    // MARK: - Disconnect
+
+    private var disconnectGroup: some View {
+        ProfileGroup(nil) {
+            Button(action: { confirmDisconnectAll = true }) {
+                Text("Disconnect All")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(Theme.Colors.error)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+// MARK: - Grouped building blocks (inset-grouped look over the ambient background)
+
+struct ProfileGroup<Content: View>: View {
+    let title: String?
+    let footer: String?
+    let content: Content
+
+    init(_ title: String?, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                    .padding(.leading, 16)
+            }
+            VStack(spacing: 0) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
+                        .fill(Theme.Colors.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.CornerRadius.lg, style: .continuous)
+                        .stroke(Theme.Colors.textPrimary.opacity(0.06), lineWidth: 0.5)
+                )
+            if let footer {
+                Text(footer)
                     .font(.system(size: 12))
                     .foregroundColor(Theme.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
             }
-            ForEach(savedGems.savedTracks.prefix(10)) { track in
-                trackRow(rank: 0, track: track, in: Array(savedGems.savedTracks.prefix(10)))
+        }
+    }
+}
+
+struct ProfileRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Colors.textPrimary.opacity(0.08))
+            .frame(height: 0.5)
+            .padding(.leading, 58)
+    }
+}
+
+struct ProfileIconBadge: View {
+    let icon: String
+    let tint: Color
+    var foreground: Color = Theme.Colors.textOnPastel
+
+    var body: some View {
+        Image(systemName: icon)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(foreground)
+            .frame(width: 30, height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint))
+    }
+}
+
+struct ProfileRowLabel: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let value: String?
+    let showsChevron: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProfileIconBadge(icon: icon, tint: tint)
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(Theme.Colors.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if let value {
+                Text(value)
+                    .font(.system(size: 15))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                    .monospacedDigit()
+            }
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textTertiary)
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, showsChevron ? 16 : 0)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Pushed screens
+
+/// Shared chrome for screens pushed from Profile.
+private struct ProfileDetailScreen<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.Colors.backgroundGradient.ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                content
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 120)
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+    }
+}
+
+/// One stat (Tracks / Gems / Genres) — the Home pills land here.
+struct ProfileStatDetailView: View {
+    let focus: ProfileStatFocus
+    let deckGemCount: Int
+
+    var body: some View {
+        ProfileDetailScreen(focus.title) {
+            ProfileStatsView(deckGemCount: deckGemCount, highlighted: nil, only: focus)
+        }
+    }
+}
+
+/// Everything saved in-app, newest first; tap to play, long-press to remove.
+struct SavedGemsListView: View {
+    @ObservedObject private var savedGems = SavedGemsStore.shared
+    @EnvironmentObject var audioManager: AudioPreviewManager
+
+    var body: some View {
+        ProfileDetailScreen("Saved gems") {
+            if savedGems.savedTracks.isEmpty {
+                Text("Swipe right on a track in a discovery session to save it here.")
+                    .font(.system(size: 14))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ProfileGroup(nil) {
+                    ForEach(Array(savedGems.savedTracks.enumerated()), id: \.element.id) { index, track in
+                        if index > 0 { ProfileRowDivider() }
+                        ProfileTrackRow(rank: nil, track: track) {
+                            let list = savedGems.savedTracks
+                            audioManager.playSpotifyTracks(list, startingAt: index)
+                        }
+                        .contextMenu {
+                            Button("Remove from Saved", systemImage: "trash", role: .destructive) {
+                                savedGems.remove(track)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Spotify top tracks / artists / recently played / audio profile, or the
+/// Apple Music taste summary — moved off the main Profile page.
+struct ProfileListeningView: View {
+    @ObservedObject var data: ProfileDataService
+    @EnvironmentObject var authManager: SpotifyAuthManager
+    @EnvironmentObject var profileAnalyzer: AIProfileAnalyzer
+    @EnvironmentObject var audioManager: AudioPreviewManager
+
+    @State private var selectedTimeRange: TimeRange = .longTerm
+
+    var body: some View {
+        ProfileDetailScreen(authManager.isAuthenticated ? "Listening" : "Your taste") {
+            if authManager.isAuthenticated {
+                if data.isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView().tint(Theme.Colors.textPrimary)
+                        Text(data.loadingMessage)
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.Colors.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                } else {
+                    VStack(alignment: .leading, spacing: 28) {
+                        topTracksSection
+                        if !data.stats.topArtistsAllTime.isEmpty { topArtistsSection }
+                        if !data.stats.recentlyPlayed.isEmpty { recentlyPlayedSection }
+                        if data.stats.hasRealAudioFeatures { audioProfileSection }
+                    }
+                }
+            } else {
+                appleMusicSummary
             }
         }
     }
 
-    // MARK: - Apple Music Summary (from analyzed profile)
+    // MARK: Top tracks
 
-    private var appleMusicSummarySection: some View {
+    private var topTracksSection: some View {
+        let tracks = Array(tracksForTimeRange.prefix(5))
+        return VStack(alignment: .leading, spacing: 12) {
+            Picker("Time range", selection: $selectedTimeRange) {
+                ForEach(TimeRange.allCases, id: \.self) { range in
+                    Text(shortLabel(for: range)).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            ProfileGroup("Top tracks") {
+                if tracks.isEmpty {
+                    Text("No top tracks for this period yet.")
+                        .font(.system(size: 14))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .padding(16)
+                } else {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        if index > 0 { ProfileRowDivider() }
+                        ProfileTrackRow(rank: index + 1, track: track) {
+                            audioManager.playSpotifyTracks(tracks, startingAt: index)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func shortLabel(for range: TimeRange) -> String {
+        switch range {
+        case .shortTerm: return "4 Weeks"
+        case .mediumTerm: return "6 Months"
+        case .longTerm: return "All Time"
+        }
+    }
+
+    private var tracksForTimeRange: [SpotifyTrack] {
+        switch selectedTimeRange {
+        case .shortTerm: return data.stats.topTracksThisMonth
+        case .mediumTerm: return data.stats.topTracksSixMonths
+        case .longTerm: return data.stats.topTracksAllTime
+        }
+    }
+
+    // MARK: Top artists
+
+    private var topArtistsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Your Taste")
-            if profileAnalyzer.profile.topArtists.isEmpty {
-                Text("Analyze your Apple Music library from the Home tab to see your taste profile.")
-                    .font(.system(size: 14))
-                    .foregroundColor(Theme.Colors.textSecondary)
-            } else {
-                ForEach(Array(profileAnalyzer.profile.topArtists.prefix(5).enumerated()), id: \.element.id) { index, artist in
+            sectionHeader("Top artists")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(Array(data.stats.topArtistsAllTime.prefix(8).enumerated()), id: \.element.id) { index, artist in
+                        artistCard(artist, rank: index + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private func artistCard(_ artist: SpotifyArtist, rank: Int) -> some View {
+        VStack(spacing: 8) {
+            Group {
+                if let url = artist.images?.first?.url {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Circle().fill(Theme.Colors.textPrimary.opacity(0.1))
+                    }
+                } else {
+                    Circle()
+                        .fill(Theme.Colors.textPrimary.opacity(0.1))
+                        .overlay(
+                            Text(String(artist.name.prefix(1)))
+                                .font(.system(size: 24, weight: .medium))
+                                .foregroundColor(Theme.Colors.textSecondary)
+                        )
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
+
+            Text(artist.name)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Theme.Colors.textPrimary)
+                .lineLimit(1)
+                .frame(width: 72)
+        }
+    }
+
+    // MARK: Recently played
+
+    private var recentlyPlayedSection: some View {
+        let list = data.stats.recentlyPlayed.map(\.track)
+        return VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Recently played")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(list.prefix(10).enumerated()), id: \.offset) { index, track in
+                        Button(action: { audioManager.playSpotifyTracks(list, startingAt: index) }) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                AsyncImage(url: track.album.images.first?.url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Rectangle().fill(Theme.Colors.textPrimary.opacity(0.1))
+                                }
+                                .frame(width: 100, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                Text(track.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Theme.Colors.textPrimary)
+                                    .lineLimit(1)
+                                Text(track.artistNames)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Theme.Colors.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 100)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Audio profile
+
+    private var audioProfileSection: some View {
+        ProfileGroup("Audio profile") {
+            if let features = data.stats.audioFeatures {
+                VStack(spacing: 12) {
+                    audioBar("Energy", value: features.energy)
+                    audioBar("Danceability", value: features.danceability)
+                    audioBar("Positivity", value: features.valence)
+                    audioBar("Acoustic", value: features.acousticness)
                     HStack {
+                        Text("Tempo \(Int(features.tempo)) BPM")
+                        Spacer()
+                        Text("Loudness \(Int(features.loudness)) dB")
+                    }
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    private func audioBar(_ label: String, value: Double) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(Theme.Colors.textSecondary)
+                .frame(width: 90, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.Colors.textPrimary.opacity(0.1))
+                    Capsule().fill(Theme.Colors.lime)
+                        .frame(width: geo.size.width * min(max(value, 0), 1))
+                }
+            }
+            .frame(height: 4)
+            Text("\(Int(value * 100))%")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.Colors.textSecondary)
+                .frame(width: 36, alignment: .trailing)
+        }
+    }
+
+    // MARK: Apple Music
+
+    @ViewBuilder
+    private var appleMusicSummary: some View {
+        if profileAnalyzer.profile.topArtists.isEmpty {
+            Text("Analyze your Apple Music library from the Home tab to see your taste profile.")
+                .font(.system(size: 14))
+                .foregroundColor(Theme.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            ProfileGroup("Top artists") {
+                ForEach(Array(profileAnalyzer.profile.topArtists.prefix(5).enumerated()), id: \.element.id) { index, artist in
+                    if index > 0 { ProfileRowDivider() }
+                    HStack(spacing: 12) {
                         Text("\(index + 1)")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
                             .foregroundColor(Theme.Colors.textSecondary)
-                            .frame(width: 24)
+                            .frame(width: 30)
                         Text(artist.name)
                             .font(.system(size: 15))
                             .foregroundColor(Theme.Colors.textPrimary)
+                            .lineLimit(1)
                         Spacer()
                         Text("\(artist.frequency) plays")
                             .font(.system(size: 12))
                             .foregroundColor(Theme.Colors.textSecondary)
                     }
-                }
-                if !profileAnalyzer.profile.genreWeights.isEmpty {
-                    Text("Top genres: " + profileAnalyzer.profile.genreWeights.sorted { $0.value > $1.value }.prefix(5).map { $0.key }.joined(separator: ", "))
-                        .font(.system(size: 13))
-                        .foregroundColor(Theme.Colors.textSecondary)
-                        .padding(.top, 4)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
                 }
             }
         }
     }
-
-    // MARK: - Helpers
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
@@ -777,10 +869,52 @@ struct ProfileView: View {
             .foregroundColor(Theme.Colors.textSecondary)
             .textCase(.uppercase)
             .tracking(0.5)
+            .padding(.leading, 16)
     }
-    
-    private func playTrack(_ track: SpotifyTrack, from list: [SpotifyTrack]) {
-        let index = list.firstIndex(where: { $0.id == track.id }) ?? 0
-        audioManager.playSpotifyTracks(list, startingAt: index)
+}
+
+/// Artwork + title row used in the pushed Profile lists.
+struct ProfileTrackRow: View {
+    let rank: Int?
+    let track: SpotifyTrack
+    let onPlay: () -> Void
+
+    var body: some View {
+        Button(action: onPlay) {
+            HStack(spacing: 12) {
+                if let rank {
+                    Text("\(rank)")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .frame(width: 22)
+                }
+                AsyncImage(url: track.album.images.first?.url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.chipFill)
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                        .lineLimit(1)
+                    Text(track.artistNames)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "play.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.Colors.textTertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

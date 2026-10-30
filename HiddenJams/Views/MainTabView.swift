@@ -133,8 +133,12 @@ struct MainTabView: View {
         // cross-service track lookup to fail. (Build 57: stopped saving to
         // both services when both are connected — the dual-save produced
         // spurious red "not available" error toasts, now removed entirely.)
-        let playlistName = GenrePlaylistRouter.playlistName(
-            for: track, sessionGenres: currentSessionGenres())
+        // Build 79: one "Hidden Jams" playlist unless the user turned on
+        // "Separate playlists by genre" in Profile.
+        let playlistName = GenrePlaylistRouter.destinationPlaylistName(
+            for: track,
+            sessionGenres: currentSessionGenres(),
+            separateByGenre: GenrePlaylistRouter.separatesByGenre)
         let isAppleMusicTrack = track.track.spotifyId?.hasPrefix("itunes:") ?? false
 
         if isAppleMusicTrack {
