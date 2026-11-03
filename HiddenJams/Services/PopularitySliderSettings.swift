@@ -37,12 +37,22 @@ class PopularitySliderSettings: ObservableObject {
     }
     
     /// The follower threshold to use in discovery
-    /// Scales from 2,000 (slider at 0) to 500,000 (slider at 1)
+    /// Scales from 10,000 (slider at 0) to 500,000 (slider at 1)
     /// This is our proxy for "monthly listeners" since Spotify API doesn't expose that data
     var followerThreshold: Int {
-        let minFollowers = 2_000     // ~5-20K monthly listeners typically
-        let maxFollowers = 500_000   // Mainstream level
-        return minFollowers + Int(Double(maxFollowers - minFollowers) * popularityLevel)
+        Self.followerThreshold(for: popularityLevel)
+    }
+
+    /// Far left: artists with a handful up to ~10k followers (barely
+    /// listened). The curve is exponential, so most of the slider's travel
+    /// stays in obscure territory and only the right end reaches mainstream
+    /// (0.25 → ~27k, 0.5 → ~71k, 0.75 → ~188k, 1.0 → 500k). The old linear
+    /// map put the midpoint at ~250k followers.
+    static func followerThreshold(for level: Double) -> Int {
+        let minFollowers = 10_000.0   // barely-listened artists
+        let maxFollowers = 500_000.0  // mainstream level
+        let t = min(1, max(0, level))
+        return Int((minFollowers * pow(maxFollowers / minFollowers, t)).rounded())
     }
     
     /// Human-readable description of current setting

@@ -241,8 +241,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     // no artist is ever served twice in a session.
     private var sessionSeenTracks: Set<String> = []  // Tracks seen in THIS discovery session only
     private var sessionSeenArtists: Set<String> = []  // Artists seen in THIS discovery session only
-    /// Spotify decks: tracks (id + artist/title) and artists already served.
-    private var spotifySession = DiscoverySessionMemory()
+    /// Spotify decks: tracks (id + artist/title) and artists ever served.
+    /// Persisted (UserDefaults), reloaded before every deck, so the no-repeat
+    /// rule holds across app launches, not just within one run.
+    private let servedMemoryDefaults: UserDefaults = .standard
     
     
     init() {
@@ -606,9 +608,13 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             followerCeiling: followerThreshold
         )
         request.excludedTrackIds = excluded
-        // Session repeats are hard exclusions (track id, artist + title, any
-        // credited artist); longer-term history stays a ranking signal.
-        spotifySession.apply(to: &request)
+        // Everything ever served is a hard exclusion (track id, artist +
+        // title, any credited artist), loaded from disk so a relaunch doesn't
+        // forget it. Older builds' history is folded in, and still checked
+        // directly as a second line of defense.
+        var served = DiscoverySessionMemory.load(from: servedMemoryDefaults)
+        served.absorb(trackIds: history.seenTrackIds, artistIds: history.seenArtistIds)
+        served.apply(to: &request)
         request.isTrackSeen = { history.isSeen(trackId: $0) }
         request.isArtistSeen = { history.isArtistSeen(artistId: $0) }
         request.userExcludedGenres = Self.userExcludedGenres()
@@ -623,8 +629,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         let summary = deck.stats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
         print("🎛️ Genre deck \(genres): \(deck.tracks.count) tracks, \(deck.playableCount) playable, \(deck.relaxedCount) relaxed [\(summary)]")
 
-        // Final gate + record: nothing that repeats this session gets through.
-        let fresh = spotifySession.admit(deck.tracks)
+        // Final gate + record: nothing ever served gets through, and the
+        // memory is saved before the deck reaches the player.
+        let fresh = served.admit(deck.tracks)
+        served.save(to: servedMemoryDefaults)
         let recommendations = fresh.map { makeRecommendation(for: $0, profile: profile) }
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
         DiscoveryQuotaManager.shared.recordDiscovered(count: recommendations.count)
