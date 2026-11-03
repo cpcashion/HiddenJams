@@ -373,20 +373,22 @@ struct GenreDeckBuilderTests {
         #expect(!deck.tracks.contains { excluded.contains($0.id) })
     }
 
-    @Test func recentlyServedTracksOnlyAsALastResort() async {
+    @Test func tracksAndArtistsFromEarlierSessionsNeverReturn() async {
         var stub = StubCatalog()
         stub.addGenre("jungle", idPrefix: "jungle", artistGenres: ["jungle"], artists: 30)
         let seen = Set((0..<30).filter { $0 % 2 == 0 }.map { "jungle-t\($0)" })
+        let seenArtists: Set<String> = ["jungle-a1"]
 
         let deck = await build(stub, genres: ["jungle"], ceiling: 90, followers: 500_000) {
             $0.isTrackSeen = { seen.contains($0) }
+            $0.isArtistSeen = { seenArtists.contains($0) }
         }
 
-        // Only 30 jungle tracks exist, so repeats fill the deck, last.
-        #expect(deck.tracks.count == 30)
-        let firstRepeat = deck.tracks.firstIndex { seen.contains($0.id) } ?? deck.tracks.count
-        #expect(firstRepeat == 15)
-        #expect(deck.tracks[firstRepeat...].allSatisfy { seen.contains($0.id) })
+        // Only 30 jungle tracks exist: 15 were served before and one more is
+        // by an artist served before. A short deck, never a repeat.
+        #expect(deck.tracks.count == 14)
+        #expect(!deck.tracks.contains { seen.contains($0.id) })
+        #expect(!deck.tracks.contains { $0.artists.contains { seenArtists.contains($0.spotifyId ?? "") } })
     }
 
     // MARK: - Who decides the genre

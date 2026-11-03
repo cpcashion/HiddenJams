@@ -36,10 +36,16 @@ struct GenreDeckRequest {
     /// Never served: songs already shown this session, by normalized
     /// artist name + title (catches the same song under another track id).
     var excludedSongKeys: Set<String> = []
-    /// Served recently: only repeated when nothing new is left.
+    /// Served in an earlier Discover session (persisted history): never
+    /// served again. A short deck beats a repeat.
     var isTrackSeen: (String) -> Bool = { _ in false }
-    /// Artists served recently: ranked after new artists.
+    /// Artists served in an earlier session: never served again. A track is
+    /// out if ANY of its credited artists has been served.
     var isArtistSeen: (String) -> Bool = { _ in false }
+    /// How many search waves to run at most while fresh in-slider tracks are
+    /// still short of the target. Each wave reads new query/offset pages and
+    /// the next page of searches that are still turning up new music.
+    var maxSearchWaves = 5
     /// Genres the user excluded in settings.
     var userExcludedGenres: [String] = []
     var target = 50
@@ -51,7 +57,7 @@ struct GenreDeckRequest {
 
 struct GenreDeckResult {
     var tracks: [SpotifyTrack] = []
-    /// Deck tracks added above the slider's limits (or repeats) to reach the target.
+    /// Deck tracks added above the slider's limits to reach the target (never repeats).
     var relaxedCount = 0
     /// Deck tracks with a preview that's ready to play.
     var playableCount = 0
@@ -93,21 +99,19 @@ final class GenreDeckBuilder {
         let tier: Int
         /// 0 = within the slider's limits; +1 per step of relaxation.
         let level: Int
-        let seenTrack: Bool
-        let seenArtist: Bool
         let artistKey: String
         /// Every credited artist's Spotify id (main artist first).
         let artistIds: [String]
         /// Distance from the slider's target popularity (plus a little jitter).
         let closeness: Double
 
-        /// Slider compliance first, then freshness, then how close the track
+        /// Slider compliance first, then how close the track
         /// is to the slider's target popularity (in 10-point buckets), then
         /// genre exactness. This lets the popularity slider actually control
         /// the deck: at max it surfaces popular tracks, at min the obscure
         /// ones — instead of genre-exactness always winning.
         var sortKey: [Int] {
-            [level, seenTrack ? 1 : 0, seenArtist ? 1 : 0, Int(closeness / 10), tier]
+            [level, Int(closeness / 10), tier]
         }
     }
 
@@ -149,38 +153,52 @@ final class GenreDeckBuilder {
         var candidates: [String: Candidate] = [:]
         var titleKeys = Set<String>()
         var fetchedPages = Set<String>()
+        /// Next pages of searches that turned up new, verified music.
+        var continuations: [PlannedPage] = []
+        /// Spotify's page size as observed (50, or 10 on newer app tiers).
+        var observedPageSize = 50
 
-        // 1. Search: one wave, plus a second for genres that came up short.
-        for wave in 0..<2 {
+        // 1. Search in waves until every genre has enough fresh, in-slider
+        //    tracks (by distinct artist) or the search budget runs out. Every
+        //    wave draws new random offsets and query slices, so each Discover
+        //    tap reads a different part of Spotify's pool.
+        for wave in 0..<max(1, request.maxSearchWaves) {
             var focus = Set(matcher.families.indices)
             var broaden = Set<Int>()
             if wave == 0 {
                 await onProgress?("Searching for music…")
             } else {
-                var strong: [Int: Int] = [:]
-                var exact: [Int: Int] = [:]
-                for candidate in candidates.values where candidate.tier == 0 && !candidate.seenTrack {
-                    exact[candidate.family, default: 0] += 1
-                    if candidate.level == 0 { strong[candidate.family, default: 0] += 1 }
+                var strongArtists: [Int: Set<String>] = [:]
+                var exactArtists: [Int: Set<String>] = [:]
+                for candidate in candidates.values where candidate.tier == 0 {
+                    exactArtists[candidate.family, default: []].insert(candidate.artistKey)
+                    if candidate.level == 0 { strongArtists[candidate.family, default: []].insert(candidate.artistKey) }
                 }
-                focus = Set(matcher.families.indices.filter { strong[$0, default: 0] < share + 3 })
-                broaden = Set(matcher.families.indices.filter { exact[$0, default: 0] < share })
-                guard !focus.isEmpty, Date() < searchDeadline.addingTimeInterval(-1) else { break }
+                focus = Set(matcher.families.indices.filter { strongArtists[$0, default: []].count < share + 3 })
+                broaden = Set(matcher.families.indices.filter { exactArtists[$0, default: []].count < share })
+                guard !focus.isEmpty, Date() < searchDeadline.addingTimeInterval(-0.5) else { break }
                 await onProgress?("Finding hidden gems…")
             }
 
-            let plan = Self.searchPlan(
+            // Smaller Spotify pages (10) need more requests for the same pool.
+            let pageBoost = observedPageSize < 50 ? 2 : 1
+            let basePages = (wave == 0 ? Self.firstWavePages(familyCount: matcher.families.count) : 12) * pageBoost
+            let follow = continuations.filter { focus.contains($0.family) && !fetchedPages.contains($0.key) }
+            continuations = []
+            let fresh = Self.searchPlan(
                 families: matcher.families,
                 slider: slider,
-                pages: wave == 0 ? Self.firstWavePages(familyCount: matcher.families.count) : 12,
+                pages: max(0, basePages - follow.count),
                 only: focus,
                 broaden: broaden,
-                skipping: fetchedPages
+                skipping: fetchedPages.union(follow.map(\.key))
             )
+            let plan = Array((follow + fresh).prefix(max(basePages, follow.count)))
             guard !plan.isEmpty else { break }
             fetchedPages.formUnion(plan.map(\.key))
 
             let searched = await search(plan, deadline: searchDeadline)
+            if let size = searched.pageSize { observedPageSize = size }
             stats["pages_ok", default: 0] += searched.ok
             stats["pages_failed", default: 0] += searched.failed
             stats["found", default: 0] += searched.found.count
@@ -197,6 +215,7 @@ final class GenreDeckBuilder {
             await hydrate(featured, deadline: hydrateDeadline)
 
             // 3. Verify every track.
+            var acceptedPerPage: [String: Int] = [:]
             for entry in searched.found {
                 guard let id = entry.track.spotifyId, candidates[id] == nil else {
                     stats["duplicate", default: 0] += 1
@@ -216,7 +235,17 @@ final class GenreDeckBuilder {
                     titleKeys.insert(titleKey)
                     titleKeys.insert(songKey)
                     candidates[id] = candidate
+                    acceptedPerPage[entry.page.key, default: 0] += 1
                 }
+            }
+
+            // 4. Pagination: searches that are still yielding new music get
+            //    their next page in the following wave.
+            for page in searched.pages where acceptedPerPage[page.page.key, default: 0] > 0 {
+                let next = page.page.offset + page.limit
+                guard next < min(page.total, 1000) else { continue }
+                continuations.append(PlannedPage(query: page.page.query, offset: next,
+                                                 family: page.page.family, depth: page.page.depth))
             }
         }
 
@@ -279,7 +308,7 @@ final class GenreDeckBuilder {
 
         result.tracks = deck.map { $0.track.withPreview(previews[$0.track.id] ?? $0.track.previewUrl) }
         result.playableCount = result.tracks.filter { !($0.previewUrl ?? "").isEmpty }.count
-        result.relaxedCount = deck.filter { $0.level > 0 || $0.tier > 0 || $0.seenTrack }.count
+        result.relaxedCount = deck.filter { $0.level > 0 || $0.tier > 0 }.count
         stats["deck"] = result.tracks.count
         stats["playable"] = result.playableCount
         stats["relaxed"] = result.relaxedCount
@@ -291,21 +320,34 @@ final class GenreDeckBuilder {
 
     // MARK: - Search
 
+    private struct FetchedPage {
+        let page: PlannedPage
+        let limit: Int
+        let total: Int
+    }
+
+    private struct SearchOutcome {
+        var found: [(track: SpotifyTrack, family: Int, page: PlannedPage)] = []
+        var pages: [FetchedPage] = []
+        var ok = 0
+        var failed = 0
+        var pageSize: Int?
+    }
+
     private func search(
         _ plan: [PlannedPage],
         deadline: Date
-    ) async -> (found: [(track: SpotifyTrack, family: Int)], ok: Int, failed: Int) {
-        var found: [(track: SpotifyTrack, family: Int)] = []
-        var ok = 0
-        var failed = 0
+    ) async -> SearchOutcome {
+        var outcome = SearchOutcome()
         var retries: [PlannedPage] = []
 
         let pages = await Self.concurrentMap(plan, limit: 8, deadline: deadline) { [catalog] page -> GenreDeckSearchPage? in
             await catalog.searchTracks(query: page.query, offset: page.offset)
         }
         for (page, response) in zip(plan, pages) {
-            guard let response else { failed += 1; continue }
-            ok += 1
+            guard let response else { outcome.failed += 1; continue }
+            outcome.ok += 1
+            outcome.pageSize = response.limit
             if response.tracks.isEmpty, response.total > 0, page.offset > 0 {
                 // Landed past the end of a short result list: aim inside it.
                 let maxOffset = max(0, min(response.total, 1000) - response.limit)
@@ -315,8 +357,10 @@ final class GenreDeckBuilder {
                     family: page.family,
                     depth: page.depth
                 ))
+                continue
             }
-            found += response.tracks.map { (track: $0, family: page.family) }
+            outcome.pages.append(FetchedPage(page: page, limit: response.limit, total: response.total))
+            outcome.found += response.tracks.map { (track: $0, family: page.family, page: page) }
         }
 
         if !retries.isEmpty {
@@ -324,12 +368,13 @@ final class GenreDeckBuilder {
                 await catalog.searchTracks(query: page.query, offset: page.offset)
             }
             for (page, response) in zip(retries, again) {
-                guard let response else { failed += 1; continue }
-                ok += 1
-                found += response.tracks.map { (track: $0, family: page.family) }
+                guard let response else { outcome.failed += 1; continue }
+                outcome.ok += 1
+                outcome.pages.append(FetchedPage(page: page, limit: response.limit, total: response.total))
+                outcome.found += response.tracks.map { (track: $0, family: page.family, page: page) }
             }
         }
-        return (found, ok, failed)
+        return outcome
     }
 
     /// 0 at the slider's Deep end, 1 at Hot.
@@ -341,10 +386,17 @@ final class GenreDeckBuilder {
         min(18, max(12, 8 + 3 * familyCount))
     }
 
-    /// Which searches to run: each family's Spotify genres (plus year slices
-    /// when the slider leans obscure, since each slice has its own
-    /// 1,000-result window), read at a depth set by the slider, shared out
-    /// across families in turn.
+    /// How far each search page may stray from the slider's depth, so every
+    /// Discover tap reads a different slice of Spotify's results.
+    static let depthSpread = 0.25
+
+    /// Which searches to run: each family's Spotify genres, plain and in
+    /// random release-year slices (each slice has its own 1,000-result
+    /// window, so the reachable pool is many times larger than one query's),
+    /// each read at a random offset around the depth the slider sets (Deep:
+    /// the obscure tail, Hot: the popular head), shared out across families
+    /// in turn. Nothing here is fixed or cached: two calls with the same
+    /// input plan different pages.
     static func searchPlan(
         families: [GenreMatcher.Family],
         slider: Double,
@@ -353,7 +405,11 @@ final class GenreDeckBuilder {
         broaden: Set<Int>,
         skipping: Set<String>
     ) -> [PlannedPage] {
+        guard pages > 0 else { return [] }
         let year = Calendar.current.component(.year, from: Date())
+        // Obscure end: any era. Popular end: mostly recent releases.
+        let yearSpan = slider < 0.6 ? 40 : 10
+        let center = 0.92 - 0.9 * slider
         var perFamily: [[PlannedPage]] = []
         for (index, family) in families.enumerated() {
             guard only.contains(index) else {
@@ -364,15 +420,28 @@ final class GenreDeckBuilder {
             if broaden.contains(index) {
                 genres += family.broaderSearches.shuffled()
             }
-            var queries = genres.map { "genre:\"\($0)\"" }
-            if slider < 0.6 {
-                let sliced = genres.prefix(4).map { "genre:\"\($0)\" year:\(year - Int.random(in: 0...8))" }
-                queries = alternate(queries, Array(sliced))
+            var queries: [String] = []
+            for genre in genres {
+                let base = "genre:\"\(genre)\""
+                queries.append(base)
+                let single = year - Int.random(in: 0...yearSpan)
+                queries.append("\(base) year:\(single)")
+                let from = year - Int.random(in: 1...yearSpan)
+                let to = min(year, from + Int.random(in: 1...4))
+                queries.append("\(base) year:\(from)-\(to)")
             }
-            perFamily.append(queries.map { query -> PlannedPage in
-                let depth = min(1, max(0, 0.92 - 0.9 * slider + Double.random(in: -0.08...0.08)))
-                return PlannedPage(query: query, offset: Int((depth * 950).rounded()), family: index, depth: depth)
-            }.filter { !skipping.contains($0.key) })
+            queries.shuffle()
+            var used = Set<String>()
+            perFamily.append(queries.compactMap { query -> PlannedPage? in
+                // A couple of tries to find an offset not already read.
+                for _ in 0..<3 {
+                    let depth = min(1, max(0, center + Double.random(in: -depthSpread...depthSpread)))
+                    let offset = Int((depth * 950).rounded())
+                    let page = PlannedPage(query: query, offset: offset, family: index, depth: depth)
+                    if !skipping.contains(page.key), used.insert(page.key).inserted { return page }
+                }
+                return nil
+            })
         }
 
         var plan: [PlannedPage] = []
@@ -388,15 +457,6 @@ final class GenreDeckBuilder {
             round += 1
         }
         return plan
-    }
-
-    private static func alternate(_ a: [String], _ b: [String]) -> [String] {
-        var out: [String] = []
-        for i in 0..<max(a.count, b.count) {
-            if i < a.count { out.append(a[i]) }
-            if i < b.count { out.append(b[i]) }
-        }
-        return out
     }
 
     // MARK: - Artists
@@ -429,6 +489,12 @@ final class GenreDeckBuilder {
             return .rejected("session_artist")
         }
         if request.excludedSongKeys.contains(Self.songKey(for: track)) { return .rejected("session_song") }
+        // Earlier sessions (persisted history) are hard exclusions too: a
+        // served song or artist never comes back, even when the pool is thin.
+        if request.isTrackSeen(trackId) { return .rejected("history_track") }
+        if track.artists.contains(where: { artist in artist.spotifyId.map(request.isArtistSeen) ?? false }) {
+            return .rejected("history_artist")
+        }
         if track.durationMs > 0 && track.durationMs < 45_000 { return .rejected("too_short") }
         if Self.isCompilation(track.album.name) { return .rejected("compilation") }
         guard let credited = track.artists.first, let artistId = credited.spotifyId else {
@@ -478,8 +544,6 @@ final class GenreDeckBuilder {
                 popularityCeiling: request.popularityCeiling,
                 followerCeiling: request.followerCeiling
             ),
-            seenTrack: request.isTrackSeen(trackId),
-            seenArtist: request.isArtistSeen(artistId),
             artistKey: artistId,
             artistIds: Self.artistIds(of: track),
             closeness: abs(Double(track.popularity) - targetPopularity) + Double.random(in: 0..<3)
@@ -696,14 +760,41 @@ final class GenreDeckBuilder {
     }
 }
 
-/// What one Discover session has already served, so nothing repeats: no
-/// track (by Spotify id or by artist + title) and no artist (by Spotify id,
-/// any credited artist) comes back, however many times Discover is tapped.
-/// Lives as long as the discovery engine (the app session).
-struct DiscoverySessionMemory {
+/// Everything Discover has ever served, so nothing repeats: no track (by
+/// Spotify id or by artist + title) and no artist (by Spotify id, any
+/// credited artist) comes back, however many times Discover is tapped and
+/// across app launches. Saved to UserDefaults after every deck (`save`) and
+/// read back before the next one (`load`); earlier builds only kept this in
+/// memory, so every relaunch started from an empty memory and replayed the
+/// same songs.
+struct DiscoverySessionMemory: Codable, Equatable {
     private(set) var trackIds = Set<String>()
     private(set) var songKeys = Set<String>()
     private(set) var artistIds = Set<String>()
+
+    static let storageKey = "discover_served_memory_v1"
+
+    /// The saved memory, or an empty one on first run (or unreadable data).
+    static func load(from defaults: UserDefaults = .standard) -> DiscoverySessionMemory {
+        guard let data = defaults.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode(DiscoverySessionMemory.self, from: data) else {
+            return DiscoverySessionMemory()
+        }
+        return decoded
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) {
+            defaults.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    /// Folds in ids served before this memory existed (DiscoveryHistoryManager),
+    /// so tracks and artists from older builds don't come back either.
+    mutating func absorb(trackIds tracks: Set<String>, artistIds artists: Set<String>) {
+        trackIds.formUnion(tracks)
+        artistIds.formUnion(artists)
+    }
 
     /// Adds the session's exclusions to a deck request.
     func apply(to request: inout GenreDeckRequest) {
@@ -712,8 +803,9 @@ struct DiscoverySessionMemory {
         request.excludedArtistIds.formUnion(artistIds)
     }
 
-    /// Final gate: keeps only tracks that repeat nothing already served this
-    /// session or earlier in `tracks`, and records the ones it keeps.
+    /// Final gate: keeps only tracks that repeat nothing already served
+    /// (this session, earlier sessions, or earlier in `tracks`), and records
+    /// the ones it keeps.
     mutating func admit(_ tracks: [SpotifyTrack]) -> [SpotifyTrack] {
         var kept: [SpotifyTrack] = []
         for track in tracks {
