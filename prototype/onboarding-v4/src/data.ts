@@ -1,7 +1,8 @@
 import raw from './tracks.json'
 
 export const BASE = import.meta.env.BASE_URL
-export const art = (f: string) => `${BASE}art/${f}`
+// A single-file build (see scripts/singlefile.py) can inline covers as data URIs on window.__ART.
+export const art = (f: string) => ((window as unknown as { __ART?: Record<string, string> }).__ART?.[f]) ?? `${BASE}art/${f}`
 
 // Prototype play counts (illustrative, not live Spotify data).
 const PLAYS = [2418, 731, 5102, 1366, 864, 3290, 9840, 412, 1780, 6021, 2954, 1107]
