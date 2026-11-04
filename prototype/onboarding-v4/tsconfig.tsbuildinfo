@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/bus.ts","./src/data.ts","./src/main.tsx","./src/screens/Connect.tsx","./src/screens/Depth.tsx","./src/screens/Genres.tsx","./src/screens/Intro.tsx","./src/screens/Payoff.tsx","./src/screens/Swipe.tsx","./src/three/Scene.tsx","./src/three/textures.ts","./src/ui/SlideToGo.tsx","./src/ui/bits.tsx"],"version":"5.9.3"}
