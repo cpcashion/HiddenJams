@@ -2,7 +2,7 @@
 //  PaywallView.swift
 //  HiddenJams
 //
-//  Presented when a free user hits the 50 discoveries/day limit.
+//  Presented when a free user hits the 50 discoveries/month limit.
 //  Hidden Jams Pro: $1.99/month, unlimited discoveries.
 //
 
@@ -14,6 +14,13 @@ struct PaywallView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isPurchasing = false
+    @State private var isRestoring = false
+    @State private var restoreMessage: String?
+
+    private static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private static let privacyURL = URL(string: "https://cpcashion.github.io/HiddenJams/privacy.html")!
+
+    private var priceText: String { monthlyProduct?.displayPrice ?? "$1.99" }
 
     private var monthlyProduct: Product? {
         subscriptionManager.products.first(where: { $0.id == SubscriptionProduct.monthly.rawValue })
@@ -106,11 +113,53 @@ struct PaywallView: View {
                 .padding(.top, 14)
 
                 if let error = subscriptionManager.lastError {
-                    Text(error)
+                    VStack(spacing: 6) {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                        if monthlyProduct == nil {
+                            Button("Retry") {
+                                Task { await subscriptionManager.loadProducts() }
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(Theme.Colors.gemGold)
+                        }
+                    }
+                } else if monthlyProduct == nil && subscriptionManager.isLoading {
+                    ProgressView().tint(Theme.Colors.gemGold)
+                }
+
+                if let restoreMessage {
+                    Text(restoreMessage)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundColor(Theme.Colors.textSecondary)
                         .multilineTextAlignment(.center)
                 }
+
+                // Auto-renew disclosure (App Review guideline 3.1.2)
+                Text("\(priceText)/month (or local price), renews automatically until cancelled; cancel anytime in Settings > Apple ID > Subscriptions. Payment charged to Apple ID at confirmation.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 16) {
+                    Button {
+                        Task { await restorePurchases() }
+                    } label: {
+                        if isRestoring {
+                            ProgressView().tint(Theme.Colors.textSecondary)
+                        } else {
+                            Text("Restore Purchases")
+                        }
+                    }
+                    .disabled(isRestoring || isPurchasing)
+                    Link("Terms", destination: Self.termsURL)
+                    Link("Privacy", destination: Self.privacyURL)
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Theme.Colors.textSecondary)
             }
             .padding(20)
             .background(Color.white.opacity(0.03))
@@ -125,9 +174,8 @@ struct PaywallView: View {
             Spacer(minLength: 8)
 
             Button("Maybe later") {
-                // Snooze the paywall for this session so the user can
-                // keep testing/using the app. Resets on next launch.
-                DiscoveryQuotaManager.shared.paywallSnoozed = true
+                // Just dismiss. Discovery stays blocked at the free limit;
+                // the paywall shows again on the next discovery attempt.
                 dismiss()
             }
             .font(.system(size: 16))
@@ -169,12 +217,30 @@ struct PaywallView: View {
         defer { isPurchasing = false }
         guard let product = monthlyProduct else {
             await subscriptionManager.loadProducts()
+            if monthlyProduct == nil, subscriptionManager.lastError == nil {
+                subscriptionManager.lastError = "Couldn't load the subscription from the App Store. Please try again."
+            }
             return
         }
         do {
             try await subscriptionManager.purchase(product)
         } catch {
-            // Error surfaced via subscriptionManager.lastError
+            if let e = error as? SubscriptionError, case .cancelled = e { return }
+            subscriptionManager.lastError = error.localizedDescription
+        }
+    }
+
+    private func restorePurchases() async {
+        isRestoring = true
+        restoreMessage = nil
+        defer { isRestoring = false }
+        let restored = await subscriptionManager.restore()
+        if restored {
+            restoreMessage = "Purchases restored. Unlimited discovery is on."
+        } else if subscriptionManager.lastError == nil {
+            restoreMessage = "No active subscription found for this Apple ID."
+        } else {
+            restoreMessage = "Restore failed. Please try again."
         }
     }
 }

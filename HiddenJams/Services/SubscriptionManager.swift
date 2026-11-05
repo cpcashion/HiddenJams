@@ -2,13 +2,10 @@
 //  SubscriptionManager.swift
 //  HiddenJams
 //
-//  StoreKit 2 subscriptions. Product IDs are placeholders — create the
-//  matching products in App Store Connect (Subscriptions under the app's
-//  In-App Purchases) and the IDs must match exactly.
-//
-//  Planned products:
-//    com.chris.GettingStarted.HiddenJams.premium.monthly  – $4.99/mo
-//    com.chris.GettingStarted.HiddenJams.premium.yearly   – $39.99/yr
+//  StoreKit 2 subscription. One product, which must exist in App Store
+//  Connect (subscription group "Hidden Jams Pro") with this exact ID:
+//    com.chris.GettingStarted.HiddenJams.unlimited.monthly  – $1.99/month
+//  Local testing: HiddenJams.storekit (wired into the HiddenJams scheme).
 //
 
 import Foundation
@@ -16,13 +13,11 @@ import StoreKit
 import Combine
 
 enum SubscriptionProduct: String, CaseIterable {
-    case monthly = "com.chris.GettingStarted.HiddenJams.premium.monthly"
-    case yearly = "com.chris.GettingStarted.HiddenJams.premium.yearly"
+    case monthly = "com.chris.GettingStarted.HiddenJams.unlimited.monthly"
 
     var displayName: String {
         switch self {
-        case .monthly: return "Premium Monthly"
-        case .yearly: return "Premium Yearly"
+        case .monthly: return "Hidden Jams Unlimited"
         }
     }
 }
@@ -63,6 +58,7 @@ final class SubscriptionManager: ObservableObject {
 
     func loadProducts() async {
         isLoading = true
+        lastError = nil
         defer { isLoading = false }
         do {
             let ids = Set(SubscriptionProduct.allCases.map(\.rawValue))
@@ -70,6 +66,7 @@ final class SubscriptionManager: ObservableObject {
                 .sorted { $0.price < $1.price }
             if products.isEmpty {
                 print("⚠️ No subscription products found — create them in App Store Connect.")
+                lastError = "Couldn't load the subscription from the App Store. Please try again."
             }
         } catch {
             lastError = error.localizedDescription
@@ -95,13 +92,17 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
-    func restore() async {
+    /// Restores purchases. Returns true if an active subscription was found.
+    @discardableResult
+    func restore() async -> Bool {
+        lastError = nil
         do {
             try await AppStore.sync()
         } catch {
             lastError = error.localizedDescription
         }
         await refreshStatus()
+        return isPremium
     }
 
     // MARK: - Entitlement
@@ -111,7 +112,10 @@ final class SubscriptionManager: ObservableObject {
         var premium = false
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else { continue }
-            if transaction.productType == .autoRenewable,
+            // Only the $1.99/mo unlimited product counts (the group also
+            // holds a legacy premium.monthly product that must not unlock).
+            if transaction.productID == SubscriptionProduct.monthly.rawValue,
+               transaction.productType == .autoRenewable,
                transaction.revocationDate == nil,
                (transaction.expirationDate ?? .distantFuture) > Date() {
                 premium = true
