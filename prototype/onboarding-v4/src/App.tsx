@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import { bus } from './bus'
 import Scene from './three/Scene'
-import { Progress } from './ui/bits'
+import { Dots } from './ui/bits'
 import Intro from './screens/Intro'
 import Swipe from './screens/Swipe'
 import Depth from './screens/Depth'
@@ -62,11 +62,11 @@ export default function App() {
   return (
     <div className={`stage ${framed ? 'framed' : 'full'}`}>
       {framed && (
-        <aside className="caption">
-          <div className="cap-k mono">Hidden Jams · Onboarding v4</div>
-          <div className="cap-t">Interactive prototype</div>
-          <p>Drag, swipe and tap like you would on the phone. Open this link on an iPhone for full screen and tilt.</p>
-          <div className="cap-nav">{Array.from({ length: N }, (_, k) => <button key={k} className={k === i ? 'on' : ''} onClick={() => go(k)}>{String(k + 1).padStart(2, '0')}</button>)}</div>
+        <aside className="aside">
+          <div className="k">Hidden Jams · Onboarding v4</div>
+          <div className="t">Interactive prototype</div>
+          <p>Tap, swipe and drag like you would on the phone. Open the link on an iPhone for full screen and tilt.</p>
+          <div className="aside-nav">{Array.from({ length: N }, (_, k) => <button key={k} className={`glass chip ${k === i ? 'lime' : 'graphite'}`} onClick={() => go(k)}>{k + 1}</button>)}</div>
         </aside>
       )}
       <div className="phone" ref={phone}>
@@ -74,15 +74,14 @@ export default function App() {
         <div className="chrome">
           {framed && <div className="statusbar"><span>9:41</span><span className="sb-r"><i className="sig" /><i className="wifi" /><i className="bat" /></span></div>}
           <div className="topbar">
-            {i > 0 ? <button className="back" onClick={() => go(i - 1)} aria-label="Back"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" stroke="#F7F3EE" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg></button> : <span className="brand mono">Hidden Jams</span>}
-            <Progress i={i} n={N} />
-            <span className="step mono">{String(i + 1).padStart(2, '0')}/{String(N).padStart(2, '0')}</span>
+            {i > 0 && <button className="glass subtle back" onClick={() => go(i - 1)} aria-label="Back"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" stroke="#fff" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
+            <Dots i={i} n={N} />
           </div>
         </div>
         <AnimatePresence mode="popLayout" custom={dir} initial={false}>
           <motion.div key={`${run}-${i}`} className="screen-host" custom={dir}
-            variants={{ enter: (d: number) => ({ x: d * 60, opacity: 0 }), center: { x: 0, opacity: 1 }, exit: (d: number) => ({ x: d * -60, opacity: 0 }) }}
-            initial="enter" animate="center" exit="exit" transition={{ type: 'spring', stiffness: 300, damping: 34 }}>
+            variants={{ enter: (d: number) => ({ x: d * 40, opacity: 0 }), center: { x: 0, opacity: 1 }, exit: (d: number) => ({ x: d * -40, opacity: 0 }) }}
+            initial="enter" animate="center" exit="exit" transition={{ type: 'spring', stiffness: 280, damping: 36 }}>
             {screens[i]}
           </motion.div>
         </AnimatePresence>
