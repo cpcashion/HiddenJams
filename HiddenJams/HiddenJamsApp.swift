@@ -17,6 +17,8 @@ struct HiddenJamsApp: App {
     @StateObject private var appleMusicService = AppleMusicService()
     @StateObject private var sourceManager: MusicSourceManager
     @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let auth = SpotifyAuthManager()
@@ -47,6 +49,7 @@ struct HiddenJamsApp: App {
                 .environmentObject(appleMusicService)
                 .environmentObject(sourceManager)
                 .environmentObject(themeManager)
+                .environmentObject(subscriptionManager)
                 // Dynamic: follows the appearance switch on the profile page.
                 // Reading themeManager.mode here re-renders on toggle; the
                 // @StateObjects above survive (audio keeps playing).
@@ -64,6 +67,13 @@ struct HiddenJamsApp: App {
                     // Bring up the Apple Watch link (thumbs up/down remote).
                     WatchBridge.shared.activate()
                 }
+        }
+        .onChange(of: scenePhase) { phase in
+            // Re-check the subscription whenever the app comes forward
+            // (renewal, expiry, refund, or purchase on another device).
+            if phase == .active {
+                Task { await subscriptionManager.refreshStatus() }
+            }
         }
     }
 }

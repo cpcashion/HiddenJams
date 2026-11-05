@@ -27,7 +27,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     @Published var discoveredGems: [RecommendedTrack] = []
     @Published var isDiscovering = false
     @Published var errorMessage: String?
-    /// Set when a free user hits the daily discovery limit — UI presents the paywall.
+    /// Set when a free user hits the monthly discovery limit — UI presents the paywall.
     @Published var showPaywall = false
     @Published var discoveryProgress: String = ""
     
@@ -280,7 +280,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         popularityOverride: Int? = nil,  // User-controlled popularity threshold from slider
         followerOverride: Int? = nil     // User-controlled follower threshold from slider
     ) async {
-        // QUOTA: free tier gets 50 discoveries/day. Pro is unlimited.
+        // QUOTA: free tier gets 50 discoveries/month. Pro is unlimited.
         // Check before doing any work — hitting the limit opens the paywall.
         let quota = await MainActor.run { DiscoveryQuotaManager.shared }
         guard await MainActor.run(body: { quota.canDiscover }) else {
@@ -493,7 +493,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 let finalResults = appendResults ? discoveredGems + sorted : sorted
                 discoveredGems = finalResults
 
-                // QUOTA: record newly served tracks against the daily free limit.
+                // QUOTA: record newly served tracks against the monthly free limit.
                 // Only count tracks actually added this run (not pre-existing).
                 let newCount = appendResults ? sorted.count : finalResults.count
                 DiscoveryQuotaManager.shared.recordDiscovered(count: newCount)

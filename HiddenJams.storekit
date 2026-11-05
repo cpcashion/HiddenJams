@@ -1,0 +1,47 @@
+{
+  "identifier" : "4F1C2B7A",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_applicationInternalID" : "6756250527",
+    "_developerTeamID" : "3CQEKUP494",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "8A6E2D10",
+      "localizations" : [],
+      "name" : "Hidden Jams Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "1.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "5B3D9C21",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited track discovery every month.",
+              "displayName" : "Hidden Jams Unlimited",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.chris.GettingStarted.HiddenJams.unlimited.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Unlimited Monthly",
+          "subscriptionGroupID" : "8A6E2D10",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}
