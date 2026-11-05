@@ -12,7 +12,7 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "8A6E2D10",
+      "id" : "22458974",
       "localizations" : [],
       "name" : "Hidden Jams Pro",
       "subscriptions" : [
@@ -22,7 +22,7 @@
           "displayPrice" : "1.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "5B3D9C21",
+          "internalID" : "6831179739",
           "introductoryOffer" : null,
           "localizations" : [
             {
@@ -34,7 +34,7 @@
           "productID" : "com.chris.GettingStarted.HiddenJams.unlimited.monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Unlimited Monthly",
-          "subscriptionGroupID" : "8A6E2D10",
+          "subscriptionGroupID" : "22458974",
           "type" : "RecurringSubscription"
         }
       ]

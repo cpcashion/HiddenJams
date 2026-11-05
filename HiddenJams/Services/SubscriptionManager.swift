@@ -112,7 +112,10 @@ final class SubscriptionManager: ObservableObject {
         var premium = false
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else { continue }
-            if transaction.productType == .autoRenewable,
+            // Only the $1.99/mo unlimited product counts (the group also
+            // holds a legacy premium.monthly product that must not unlock).
+            if transaction.productID == SubscriptionProduct.monthly.rawValue,
+               transaction.productType == .autoRenewable,
                transaction.revocationDate == nil,
                (transaction.expirationDate ?? .distantFuture) > Date() {
                 premium = true
