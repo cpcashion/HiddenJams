@@ -206,6 +206,9 @@ struct PlaylistPlayerView: View {
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.textPrimary)
                 
+                // N is the real deck size (target 50). Never faked — a short
+                // niche-genre deck shows its true count after the builder
+                // exhausts the pool under the no-repeat rule.
                 Text("Track \(audioPlayer.currentIndex + 1) of \(recommendations.count)")
                     .font(Theme.Typography.caption)
                     .foregroundColor(Theme.Colors.textSecondary)
