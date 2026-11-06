@@ -28,11 +28,12 @@ struct PlaylistPlayerView: View {
     var isRefreshing: Bool = false
     var refreshProgress: String = ""
     /// Called when the deck is nearly exhausted so the parent can append
-    /// another batch (continuous discovery). Optional.
-    var onPrefetchMore: (() -> Void)? = nil
+    /// another batch (continuous discovery). Returns an outcome so the
+    /// latch can clear on empty/error (not only when gem ids change).
+    var onPrefetchMore: (() async -> PrefetchOutcome)? = nil
     
     @State private var savedTracks: Set<String> = []
-    @State private var isPrefetchRequested = false
+    @State private var prefetchLatch = PrefetchLatch()
     /// Tracks swiped left (or thumbs-down) this session — never auto-saved,
     /// even if the user goes back to one and lets it play out.
     @State private var skippedTracks: Set<String> = []
@@ -102,19 +103,25 @@ struct PlaylistPlayerView: View {
         }
         .onAppear {
             syncQueue(with: recommendations)
-            consumeCurrentTrackIfNeeded()
             maybePrefetchMore()
         }
         .onChange(of: recommendations.map(\.id)) { _ in
             syncQueue(with: recommendations)
-            // A fresh/append batch can clear the prefetch latch.
-            isPrefetchRequested = false
+            // A successful append still resets empty-retry streak via finish(.appended).
             maybePrefetchMore()
         }
         .onAppear { pushCurrentGemToWatch() }
+        .onReceive(audioPlayer.previewBecameReady) { track in
+            // Findings 6+7: ready preview + resolved entitlement (consume also gates).
+            guard audioPlayer.isDiscoveryDeck else { return }
+            guard DiscoveryTrackCountPolicy.allowsConsume(
+                previewReady: true,
+                entitlementResolved: SubscriptionManager.shared.hasResolvedEntitlement
+            ) else { return }
+            _ = discoveryQuota.consume(trackId: track.id)
+        }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in
             pushCurrentGemToWatch()
-            consumeCurrentTrackIfNeeded()
             maybePrefetchMore()
             // Profile stats (build 78): log each deck track that comes up.
             if audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack {
@@ -396,23 +403,34 @@ struct PlaylistPlayerView: View {
         audioPlayer.loadQueue(tracks, isDiscoveryDeck: true)
     }
 
-    private func consumeCurrentTrackIfNeeded() {
-        guard audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack else { return }
-        discoveryQuota.consume(trackId: track.id)
-    }
-
     private func maybePrefetchMore() {
         guard audioPlayer.isDiscoveryDeck else { return }
-        guard !isRefreshing, !isPrefetchRequested else { return }
+        guard !isRefreshing else { return }
         guard !recommendations.isEmpty else { return }
         let remainingInQueue = audioPlayer.queue.count - audioPlayer.currentIndex - 1
         guard remainingInQueue <= 2 else { return }
         // Free users with no remaining monthly slots: don't prefetch; paywall
         // is shown when they try Discover / when parent checks quota.
         if !discoveryQuota.isUnlimited, !discoveryQuota.canDiscover { return }
-        isPrefetchRequested = true
+        guard let onPrefetchMore else { return }
+        guard prefetchLatch.begin() else { return }
         print("📡 Near end of batch (\(remainingInQueue) left) — prefetching next")
-        onPrefetchMore?()
+        Task {
+            let outcome = await onPrefetchMore()
+            await MainActor.run {
+                let shouldRetry = prefetchLatch.finish(outcome)
+                print("📡 Prefetch finished: \(outcome), retry=\(shouldRetry)")
+                if shouldRetry {
+                    // Finding 4: empty/error must not dead-end while quota remains.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        await MainActor.run { maybePrefetchMore() }
+                    }
+                } else if case .appended(let n) = outcome, n > 0 {
+                    maybePrefetchMore()
+                }
+            }
+        }
     }
 
     // Refresh button that appears behind the last card

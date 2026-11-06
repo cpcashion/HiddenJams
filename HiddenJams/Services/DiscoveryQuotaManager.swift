@@ -168,6 +168,9 @@ final class DiscoveryQuotaManager: ObservableObject {
     private let store: DiscoveryQuotaStore
     private let now: () -> Date
     private let premiumCheck: () -> Bool
+    /// False until StoreKit has answered once — consume is a no-op until then
+    /// so a subscriber is not billed for cold-start tracks.
+    private let entitlementResolved: () -> Bool
     private let defaults: UserDefaults
 
     convenience init() {
@@ -175,7 +178,8 @@ final class DiscoveryQuotaManager: ObservableObject {
             store: KeychainDiscoveryQuotaStore(),
             defaults: .standard,
             now: Date.init,
-            premiumCheck: { UserProfileManager.shared.isPremium }
+            premiumCheck: { UserProfileManager.shared.isPremium },
+            entitlementResolved: { SubscriptionManager.shared.hasResolvedEntitlement }
         )
     }
 
@@ -183,12 +187,14 @@ final class DiscoveryQuotaManager: ObservableObject {
         store: DiscoveryQuotaStore,
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init,
-        premiumCheck: @escaping () -> Bool = { false }
+        premiumCheck: @escaping () -> Bool = { false },
+        entitlementResolved: @escaping () -> Bool = { true }
     ) {
         self.store = store
         self.defaults = defaults
         self.now = now
         self.premiumCheck = premiumCheck
+        self.entitlementResolved = entitlementResolved
         self.state = DiscoveryQuotaState(month: DiscoveryQuotaState.monthString(for: now()))
         load()
         syncPublished()
@@ -224,6 +230,12 @@ final class DiscoveryQuotaManager: ObservableObject {
 
     @discardableResult
     func consume(trackId: String) -> Bool {
+        // Finding 7: wait for the first StoreKit entitlement pass so Pro users
+        // are not charged while isPremium is still the cold-start default.
+        guard entitlementResolved() else {
+            print("📊 Quota: defer consume until entitlement resolves (\(trackId))")
+            return false
+        }
         let changed = mutateState {
             $0.consume(trackId: trackId, isUnlimited: isUnlimited, now: now())
         }
@@ -239,8 +251,11 @@ final class DiscoveryQuotaManager: ObservableObject {
         save()
         syncPublished()
         defaults.set(false, forKey: Self.onboardingCompletedKey)
+        // Finding 3: Reset must clear Simulate free tier so Pro entitlement applies again.
+        defaults.set(false, forKey: Self.simulateFreeTierKey)
         defaults.removeObject(forKey: legacyCountKey)
         defaults.removeObject(forKey: legacyDateKey)
+        objectWillChange.send()
         print("📊 Quota: TestFlight reset")
     }
 

@@ -67,12 +67,12 @@ struct MainTabView: View {
                                 selectedTab = .home
                             },
                             onDiscoverMore: {
-                                Task { await fetchMoreDiscoveries(append: true) }
+                                Task { _ = await fetchMoreDiscoveries(append: true) }
                             },
                             isRefreshing: discoveryEngine.isDiscovering,
                             refreshProgress: discoveryEngine.discoveryProgress,
                             onPrefetchMore: {
-                                Task { await fetchMoreDiscoveries(append: true) }
+                                await fetchMoreDiscoveries(append: true)
                             }
                         )
                     }
@@ -106,12 +106,14 @@ struct MainTabView: View {
     /// Prefetch / Discover More: append the next batch without resetting the
     /// monthly counter or restarting playback. Caps to remaining free slots.
     @MainActor
-    private func fetchMoreDiscoveries(append: Bool) async {
+    @discardableResult
+    private func fetchMoreDiscoveries(append: Bool) async -> PrefetchOutcome {
         let quota = DiscoveryQuotaManager.shared
         if !quota.isUnlimited, !quota.canDiscover {
             discoveryEngine.showPaywall = true
-            return
+            return .exhausted
         }
+        let beforeCount = discoveryEngine.discoveredGems.count
         let token = authManager.accessToken
         let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
         var selectedGenres: Set<String>? = nil
@@ -131,6 +133,21 @@ struct MainTabView: View {
             popularityOverride: PopularitySliderSettings().popularityThreshold,
             followerOverride: PopularitySliderSettings().followerThreshold
         )
+        if discoveryEngine.showPaywall {
+            return .exhausted
+        }
+        let added = discoveryEngine.discoveredGems.count - beforeCount
+        if added > 0 {
+            return .appended(added)
+        }
+        if let message = discoveryEngine.errorMessage {
+            let lower = message.lowercased()
+            if lower.contains("everything we found") || lower.contains("try another genre") {
+                return .exhausted
+            }
+            return .failed
+        }
+        return .empty
     }
 
     // MARK: - Save to Hidden Jams Playlist

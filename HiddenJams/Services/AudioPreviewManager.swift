@@ -38,6 +38,12 @@ class AudioPreviewManager: ObservableObject {
     /// `playNext()`/`playTrackAtIndex` directly and never fire this.
     let trackPlayedThrough = PassthroughSubject<RecommendedTrack, Never>()
 
+    /// Fires when a preview AVPlayerItem reaches `.readyToPlay` for the
+    /// current queue track. Discovery quota consumes on this signal — not
+    /// when `currentTrack` is merely assigned (unplayable / lookup-fail
+    /// skips must not count).
+    let previewBecameReady = PassthroughSubject<RecommendedTrack, Never>()
+
     /// Provides the Spotify web-API token for the Premium check. Wired up
     /// by the app at launch.
     var spotifyTokenProvider: (() -> String?)?
@@ -550,6 +556,7 @@ class AudioPreviewManager: ObservableObject {
             switch item.status {
             case .readyToPlay:
                 self?.consecutiveFailures = 0
+                self?.emitPreviewBecameReadyIfCurrent(trackId: trackId)
             case .failed:
                 print("⚠️ Preview URL failed to load: \(item.error?.localizedDescription ?? "unknown error")")
                 self?.skipAfterFailure()
@@ -748,6 +755,14 @@ class AudioPreviewManager: ObservableObject {
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         player?.seek(to: cmTime)
         currentTime = time
+    }
+
+    /// Quota / analytics: only when this track's preview is actually ready.
+    private func emitPreviewBecameReadyIfCurrent(trackId: String) {
+        guard currentTrackId == trackId,
+              let track = currentTrack,
+              track.id == trackId else { return }
+        previewBecameReady.send(track)
     }
 
     /// Tears down the AVPlayer and all of its observers. Observers are

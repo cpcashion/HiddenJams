@@ -30,6 +30,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Set when a free user hits the monthly discovery limit — UI presents the paywall.
     @Published var showPaywall = false
     @Published var discoveryProgress: String = ""
+
+    /// Bumped on every non-append discover so in-flight prefetch/genre work
+    /// cannot append into a newer deck (finding 5).
+    private var discoveryGenerationToken = DiscoveryGenerationToken()
     
     // Services
     private let spotifyAPI: SpotifyAPIService
@@ -271,6 +275,21 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         "new year", "thanksgiving", "hanukkah", "kwanzaa"
     ]
     
+
+    @MainActor
+    private func startDiscoveryGeneration(appendResults: Bool) -> UInt64 {
+        let generation = discoveryGenerationToken.begin(appendResults: appendResults)
+        if !appendResults {
+            print("🔄 Discovery generation → \(generation) (replace)")
+        }
+        return generation
+    }
+
+    @MainActor
+    private func isStaleDiscovery(_ generation: UInt64) -> Bool {
+        discoveryGenerationToken.isStale(generation)
+    }
+
     // MARK: - Main Discovery Function
     
     /// Dismiss the current discovery error (called from the dashboard error alert).
@@ -306,6 +325,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             return
         }
         let effectiveCount = requestCount
+        let generation = await MainActor.run {
+            self.startDiscoveryGeneration(appendResults: appendResults)
+        }
 
         // Apply user's overrides if provided (from slider)
         if let override = popularityOverride {
@@ -343,7 +365,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 selectedGenres: selectedGenres,
                 token: spotifyToken,
                 count: effectiveCount,
-                appendResults: appendResults
+                appendResults: appendResults,
+                generation: generation
             )
             return
         }
@@ -494,6 +517,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
 
             await Task { @MainActor in
+                guard !self.isStaleDiscovery(generation) else {
+                    print("⏭️ Dropping stale Apple/Last.fm discovery completion (gen \(generation))")
+                    return
+                }
                 // NO HISTORY FILTER: History is a ranking signal (unseen first),
                 // not a gate. Every candidate reaches the queue. Repeats are
                 // acceptable — an empty deck is not.
@@ -587,6 +614,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         } catch {
             print("❌ Discovery error: \(error)")
             await MainActor.run {
+                guard !self.isStaleDiscovery(generation) else { return }
                 self.errorMessage = error.localizedDescription
                 self.isDiscovering = false
                 self.discoveryProgress = "Error occurred"
@@ -606,7 +634,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         selectedGenres: Set<String>?,
         token: String,
         count: Int,
-        appendResults: Bool
+        appendResults: Bool,
+        generation: UInt64
     ) async {
         let picked = (selectedGenres ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let genres = picked.isEmpty ? Self.openModeGenres(profile: profile) : picked.sorted()
@@ -702,8 +731,16 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         print("🎛️ Genre deck \(genres): \(accumulated.count)/\(count) final (playable≈\(lastPlayable), relaxed≈\(lastRelaxed)) [\(summary)]")
 
         let recommendations = accumulated.map { makeRecommendation(for: $0, profile: profile) }
+
+        // Finding 5: drop stale completions so a cancelled genre switch cannot
+        // append the old genre into the new deck.
+        if await MainActor.run(body: { self.isStaleDiscovery(generation) }) {
+            print("⏭️ Dropping stale Spotify deck completion (gen \(generation))")
+            return
+        }
+
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
-        // Quota is consumed when a track is shown in the player, not here.
+        // Quota is consumed when a track's preview becomes ready, not here.
 
         for gem in recommendations {
             sessionSeenTracks.insert(gem.track.id)
@@ -727,8 +764,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     : "Couldn't find \(label) tracks on Spotify. Try another genre. [\(summary)]"
             }
         }
-        isDiscovering = false
-        discoveryProgress = "Complete!"
+        if await MainActor.run(body: { !self.isStaleDiscovery(generation) }) {
+            isDiscovering = false
+            discoveryProgress = "Complete!"
+        }
     }
 
     private func makeRecommendation(for track: SpotifyTrack, profile: ListeningProfile) -> RecommendedTrack {
