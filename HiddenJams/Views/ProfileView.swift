@@ -459,7 +459,7 @@ struct ProfileView: View {
     private var testFlightToolsGroup: some View {
         ProfileGroup(
             "TestFlight",
-            footer: "Sandbox subscription: cancel in iOS Settings → App Store → Sandbox Account to test a real lapse. "Simulate free tier" only ignores entitlement in this app."
+            footer: #"Sandbox subscription: cancel in iOS Settings → App Store → Sandbox Account to test a real lapse. "Simulate free tier" only ignores entitlement in this app."#
         ) {
             Toggle(isOn: Binding(
                 get: { discoveryQuota.simulateFreeTier },
