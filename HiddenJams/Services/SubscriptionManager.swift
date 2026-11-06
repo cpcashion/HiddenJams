@@ -42,6 +42,10 @@ final class SubscriptionManager: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var isPremium: Bool = false
+    /// True after the first `refreshStatus()` finishes (even if not premium).
+    /// Discovery quota waits on this so cold-start tracks are not consumed
+    /// under the free default while StoreKit is still loading.
+    @Published private(set) var hasResolvedEntitlement: Bool = false
     @Published private(set) var isLoading: Bool = false
     @Published var lastError: String?
 
@@ -124,6 +128,7 @@ final class SubscriptionManager: ObservableObject {
         }
         isPremium = premium
         UserProfileManager.shared.setSubscriptionTier(premium ? .premium : .free)
+        hasResolvedEntitlement = true
     }
 
     // MARK: - Private
