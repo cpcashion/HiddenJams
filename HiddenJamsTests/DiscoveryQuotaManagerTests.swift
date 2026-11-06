@@ -6,151 +6,196 @@
 //  bypass, genre-switch doesn't reset, idempotent per-track consume.
 //
 
-import XCTest
+import Foundation
+import Testing
 @testable import HiddenJams
 
 @MainActor
-final class DiscoveryQuotaManagerTests: XCTestCase {
+struct DiscoveryQuotaManagerTests {
 
-    private var store: InMemoryDiscoveryQuotaStore!
-    private var defaults: UserDefaults!
-    private var suiteName: String!
-    private var now: Date!
-    private var isPremium: Bool!
-
-    override func setUp() {
-        super.setUp()
-        store = InMemoryDiscoveryQuotaStore()
-        suiteName = "DiscoveryQuotaManagerTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
-        defaults.removePersistentDomain(forName: suiteName)
-        now = Self.date(year: 2026, month: 11, day: 6)
-        isPremium = false
+    private final class Clock {
+        var now: Date
+        init(_ now: Date) { self.now = now }
     }
 
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults = nil
-        super.tearDown()
-    }
-
-    private func makeQuota() -> DiscoveryQuotaManager {
-        DiscoveryQuotaManager(
-            store: store,
-            defaults: defaults,
-            now: { [unowned self] in self.now },
-            premiumCheck: { [unowned self] in self.isPremium }
-        )
+    private final class PremiumFlag {
+        var value: Bool
+        init(_ value: Bool) { self.value = value }
     }
 
     private static func date(year: Int, month: Int, day: Int) -> Date {
         var c = DateComponents()
         c.calendar = Calendar(identifier: .gregorian)
-        c.timeZone = .current
+        c.timeZone = TimeZone(secondsFromGMT: 0)
         c.year = year
         c.month = month
         c.day = day
         return c.date!
     }
 
-    func testFiftyCapAndPaywallGate() {
-        let q = makeQuota()
-        XCTAssertEqual(q.batchRequestCount(), 50)
+    private func makeQuota(
+        clock: Clock,
+        premium: PremiumFlag,
+        store: InMemoryDiscoveryQuotaStore = InMemoryDiscoveryQuotaStore(),
+        defaults: UserDefaults
+    ) -> DiscoveryQuotaManager {
+        DiscoveryQuotaManager(
+            store: store,
+            defaults: defaults,
+            now: { clock.now },
+            premiumCheck: { premium.value }
+        )
+    }
+
+    private func freshDefaults() -> (UserDefaults, String) {
+        let name = "DiscoveryQuotaManagerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return (defaults, name)
+    }
+
+    @Test func fiftyCapAndPaywallGate() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(false),
+            defaults: defaults
+        )
+        #expect(q.batchRequestCount() == 50)
         for i in 1...50 {
-            XCTAssertTrue(q.consume(trackId: "t\(i)"), "consume #\(i)")
-            XCTAssertEqual(q.usedThisMonth, i)
+            #expect(q.consume(trackId: "t\(i)"))
+            #expect(q.usedThisMonth == i)
         }
-        XCTAssertFalse(q.canDiscover)
-        XCTAssertEqual(q.remainingThisMonth, 0)
-        XCTAssertEqual(q.batchRequestCount(), 0)
-        XCTAssertFalse(q.consume(trackId: "t51"), "no 51st free track")
-        XCTAssertEqual(q.usedThisMonth, 50)
+        #expect(!q.canDiscover)
+        #expect(q.remainingThisMonth == 0)
+        #expect(q.batchRequestCount() == 0)
+        #expect(!q.consume(trackId: "t51"))
+        #expect(q.usedThisMonth == 50)
     }
 
-    func testIdempotentConsumePerTrackId() {
-        let q = makeQuota()
-        XCTAssertTrue(q.consume(trackId: "same"))
-        XCTAssertFalse(q.consume(trackId: "same"))
-        XCTAssertFalse(q.consume(trackId: "same"))
-        XCTAssertEqual(q.usedThisMonth, 1)
-        XCTAssertEqual(q.batchRequestCount(), 49)
+    @Test func idempotentConsumePerTrackId() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(false),
+            defaults: defaults
+        )
+        #expect(q.consume(trackId: "same"))
+        #expect(!q.consume(trackId: "same"))
+        #expect(!q.consume(trackId: "same"))
+        #expect(q.usedThisMonth == 1)
+        #expect(q.batchRequestCount() == 49)
     }
 
-    func testGenreSwitchDoesNotResetQuota() {
-        // Genre switches rebuild the deck but must not replenish the allowance.
-        let q = makeQuota()
+    @Test func genreSwitchDoesNotResetQuota() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(false),
+            defaults: defaults
+        )
         for i in 1...20 { _ = q.consume(trackId: "a\(i)") }
-        XCTAssertEqual(q.usedThisMonth, 20)
-        // Simulate a genre-switch session: new track ids, same month.
+        #expect(q.usedThisMonth == 20)
         for i in 1...5 { _ = q.consume(trackId: "b\(i)") }
-        XCTAssertEqual(q.usedThisMonth, 25)
-        XCTAssertEqual(q.batchRequestCount(), 25)
-        XCTAssertTrue(q.canDiscover)
+        #expect(q.usedThisMonth == 25)
+        #expect(q.batchRequestCount() == 25)
+        #expect(q.canDiscover)
     }
 
-    func testMonthRolloverResetsCountAndIds() {
-        let q = makeQuota()
+    @Test func monthRolloverResetsCountAndIds() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let clock = Clock(Self.date(year: 2026, month: 11, day: 6))
+        let q = makeQuota(clock: clock, premium: PremiumFlag(false), defaults: defaults)
         for i in 1...10 { _ = q.consume(trackId: "t\(i)") }
-        XCTAssertEqual(q.usedThisMonth, 10)
+        #expect(q.usedThisMonth == 10)
 
-        now = Self.date(year: 2026, month: 12, day: 1)
-        // Next public call triggers rollover.
-        XCTAssertTrue(q.canDiscover)
-        XCTAssertEqual(q.usedThisMonth, 0)
-        XCTAssertEqual(q.batchRequestCount(), 50)
-        // Old ids do not block the new month.
-        XCTAssertTrue(q.consume(trackId: "t1"))
-        XCTAssertEqual(q.usedThisMonth, 1)
+        clock.now = Self.date(year: 2026, month: 12, day: 1)
+        #expect(q.canDiscover)
+        #expect(q.usedThisMonth == 0)
+        #expect(q.batchRequestCount() == 50)
+        #expect(q.consume(trackId: "t1"))
+        #expect(q.usedThisMonth == 1)
     }
 
-    func testEntitlementBypassIsUnlimited() {
-        isPremium = true
-        let q = makeQuota()
-        XCTAssertTrue(q.isUnlimited)
-        XCTAssertTrue(q.canDiscover)
-        XCTAssertNil(q.remainingThisMonth)
-        XCTAssertEqual(q.batchRequestCount(), 50)
-        XCTAssertFalse(q.consume(trackId: "p1"), "unlimited does not consume")
-        XCTAssertEqual(q.usedThisMonth, 0)
+    @Test func entitlementBypassIsUnlimited() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(true),
+            defaults: defaults
+        )
+        #expect(q.isUnlimited)
+        #expect(q.canDiscover)
+        #expect(q.remainingThisMonth == nil)
+        #expect(q.batchRequestCount() == 50)
+        #expect(!q.consume(trackId: "p1"))
+        #expect(q.usedThisMonth == 0)
     }
 
-    func testSimulateFreeTierIgnoresEntitlement() {
-        isPremium = true
-        let q = makeQuota()
+    @Test func simulateFreeTierIgnoresEntitlement() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(true),
+            defaults: defaults
+        )
         q.simulateFreeTier = true
-        XCTAssertFalse(q.isUnlimited)
-        XCTAssertTrue(q.canDiscover)
-        XCTAssertTrue(q.consume(trackId: "f1"))
-        XCTAssertEqual(q.usedThisMonth, 1)
+        #expect(!q.isUnlimited)
+        #expect(q.canDiscover)
+        #expect(q.consume(trackId: "f1"))
+        #expect(q.usedThisMonth == 1)
         q.simulateFreeTier = false
-        XCTAssertTrue(q.isUnlimited)
+        #expect(q.isUnlimited)
     }
 
-    func testPersistenceAcrossRelaunch() {
-        let q1 = makeQuota()
+    @Test func persistenceAcrossRelaunch() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = InMemoryDiscoveryQuotaStore()
+        let clock = Clock(Self.date(year: 2026, month: 11, day: 6))
+        let premium = PremiumFlag(false)
+        let q1 = makeQuota(clock: clock, premium: premium, store: store, defaults: defaults)
         for i in 1...7 { _ = q1.consume(trackId: "t\(i)") }
-        // Relaunch: new manager, same store.
-        let q2 = makeQuota()
-        XCTAssertEqual(q2.usedThisMonth, 7)
-        XCTAssertFalse(q2.consume(trackId: "t3"), "already counted")
-        XCTAssertTrue(q2.consume(trackId: "t8"))
-        XCTAssertEqual(q2.usedThisMonth, 8)
+
+        let q2 = makeQuota(clock: clock, premium: premium, store: store, defaults: defaults)
+        #expect(q2.usedThisMonth == 7)
+        #expect(!q2.consume(trackId: "t3"))
+        #expect(q2.consume(trackId: "t8"))
+        #expect(q2.usedThisMonth == 8)
     }
 
-    func testResetForTestingClearsQuotaAndOnboardingFlag() {
-        let q = makeQuota()
+    @Test func resetForTestingClearsQuotaAndOnboardingFlag() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(false),
+            defaults: defaults
+        )
         q.markOnboardingCompleted()
         for i in 1...12 { _ = q.consume(trackId: "t\(i)") }
         q.resetQuotaForTesting()
-        XCTAssertEqual(q.usedThisMonth, 0)
-        XCTAssertEqual(q.batchRequestCount(), 50)
-        XCTAssertFalse(defaults.bool(forKey: DiscoveryQuotaManager.onboardingCompletedKey))
+        #expect(q.usedThisMonth == 0)
+        #expect(q.batchRequestCount() == 50)
+        #expect(defaults.bool(forKey: DiscoveryQuotaManager.onboardingCompletedKey) == false)
     }
 
-    func testBatchRequestCountCapsToRemaining() {
-        let q = makeQuota()
+    @Test func batchRequestCountCapsToRemaining() {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let q = makeQuota(
+            clock: Clock(Self.date(year: 2026, month: 11, day: 6)),
+            premium: PremiumFlag(false),
+            defaults: defaults
+        )
         for i in 1...47 { _ = q.consume(trackId: "t\(i)") }
-        XCTAssertEqual(q.batchRequestCount(defaultTarget: 50), 3)
-        XCTAssertEqual(q.batchRequestCount(defaultTarget: 2), 2)
+        #expect(q.batchRequestCount(defaultTarget: 50) == 3)
+        #expect(q.batchRequestCount(defaultTarget: 2) == 2)
     }
 }
