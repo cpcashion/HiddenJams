@@ -16,8 +16,72 @@ import Foundation
 import Combine
 import Security
 
-/// Persistence for the monthly discovery quota. Production uses the Keychain;
-/// unit tests inject an in-memory store.
+// MARK: - Pure logic (nonisolated — unit-tested without MainActor contention)
+
+/// Calendar-month discovery allowance. Mutable value type so tests can drive
+/// it with a fake clock and no actors.
+struct DiscoveryQuotaState: Equatable, Sendable {
+    static let freeMonthlyLimit = 50
+
+    var month: String
+    var usedThisMonth: Int
+    var countedTrackIds: Set<String>
+
+    init(month: String, usedThisMonth: Int = 0, countedTrackIds: Set<String> = []) {
+        self.month = month
+        self.usedThisMonth = usedThisMonth
+        self.countedTrackIds = countedTrackIds
+    }
+
+    static func monthString(for date: Date, timeZone: TimeZone = .current) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM"
+        f.timeZone = timeZone
+        return f.string(from: date)
+    }
+
+    mutating func resetIfNewMonth(now: Date, timeZone: TimeZone = .current) {
+        let current = Self.monthString(for: now, timeZone: timeZone)
+        if month != current {
+            month = current
+            usedThisMonth = 0
+            countedTrackIds = []
+        }
+    }
+
+    func canDiscover(isUnlimited: Bool) -> Bool {
+        if isUnlimited { return true }
+        return usedThisMonth < Self.freeMonthlyLimit
+    }
+
+    func remaining(isUnlimited: Bool) -> Int? {
+        if isUnlimited { return nil }
+        return max(0, Self.freeMonthlyLimit - usedThisMonth)
+    }
+
+    func batchRequestCount(defaultTarget: Int, isUnlimited: Bool) -> Int {
+        if isUnlimited { return defaultTarget }
+        return max(0, min(defaultTarget, Self.freeMonthlyLimit - usedThisMonth))
+    }
+
+    /// Count a track the first time it is shown this month. Idempotent per id.
+    @discardableResult
+    mutating func consume(trackId: String, isUnlimited: Bool, now: Date, timeZone: TimeZone = .current) -> Bool {
+        if isUnlimited { return false }
+        guard !trackId.isEmpty else { return false }
+        resetIfNewMonth(now: now, timeZone: timeZone)
+        guard !countedTrackIds.contains(trackId) else { return false }
+        guard usedThisMonth < Self.freeMonthlyLimit else { return false }
+        countedTrackIds.insert(trackId)
+        usedThisMonth += 1
+        return true
+    }
+}
+
+// MARK: - Persistence
+
 protocol DiscoveryQuotaStore: AnyObject {
     func load() -> DiscoveryQuotaManager.StoredQuota?
     func save(_ quota: DiscoveryQuotaManager.StoredQuota)
@@ -78,19 +142,16 @@ final class InMemoryDiscoveryQuotaStore: DiscoveryQuotaStore {
     func clear() { stored = nil }
 }
 
+// MARK: - Observable wrapper
+
 @MainActor
 final class DiscoveryQuotaManager: ObservableObject {
     static let shared = DiscoveryQuotaManager()
 
-    /// Free tracks per calendar month.
-    static let freeMonthlyLimit = 50
-
-    /// TestFlight / DEBUG: when true, discovery UI ignores StoreKit entitlement.
+    static let freeMonthlyLimit = DiscoveryQuotaState.freeMonthlyLimit
     static let simulateFreeTierKey = "hj.simulateFreeTier"
-    /// Cleared by the TestFlight reset tool (onboarding is connection-gated today).
     static let onboardingCompletedKey = "hj.hasCompletedOnboarding"
 
-    // Legacy UserDefaults keys (daily quota, builds ≤ 82) — migrated once.
     private let legacyCountKey = "hj.dailyDiscoveryCount"
     private let legacyDateKey = "hj.dailyDiscoveryDate"
 
@@ -101,10 +162,9 @@ final class DiscoveryQuotaManager: ObservableObject {
     }
 
     @Published private(set) var usedThisMonth: Int = 0
-    /// Track ids already counted this month (idempotent consume).
     @Published private(set) var countedTrackIds: Set<String> = []
 
-    private var month: String = ""
+    private var state: DiscoveryQuotaState
     private let store: DiscoveryQuotaStore
     private let now: () -> Date
     private let premiumCheck: () -> Bool
@@ -119,7 +179,6 @@ final class DiscoveryQuotaManager: ObservableObject {
         )
     }
 
-    /// Test / custom injection seam.
     init(
         store: DiscoveryQuotaStore,
         defaults: UserDefaults = .standard,
@@ -130,14 +189,11 @@ final class DiscoveryQuotaManager: ObservableObject {
         self.defaults = defaults
         self.now = now
         self.premiumCheck = premiumCheck
+        self.state = DiscoveryQuotaState(month: DiscoveryQuotaState.monthString(for: now()))
         load()
-        resetIfNewMonth()
+        syncPublished()
     }
 
-    // MARK: - Entitlement / TestFlight simulate-free
-
-    /// Local TestFlight-only flag: discovery behaves as free even if StoreKit
-    /// says the user is subscribed. Never revokes anything in StoreKit.
     var simulateFreeTier: Bool {
         get { defaults.bool(forKey: Self.simulateFreeTierKey) }
         set {
@@ -146,102 +202,88 @@ final class DiscoveryQuotaManager: ObservableObject {
         }
     }
 
-    /// True when discovery is unlimited (active entitlement and not simulating free).
     var isUnlimited: Bool {
         if simulateFreeTier { return false }
         return premiumCheck()
     }
 
-    // MARK: - Public
-
-    /// True if the user may discover / be shown more tracks right now.
     var canDiscover: Bool {
-        if isUnlimited { return true }
-        resetIfNewMonth()
-        return usedThisMonth < Self.freeMonthlyLimit
+        mutateState { $0.resetIfNewMonth(now: now()) }
+        return state.canDiscover(isUnlimited: isUnlimited)
     }
 
-    /// Tracks remaining for free users this month. Nil for unlimited.
     var remainingThisMonth: Int? {
-        if isUnlimited { return nil }
-        resetIfNewMonth()
-        return max(0, Self.freeMonthlyLimit - usedThisMonth)
+        mutateState { $0.resetIfNewMonth(now: now()) }
+        return state.remaining(isUnlimited: isUnlimited)
     }
 
-    /// How many tracks a new Discover / prefetch batch may request.
     func batchRequestCount(defaultTarget: Int = 50) -> Int {
-        if isUnlimited { return defaultTarget }
-        resetIfNewMonth()
-        return max(0, min(defaultTarget, Self.freeMonthlyLimit - usedThisMonth))
+        mutateState { $0.resetIfNewMonth(now: now()) }
+        return state.batchRequestCount(defaultTarget: defaultTarget, isUnlimited: isUnlimited)
     }
 
-    /// Count a track the first time it is shown this month. Idempotent per id.
-    /// Returns true when this call newly consumed a slot.
     @discardableResult
     func consume(trackId: String) -> Bool {
-        if isUnlimited { return false }
-        guard !trackId.isEmpty else { return false }
-        resetIfNewMonth()
-        guard !countedTrackIds.contains(trackId) else { return false }
-        guard usedThisMonth < Self.freeMonthlyLimit else { return false }
-        countedTrackIds.insert(trackId)
-        usedThisMonth += 1
-        save()
-        print("📊 Quota: \(usedThisMonth)/\(Self.freeMonthlyLimit) used this month (+\(trackId))")
-        return true
+        let changed = mutateState {
+            $0.consume(trackId: trackId, isUnlimited: isUnlimited, now: now())
+        }
+        if changed {
+            print("📊 Quota: \(usedThisMonth)/\(Self.freeMonthlyLimit) used this month (+\(trackId))")
+        }
+        return changed
     }
 
-    /// TestFlight reset: wipe this month's quota only (Keychain). Does not
-    /// touch StoreKit. Also clears the onboarding-completed flag.
     func resetQuotaForTesting() {
         store.clear()
-        month = Self.monthString(for: now())
-        usedThisMonth = 0
-        countedTrackIds = []
+        state = DiscoveryQuotaState(month: DiscoveryQuotaState.monthString(for: now()))
         save()
+        syncPublished()
         defaults.set(false, forKey: Self.onboardingCompletedKey)
-        // Drop legacy daily keys if somehow still present.
         defaults.removeObject(forKey: legacyCountKey)
         defaults.removeObject(forKey: legacyDateKey)
         print("📊 Quota: TestFlight reset")
     }
 
-    /// Mark onboarding completed (set when a music source first connects).
     func markOnboardingCompleted() {
         defaults.set(true, forKey: Self.onboardingCompletedKey)
     }
 
     // MARK: - Private
 
-    private func resetIfNewMonth() {
-        let current = Self.monthString(for: now())
-        if month != current {
-            month = current
-            usedThisMonth = 0
-            countedTrackIds = []
+    @discardableResult
+    private func mutateState<T>(_ body: (inout DiscoveryQuotaState) -> T) -> T {
+        let before = state
+        let result = body(&state)
+        if state != before {
             save()
-            print("📊 Quota: new month, counter reset")
+            syncPublished()
         }
+        return result
+    }
+
+    private func syncPublished() {
+        usedThisMonth = state.usedThisMonth
+        countedTrackIds = state.countedTrackIds
     }
 
     private func load() {
         if let stored = store.load() {
-            month = stored.month
-            usedThisMonth = stored.count
-            countedTrackIds = Set(stored.trackIds)
+            state = DiscoveryQuotaState(
+                month: stored.month,
+                usedThisMonth: stored.count,
+                countedTrackIds: Set(stored.trackIds)
+            )
+            mutateState { $0.resetIfNewMonth(now: now()) }
             return
         }
-        // One-time migration from the old daily UserDefaults counter.
         let legacyCount = defaults.integer(forKey: legacyCountKey)
-        let current = Self.monthString(for: now())
+        let current = DiscoveryQuotaState.monthString(for: now())
+        var used = 0
         if let legacyDay = defaults.string(forKey: legacyDateKey),
            legacyDay.hasPrefix(current) {
-            usedThisMonth = min(legacyCount, Self.freeMonthlyLimit)
-        } else {
-            usedThisMonth = 0
+            used = min(legacyCount, Self.freeMonthlyLimit)
         }
-        countedTrackIds = []
-        month = current
+        state = DiscoveryQuotaState(month: current, usedThisMonth: used)
         save()
         defaults.removeObject(forKey: legacyCountKey)
         defaults.removeObject(forKey: legacyDateKey)
@@ -249,18 +291,9 @@ final class DiscoveryQuotaManager: ObservableObject {
 
     private func save() {
         store.save(StoredQuota(
-            month: month,
-            count: usedThisMonth,
-            trackIds: Array(countedTrackIds)
+            month: state.month,
+            count: state.usedThisMonth,
+            trackIds: Array(state.countedTrackIds)
         ))
-    }
-
-    static func monthString(for date: Date) -> String {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM"
-        f.timeZone = .current
-        return f.string(from: date)
     }
 }
