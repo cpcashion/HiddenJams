@@ -176,4 +176,58 @@ nonisolated struct DiscoveryQuotaManagerTests {
         #expect(q.batchRequestCount() == 50)
         #expect(defaults.bool(forKey: DiscoveryQuotaManager.onboardingCompletedKey) == false)
     }
+
+    /// Documents build-85 TF defect: Profile "Reset discovery" clears quota
+    /// but leaves Simulate free tier ON, so a subscriber stays gated after reset.
+    /// Expected contract: reset clears the simulate flag. Currently FAILS.
+    @Test @MainActor func resetClearsSimulateFreeTier() {
+        let store = InMemoryDiscoveryQuotaStore()
+        let suite = "DiscoveryQuotaManagerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let now = Self.date(year: 2026, month: 11, day: 6)
+        let q = DiscoveryQuotaManager(
+            store: store,
+            defaults: defaults,
+            now: { now },
+            premiumCheck: { true }
+        )
+        q.simulateFreeTier = true
+        #expect(!q.isUnlimited)
+        _ = q.consume(trackId: "burned")
+        #expect(q.usedThisMonth == 1)
+
+        q.resetQuotaForTesting()
+
+        #expect(q.usedThisMonth == 0)
+        #expect(q.simulateFreeTier == false, "Reset discovery must clear Simulate free tier so Pro entitlement applies again")
+        #expect(q.isUnlimited)
+    }
+
+    /// Entitlement race characterization: tracks consumed while premiumCheck
+    /// is still false stay on the monthly counter after premium flips true.
+    @Test @MainActor func entitlementFlipDoesNotRefundEarlyConsumes() {
+        let store = InMemoryDiscoveryQuotaStore()
+        let suite = "DiscoveryQuotaManagerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var premium = false
+        let now = Self.date(year: 2026, month: 11, day: 6)
+        let q = DiscoveryQuotaManager(
+            store: store,
+            defaults: defaults,
+            now: { now },
+            premiumCheck: { premium }
+        )
+        _ = q.consume(trackId: "cold-start-1")
+        _ = q.consume(trackId: "cold-start-2")
+        #expect(q.usedThisMonth == 2)
+        premium = true
+        #expect(q.isUnlimited)
+        #expect(q.usedThisMonth == 2, "Early free-tier burns are sticky after StoreKit entitlement loads")
+    }
 }
