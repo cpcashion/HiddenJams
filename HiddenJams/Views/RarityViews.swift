@@ -43,14 +43,13 @@ struct RaritySheet: View {
     let trackName: String
 
     var body: some View {
+        // Native sheet + system drag indicator: a custom grabber inside the
+        // VStack was clipped (or sat above the visible area) whenever the
+        // sheet sat between detents / was only partially raised. The system
+        // indicator is drawn by UIKit above the clipped content, so it stays
+        // visible at every detent. Extra top padding keeps the title clear
+        // of the indicator.
         VStack(spacing: 20) {
-            // Custom grabber — part of the layout so it can never overlap
-            // the title (the system drag indicator draws over content).
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-
             // Tier header
             VStack(spacing: 8) {
                 Text(rarity.tier.label)
@@ -128,9 +127,10 @@ struct RaritySheet: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
+        .padding(.top, 16)   // clear of the system drag indicator
         .padding(.bottom, 24)
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
+        .presentationDragIndicator(.visible)
     }
 
     private var rarityGradient: LinearGradient {

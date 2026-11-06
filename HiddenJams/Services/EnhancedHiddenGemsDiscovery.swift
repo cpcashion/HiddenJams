@@ -620,20 +620,75 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         request.userExcludedGenres = Self.userExcludedGenres()
         request.target = max(1, count)
 
+        // Large exclusion sets (history + prior Discover taps, including
+        // other genres) are why genre switches often landed at ~40 instead
+        // of 50: the 9s / 5-wave budget ran out before the pool did. Give
+        // the builder more room when a lot is already excluded, then top up
+        // with extra passes below if the first pass is still short.
+        if request.excludedArtistIds.count > 30 || request.excludedTrackIds.count > 80 {
+            request.timeBudget = 14
+            request.maxSearchWaves = 8
+        }
+
         let catalog = SpotifyGenreDeckCatalog(token: token)
         let builder = GenreDeckBuilder(catalog: catalog)
         builder.onProgress = { [weak self] message in
             await self?.updateProgress(message)
         }
-        let deck = await builder.build(request)
-        let summary = deck.stats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
-        print("🎛️ Genre deck \(genres): \(deck.tracks.count) tracks, \(deck.playableCount) playable, \(deck.relaxedCount) relaxed [\(summary)]")
 
-        // Final gate + record: nothing ever served gets through, and the
-        // memory is saved before the deck reaches the player.
-        let fresh = served.admit(deck.tracks)
+        // Keep building until we hit `count` or a pass finds nothing new.
+        // Never pad with repeats — a short deck beats a fake "of 50".
+        var accumulated: [SpotifyTrack] = []
+        var lastStats: [String: Int] = [:]
+        var lastPlayable = 0
+        var lastRelaxed = 0
+        let maxPasses = 3
+        for pass in 1...maxPasses {
+            let remaining = count - accumulated.count
+            guard remaining > 0 else { break }
+            request.target = remaining
+            // Later passes already know more of the catalog is spent; spend
+            // a little longer searching rather than stopping at ~40.
+            if pass > 1 {
+                request.timeBudget = max(request.timeBudget, 12)
+                request.maxSearchWaves = max(request.maxSearchWaves, 8)
+                await updateProgress("Finding more tracks…")
+            }
+
+            let deck = await builder.build(request)
+            lastStats = deck.stats
+            lastPlayable = deck.playableCount
+            lastRelaxed = deck.relaxedCount
+            let summary = deck.stats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+            print("🎛️ Genre deck pass \(pass) \(genres): \(deck.tracks.count) tracks, \(deck.playableCount) playable, \(deck.relaxedCount) relaxed [\(summary)]")
+
+            // Final gate + record: nothing ever served gets through.
+            let fresh = served.admit(deck.tracks)
+            if fresh.isEmpty {
+                print("🎛️ Genre deck pass \(pass): no new tracks after no-repeat gate — stopping")
+                break
+            }
+            accumulated.append(contentsOf: fresh)
+            // Next pass must not re-propose anything we just took (or anything
+            // admit recorded as a colliding artist/song).
+            served.apply(to: &request)
+            if accumulated.count >= count { break }
+            if deck.tracks.count < remaining {
+                // Builder itself came up short of what we asked — further
+                // passes with the same exclusions rarely help; one more try
+                // with a bigger budget is enough, then stop.
+                if pass >= 2 { break }
+            }
+        }
         served.save(to: servedMemoryDefaults)
-        let recommendations = fresh.map { makeRecommendation(for: $0, profile: profile) }
+
+        if accumulated.count > count {
+            accumulated = Array(accumulated.prefix(count))
+        }
+        let summary = lastStats.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+        print("🎛️ Genre deck \(genres): \(accumulated.count)/\(count) final (playable≈\(lastPlayable), relaxed≈\(lastRelaxed)) [\(summary)]")
+
+        let recommendations = accumulated.map { makeRecommendation(for: $0, profile: profile) }
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
         DiscoveryQuotaManager.shared.recordDiscovered(count: recommendations.count)
 
@@ -649,7 +704,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         if recommendations.isEmpty {
             if catalog.authFailed {
                 errorMessage = "Spotify needs you to sign in again. Reconnect Spotify, then tap Discover."
-            } else if deck.stats["pages_ok", default: 0] == 0 {
+            } else if lastStats["pages_ok", default: 0] == 0 {
                 errorMessage = "Couldn't reach Spotify. Check your connection and try again."
             } else {
                 let names = genres.prefix(3).joined(separator: ", ")
