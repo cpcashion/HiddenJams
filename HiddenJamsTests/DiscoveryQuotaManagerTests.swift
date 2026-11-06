@@ -4,8 +4,8 @@
 //
 //  Free-tier monthly quota: 50 cap, calendar-month rollover, entitlement
 //  bypass, genre-switch doesn't reset, idempotent per-track consume.
-//  Tests the pure DiscoveryQuotaState (+ a thin manager persistence check)
-//  so they don't contend for the MainActor with GenreDeckBuilderTests.
+//  Most cases hit pure DiscoveryQuotaState (no MainActor). Two thin
+//  @MainActor cases cover manager persistence / TestFlight reset.
 //
 
 import Foundation
@@ -14,10 +14,12 @@ import Testing
 
 struct DiscoveryQuotaManagerTests {
 
+    private static let tz = TimeZone(secondsFromGMT: 0)!
+
     private static func date(year: Int, month: Int, day: Int) -> Date {
         var c = DateComponents()
         c.calendar = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(secondsFromGMT: 0)
+        c.timeZone = tz
         c.year = year
         c.month = month
         c.day = day
@@ -33,23 +35,27 @@ struct DiscoveryQuotaManagerTests {
         let now = Self.date(year: 2026, month: 11, day: 6)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 50)
         for i in 1...50 {
-            #expect(s.consume(trackId: "t\(i)", isUnlimited: false, now: now, timeZone: TimeZone(secondsFromGMT: 0)!))
+            let consumed = s.consume(trackId: "t\(i)", isUnlimited: false, now: now, timeZone: Self.tz)
+            #expect(consumed)
             #expect(s.usedThisMonth == i)
         }
         #expect(!s.canDiscover(isUnlimited: false))
         #expect(s.remaining(isUnlimited: false) == 0)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 0)
-        #expect(!s.consume(trackId: "t51", isUnlimited: false, now: now, timeZone: TimeZone(secondsFromGMT: 0)!))
+        let overflow = s.consume(trackId: "t51", isUnlimited: false, now: now, timeZone: Self.tz)
+        #expect(!overflow)
         #expect(s.usedThisMonth == 50)
     }
 
     @Test func idempotentConsumePerTrackId() {
         var s = fresh()
         let now = Self.date(year: 2026, month: 11, day: 6)
-        let tz = TimeZone(secondsFromGMT: 0)!
-        #expect(s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: tz))
-        #expect(!s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: tz))
-        #expect(!s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: tz))
+        let first = s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: Self.tz)
+        let second = s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: Self.tz)
+        let third = s.consume(trackId: "same", isUnlimited: false, now: now, timeZone: Self.tz)
+        #expect(first)
+        #expect(!second)
+        #expect(!third)
         #expect(s.usedThisMonth == 1)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 49)
     }
@@ -57,10 +63,13 @@ struct DiscoveryQuotaManagerTests {
     @Test func genreSwitchDoesNotResetQuota() {
         var s = fresh()
         let now = Self.date(year: 2026, month: 11, day: 6)
-        let tz = TimeZone(secondsFromGMT: 0)!
-        for i in 1...20 { _ = s.consume(trackId: "a\(i)", isUnlimited: false, now: now, timeZone: tz) }
+        for i in 1...20 {
+            _ = s.consume(trackId: "a\(i)", isUnlimited: false, now: now, timeZone: Self.tz)
+        }
         #expect(s.usedThisMonth == 20)
-        for i in 1...5 { _ = s.consume(trackId: "b\(i)", isUnlimited: false, now: now, timeZone: tz) }
+        for i in 1...5 {
+            _ = s.consume(trackId: "b\(i)", isUnlimited: false, now: now, timeZone: Self.tz)
+        }
         #expect(s.usedThisMonth == 25)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 25)
         #expect(s.canDiscover(isUnlimited: false))
@@ -68,48 +77,50 @@ struct DiscoveryQuotaManagerTests {
 
     @Test func monthRolloverResetsCountAndIds() {
         var s = fresh()
-        let tz = TimeZone(secondsFromGMT: 0)!
         let nov = Self.date(year: 2026, month: 11, day: 6)
-        for i in 1...10 { _ = s.consume(trackId: "t\(i)", isUnlimited: false, now: nov, timeZone: tz) }
+        for i in 1...10 {
+            _ = s.consume(trackId: "t\(i)", isUnlimited: false, now: nov, timeZone: Self.tz)
+        }
         #expect(s.usedThisMonth == 10)
 
         let dec = Self.date(year: 2026, month: 12, day: 1)
-        s.resetIfNewMonth(now: dec, timeZone: tz)
+        s.resetIfNewMonth(now: dec, timeZone: Self.tz)
         #expect(s.usedThisMonth == 0)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 50)
-        #expect(s.consume(trackId: "t1", isUnlimited: false, now: dec, timeZone: tz))
+        let again = s.consume(trackId: "t1", isUnlimited: false, now: dec, timeZone: Self.tz)
+        #expect(again)
         #expect(s.usedThisMonth == 1)
     }
 
     @Test func entitlementBypassIsUnlimited() {
         var s = fresh()
         let now = Self.date(year: 2026, month: 11, day: 6)
-        let tz = TimeZone(secondsFromGMT: 0)!
         #expect(s.canDiscover(isUnlimited: true))
         #expect(s.remaining(isUnlimited: true) == nil)
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: true) == 50)
-        #expect(!s.consume(trackId: "p1", isUnlimited: true, now: now, timeZone: tz))
+        let consumed = s.consume(trackId: "p1", isUnlimited: true, now: now, timeZone: Self.tz)
+        #expect(!consumed)
         #expect(s.usedThisMonth == 0)
     }
 
     @Test func simulateFreeTierIgnoresEntitlement() {
-        // "Simulate free" is just isUnlimited == false even when StoreKit says premium.
         var s = fresh()
         let now = Self.date(year: 2026, month: 11, day: 6)
-        let tz = TimeZone(secondsFromGMT: 0)!
-        let simulatingFree = true
         let storeKitPremium = true
+        let simulatingFree = true
         let unlimited = storeKitPremium && !simulatingFree
         #expect(!unlimited)
-        #expect(s.consume(trackId: "f1", isUnlimited: unlimited, now: now, timeZone: tz))
+        let consumed = s.consume(trackId: "f1", isUnlimited: unlimited, now: now, timeZone: Self.tz)
+        #expect(consumed)
         #expect(s.usedThisMonth == 1)
     }
 
     @Test func batchRequestCountCapsToRemaining() {
         var s = fresh()
         let now = Self.date(year: 2026, month: 11, day: 6)
-        let tz = TimeZone(secondsFromGMT: 0)!
-        for i in 1...47 { _ = s.consume(trackId: "t\(i)", isUnlimited: false, now: now, timeZone: tz) }
+        for i in 1...47 {
+            _ = s.consume(trackId: "t\(i)", isUnlimited: false, now: now, timeZone: Self.tz)
+        }
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 3)
         #expect(s.batchRequestCount(defaultTarget: 2, isUnlimited: false) == 2)
     }
@@ -137,8 +148,10 @@ struct DiscoveryQuotaManagerTests {
             premiumCheck: { false }
         )
         #expect(q2.usedThisMonth == 7)
-        #expect(!q2.consume(trackId: "t3"))
-        #expect(q2.consume(trackId: "t8"))
+        let again = q2.consume(trackId: "t3")
+        let next = q2.consume(trackId: "t8")
+        #expect(!again)
+        #expect(next)
         #expect(q2.usedThisMonth == 8)
     }
 
