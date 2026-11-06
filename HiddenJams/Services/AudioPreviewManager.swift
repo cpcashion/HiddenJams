@@ -757,6 +757,14 @@ class AudioPreviewManager: ObservableObject {
         currentTime = time
     }
 
+    /// Quota / analytics: only when this track's preview is actually ready.
+    private func emitPreviewBecameReadyIfCurrent(trackId: String) {
+        guard currentTrackId == trackId,
+              let track = currentTrack,
+              track.id == trackId else { return }
+        previewBecameReady.send(track)
+    }
+
     /// Tears down the AVPlayer and all of its observers. Observers are
     /// removed BEFORE the player is released (removing after nil-ing the
     /// player silently leaks the time observer).
