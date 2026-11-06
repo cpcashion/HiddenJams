@@ -245,6 +245,16 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// Persisted (UserDefaults), reloaded before every deck, so the no-repeat
     /// rule holds across app launches, not just within one run.
     private let servedMemoryDefaults: UserDefaults = .standard
+
+    /// TestFlight reset: clear in-memory session exclusions and the current deck.
+    func resetSessionMemoryForTesting() {
+        sessionSeenTracks.removeAll()
+        sessionSeenArtists.removeAll()
+        discoveredGems = []
+        errorMessage = nil
+        showPaywall = false
+    }
+
     
     
     init() {
@@ -280,10 +290,14 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         popularityOverride: Int? = nil,  // User-controlled popularity threshold from slider
         followerOverride: Int? = nil     // User-controlled follower threshold from slider
     ) async {
-        // QUOTA: free tier gets 50 discoveries/month. Pro is unlimited.
-        // Check before doing any work — hitting the limit opens the paywall.
-        let quota = await MainActor.run { DiscoveryQuotaManager.shared }
-        guard await MainActor.run(body: { quota.canDiscover }) else {
+        // QUOTA: free tier gets 50 discoveries/month (cumulative). Pro is
+        // unlimited. Cap this batch to the remaining free slots so we never
+        // queue discovery #51 for a free user. Hitting the limit opens the paywall.
+        let (canDiscover, requestCount) = await MainActor.run { () -> (Bool, Int) in
+            let quota = DiscoveryQuotaManager.shared
+            return (quota.canDiscover, quota.batchRequestCount(defaultTarget: count))
+        }
+        guard canDiscover, requestCount > 0 else {
             print("📊 Quota exhausted — presenting paywall")
             await MainActor.run {
                 self.showPaywall = true
@@ -291,6 +305,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             }
             return
         }
+        let effectiveCount = requestCount
 
         // Apply user's overrides if provided (from slider)
         if let override = popularityOverride {
@@ -327,7 +342,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 profile: profile,
                 selectedGenres: selectedGenres,
                 token: spotifyToken,
-                count: count,
+                count: effectiveCount,
                 appendResults: appendResults
             )
             return
@@ -474,7 +489,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // landed at #1 of a "deep cuts" deck.) Session variety comes
             // from the walk advancing into new territory each run, not
             // from randomizing the order.
-            let topRecommendations = Array(finalRecommendations.sorted { $0.totalScore > $1.totalScore }.prefix(count))
+            let topRecommendations = Array(finalRecommendations.sorted { $0.totalScore > $1.totalScore }.prefix(effectiveCount))
 
             print("🎉 Discovery complete: \(topRecommendations.count) recommendations with AI explanations")
 
@@ -493,10 +508,8 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 let finalResults = appendResults ? discoveredGems + sorted : sorted
                 discoveredGems = finalResults
 
-                // QUOTA: record newly served tracks against the monthly free limit.
-                // Only count tracks actually added this run (not pre-existing).
-                let newCount = appendResults ? sorted.count : finalResults.count
-                DiscoveryQuotaManager.shared.recordDiscovered(count: newCount)
+                // Quota is consumed when a track is *shown* in the player
+                // (idempotent per track id), not when the batch is built.
 
                 // APPLE MUSIC UNCONDITIONAL FALLBACK: if the pipeline produced
                 // nothing and there's no Spotify token, hit the iTunes Search
@@ -690,7 +703,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
         let recommendations = accumulated.map { makeRecommendation(for: $0, profile: profile) }
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
-        DiscoveryQuotaManager.shared.recordDiscovered(count: recommendations.count)
+        // Quota is consumed when a track is shown in the player, not here.
 
         for gem in recommendations {
             sessionSeenTracks.insert(gem.track.id)
@@ -708,9 +721,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 errorMessage = "Couldn't reach Spotify. Check your connection and try again."
             } else {
                 let names = genres.prefix(3).joined(separator: ", ")
+                let label = names.isEmpty ? "this genre" : names
                 errorMessage = appendResults
-                    ? "No more new \(names) tracks right now. Try again later or add another genre. [\(summary)]"
-                    : "Couldn't find \(names) tracks on Spotify. Try another genre. [\(summary)]"
+                    ? "You've heard everything we found for \(label) — try another genre."
+                    : "Couldn't find \(label) tracks on Spotify. Try another genre. [\(summary)]"
             }
         }
         isDiscovering = false

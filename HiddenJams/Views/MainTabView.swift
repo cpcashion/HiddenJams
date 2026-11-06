@@ -67,35 +67,13 @@ struct MainTabView: View {
                                 selectedTab = .home
                             },
                             onDiscoverMore: {
-                                Task {
-                                    let token = authManager.accessToken
-                                    let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
-
-                                    var selectedGenres: Set<String>? = nil
-                                    if let selectedGenresData = UserDefaults.standard.data(forKey: "selectedGenres"),
-                                       let decoded = try? JSONDecoder().decode(Set<String>.self, from: selectedGenresData) {
-                                        selectedGenres = decoded
-                                    }
-                                    
-                                    // "Discover More" must honor the popularity slider —
-                                    // it previously reset to default thresholds on every refresh.
-                                    // PopularitySliderSettings() loads the persisted slider value.
-                                    await discoveryEngine.discoverHiddenGems(
-                                        profile: profileAnalyzer.profile,
-                                        userTracks: profileAnalyzer.userLibraryTracks.map { $0.id },
-                                        userLibrary: profileAnalyzer.userLibraryTracks,
-                                        selectedGenres: selectedGenres,
-                                        token: token,
-                                        appleMusicSeeds: appleSeeds,
-                                        count: 50,
-                                        appendResults: false,
-                                        popularityOverride: PopularitySliderSettings().popularityThreshold,
-                                        followerOverride: PopularitySliderSettings().followerThreshold
-                                    )
-                                }
+                                Task { await fetchMoreDiscoveries(append: true) }
                             },
                             isRefreshing: discoveryEngine.isDiscovering,
-                            refreshProgress: discoveryEngine.discoveryProgress
+                            refreshProgress: discoveryEngine.discoveryProgress,
+                            onPrefetchMore: {
+                                Task { await fetchMoreDiscoveries(append: true) }
+                            }
                         )
                     }
                 }
@@ -103,7 +81,7 @@ struct MainTabView: View {
                 .zIndex(selectedTab == .player ? 1 : 0)
                 
                 // Profile tab - always exists, visibility controlled by opacity
-                ProfileView(statFocus: $profileFocus, deckGemCount: discoveryEngine.discoveredGems.count)
+                ProfileView(statFocus: $profileFocus, deckGemCount: discoveryEngine.discoveredGems.count, discoveryEngine: discoveryEngine)
                     .environmentObject(profileAnalyzer)
                     .opacity(selectedTab == .profile ? 1 : 0)
                     .zIndex(selectedTab == .profile ? 1 : 0)
@@ -123,6 +101,38 @@ struct MainTabView: View {
         }
     }
     
+    // MARK: - Continuous discovery
+
+    /// Prefetch / Discover More: append the next batch without resetting the
+    /// monthly counter or restarting playback. Caps to remaining free slots.
+    @MainActor
+    private func fetchMoreDiscoveries(append: Bool) async {
+        let quota = DiscoveryQuotaManager.shared
+        if !quota.isUnlimited, !quota.canDiscover {
+            discoveryEngine.showPaywall = true
+            return
+        }
+        let token = authManager.accessToken
+        let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+        var selectedGenres: Set<String>? = nil
+        if let selectedGenresData = UserDefaults.standard.data(forKey: "selectedGenres"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: selectedGenresData) {
+            selectedGenres = decoded
+        }
+        await discoveryEngine.discoverHiddenGems(
+            profile: profileAnalyzer.profile,
+            userTracks: profileAnalyzer.userLibraryTracks.map { $0.id },
+            userLibrary: profileAnalyzer.userLibraryTracks,
+            selectedGenres: selectedGenres,
+            token: token,
+            appleMusicSeeds: appleSeeds,
+            count: 50,
+            appendResults: append,
+            popularityOverride: PopularitySliderSettings().popularityThreshold,
+            followerOverride: PopularitySliderSettings().followerThreshold
+        )
+    }
+
     // MARK: - Save to Hidden Jams Playlist
     
     private func saveTrackToHiddenJams(_ track: RecommendedTrack) async {

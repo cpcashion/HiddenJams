@@ -54,6 +54,14 @@ struct ContentView: View {
             SourceAppOpener.shared.currentTrackProvider = { [weak manager] in
                 manager?.currentTrack
             }
+            if sourceManager.hasConnectedSource {
+                DiscoveryQuotaManager.shared.markOnboardingCompleted()
+            }
+        }
+        .onChange(of: sourceManager.hasConnectedSource) { connected in
+            if connected {
+                DiscoveryQuotaManager.shared.markOnboardingCompleted()
+            }
         }
         .onOpenURL { url in
             // Handle OAuth callback

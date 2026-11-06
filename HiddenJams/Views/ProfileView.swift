@@ -48,10 +48,20 @@ struct ProfileView: View {
     @Binding var statFocus: ProfileStatFocus?
     /// Gems in the current discovery deck (Home's "Gems Found").
     var deckGemCount: Int = 0
+    /// Optional: needed for TestFlight discovery reset (clears in-memory deck).
+    var discoveryEngine: EnhancedHiddenGemsDiscovery? = nil
 
-    init(statFocus: Binding<ProfileStatFocus?> = .constant(nil), deckGemCount: Int = 0) {
+    @State private var confirmDiscoveryReset = false
+    @ObservedObject private var discoveryQuota = DiscoveryQuotaManager.shared
+
+    init(
+        statFocus: Binding<ProfileStatFocus?> = .constant(nil),
+        deckGemCount: Int = 0,
+        discoveryEngine: EnhancedHiddenGemsDiscovery? = nil
+    ) {
         self._statFocus = statFocus
         self.deckGemCount = deckGemCount
+        self.discoveryEngine = discoveryEngine
     }
 
     var body: some View {
@@ -67,6 +77,9 @@ struct ProfileView: View {
                         playlistsGroup
                         servicesGroup
                         appearanceGroup
+                        if TestFlightTools.showsDebugTools {
+                            testFlightToolsGroup
+                        }
                         if !sourceManager.connectedSources.isEmpty {
                             disconnectGroup
                         }
@@ -102,6 +115,16 @@ struct ProfileView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your playlists in Spotify and Apple Music stay as they are.")
+        }
+        .confirmationDialog("Reset discovery for TestFlight?",
+                            isPresented: $confirmDiscoveryReset,
+                            titleVisibility: .visible) {
+            Button("Reset discovery", role: .destructive) {
+                TestFlightTools.resetDiscoveryState(discovery: discoveryEngine)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Clears this month's free-track count, the onboarding-completed flag, and Discover's no-repeat history. Does not change your subscription. Onboarding UI reappears only after you disconnect music services.")
         }
     }
 
@@ -428,6 +451,49 @@ struct ProfileView: View {
             .padding(4)
             .background(Capsule().fill(Theme.Colors.chipFill))
             .padding(12)
+        }
+    }
+
+    // MARK: - TestFlight tools
+
+    private var testFlightToolsGroup: some View {
+        ProfileGroup(
+            "TestFlight",
+            footer: "Sandbox subscription: cancel in iOS Settings → App Store → Sandbox Account to test a real lapse. "Simulate free tier" only ignores entitlement in this app."
+        ) {
+            Toggle(isOn: Binding(
+                get: { discoveryQuota.simulateFreeTier },
+                set: { discoveryQuota.simulateFreeTier = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Simulate free tier")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Theme.Colors.textPrimary)
+                    Text("Ignore subscription for discovery (local only)")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider().background(Theme.Colors.textPrimary.opacity(0.08))
+
+            Button(action: { confirmDiscoveryReset = true }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reset discovery (TestFlight)")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Theme.Colors.error)
+                    Text("Quota \(discoveryQuota.usedThisMonth)/\(DiscoveryQuotaManager.freeMonthlyLimit) this month")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 

@@ -15,6 +15,7 @@ struct PlaylistPlayerView: View {
     @EnvironmentObject var authManager: SpotifyAuthManager
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var watchBridge = WatchBridge.shared
+    @ObservedObject private var discoveryQuota = DiscoveryQuotaManager.shared
 
     // Rarity reveal state
     @State private var artistRarity: ArtistRarity?
@@ -26,8 +27,12 @@ struct PlaylistPlayerView: View {
     var onDiscoverMore: (() -> Void)? = nil
     var isRefreshing: Bool = false
     var refreshProgress: String = ""
+    /// Called when the deck is nearly exhausted so the parent can append
+    /// another batch (continuous discovery). Optional.
+    var onPrefetchMore: (() -> Void)? = nil
     
     @State private var savedTracks: Set<String> = []
+    @State private var isPrefetchRequested = false
     /// Tracks swiped left (or thumbs-down) this session — never auto-saved,
     /// even if the user goes back to one and lets it play out.
     @State private var skippedTracks: Set<String> = []
@@ -96,27 +101,28 @@ struct PlaylistPlayerView: View {
             }
         }
         .onAppear {
-            let currentIDs = audioPlayer.queue.map { $0.id }
-            let newIDs = recommendations.map { $0.id }
-            
-            if currentIDs != newIDs {
-                audioPlayer.loadQueue(recommendations, isDiscoveryDeck: true)
-            }
+            syncQueue(with: recommendations)
+            consumeCurrentTrackIfNeeded()
+            maybePrefetchMore()
         }
-        .onChange(of: recommendations.map(\.id)) { newIDs in
-            let currentIDs = audioPlayer.queue.map { $0.id }
-            if currentIDs != newIDs {
-                print("🔄 Recommendations changed, reloading queue...")
-                audioPlayer.loadQueue(recommendations, isDiscoveryDeck: true)
-            }
+        .onChange(of: recommendations.map(\.id)) { _ in
+            syncQueue(with: recommendations)
+            // A fresh/append batch can clear the prefetch latch.
+            isPrefetchRequested = false
+            maybePrefetchMore()
         }
         .onAppear { pushCurrentGemToWatch() }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in
             pushCurrentGemToWatch()
+            consumeCurrentTrackIfNeeded()
+            maybePrefetchMore()
             // Profile stats (build 78): log each deck track that comes up.
             if audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack {
                 ListeningStatsStore.shared.recordPlay(track)
             }
+        }
+        .onChange(of: audioPlayer.currentIndex) { _ in
+            maybePrefetchMore()
         }
         .onChange(of: audioPlayer.isPlaying) { _ in pushCurrentGemToWatch() }
         .onAppear { loadRarity() }
@@ -206,12 +212,14 @@ struct PlaylistPlayerView: View {
                     .font(Theme.Typography.headline)
                     .foregroundColor(Theme.Colors.textPrimary)
                 
-                // N is the real deck size (target 50). Never faked — a short
-                // niche-genre deck shows its true count after the builder
-                // exhausts the pool under the no-repeat rule.
-                Text("Track \(audioPlayer.currentIndex + 1) of \(recommendations.count)")
-                    .font(Theme.Typography.caption)
-                    .foregroundColor(Theme.Colors.textSecondary)
+                // Free tier: ONE cumulative monthly counter from the quota
+                // manager ("Track N of 50"), never the batch size. Hidden
+                // for subscribers (and shown again if Simulate free tier).
+                if !discoveryQuota.isUnlimited {
+                    Text("Track \(max(discoveryQuota.usedThisMonth, 1)) of \(DiscoveryQuotaManager.freeMonthlyLimit)")
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.textSecondary)
+                }
                 
                 // Deck source: swipe-right saves go to this service's
                 // "HJ - {Genre}" playlist (build 57: source-service-only saves).
@@ -365,6 +373,48 @@ struct PlaylistPlayerView: View {
         }
     }
     
+    // MARK: - Queue sync / quota / prefetch
+
+    /// Append when the parent grew the deck; replace only on a true reset
+    /// (genre change / fresh Discover). Never restart playback on append.
+    private func syncQueue(with tracks: [RecommendedTrack]) {
+        let currentIDs = audioPlayer.queue.map(\.id)
+        let newIDs = tracks.map(\.id)
+        guard currentIDs != newIDs else { return }
+        if currentIDs.isEmpty {
+            audioPlayer.loadQueue(tracks, isDiscoveryDeck: true)
+            return
+        }
+        // Append: new list starts with the current queue.
+        if newIDs.count > currentIDs.count, Array(newIDs.prefix(currentIDs.count)) == currentIDs {
+            let appended = Array(tracks.suffix(newIDs.count - currentIDs.count))
+            print("🔄 Recommendations grew — appending \(appended.count) without restart")
+            audioPlayer.appendToQueue(appended)
+            return
+        }
+        print("🔄 Recommendations replaced — reloading queue")
+        audioPlayer.loadQueue(tracks, isDiscoveryDeck: true)
+    }
+
+    private func consumeCurrentTrackIfNeeded() {
+        guard audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack else { return }
+        discoveryQuota.consume(trackId: track.id)
+    }
+
+    private func maybePrefetchMore() {
+        guard audioPlayer.isDiscoveryDeck else { return }
+        guard !isRefreshing, !isPrefetchRequested else { return }
+        guard !recommendations.isEmpty else { return }
+        let remainingInQueue = audioPlayer.queue.count - audioPlayer.currentIndex - 1
+        guard remainingInQueue <= 2 else { return }
+        // Free users with no remaining monthly slots: don't prefetch; paywall
+        // is shown when they try Discover / when parent checks quota.
+        if !discoveryQuota.isUnlimited, !discoveryQuota.canDiscover { return }
+        isPrefetchRequested = true
+        print("📡 Near end of batch (\(remainingInQueue) left) — prefetching next")
+        onPrefetchMore?()
+    }
+
     // Refresh button that appears behind the last card
     private var refreshRevealView: some View {
         VStack(spacing: Theme.Spacing.lg) {
