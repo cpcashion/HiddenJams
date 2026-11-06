@@ -391,6 +391,18 @@ class AudioPreviewManager: ObservableObject {
         }
     }
 
+    /// Append tracks to the current discovery deck without resetting playback.
+    /// Used for continuous prefetch near the end of a batch.
+    func appendToQueue(_ tracks: [RecommendedTrack]) {
+        guard !tracks.isEmpty else { return }
+        let existing = Set(queue.map(\.id))
+        let fresh = tracks.filter { !existing.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        isDiscoveryDeck = true
+        queue.append(contentsOf: fresh)
+        print("📥 Appended \(fresh.count) tracks to queue (now \(queue.count))")
+    }
+
     private static func usablePreviewURL(_ track: RecommendedTrack) -> String? {
         guard let urlString = track.track.previewUrl,
               !urlString.isEmpty,

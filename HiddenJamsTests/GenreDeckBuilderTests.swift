@@ -124,7 +124,7 @@ struct GenreDeckBuilderTests {
     /// The app gives a deck about 9 seconds. Tests run in parallel on a
     /// shared main actor (slowly, on CI simulators), so they get a long
     /// budget: these tests check what lands in the deck, not wall-clock speed.
-    static let testTimeBudget: TimeInterval = 60
+    static let testTimeBudget: TimeInterval = 180
 
     private func build(
         _ stub: StubCatalog,

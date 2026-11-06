@@ -789,6 +789,11 @@ struct DiscoverySessionMemory: Codable, Equatable {
         }
     }
 
+    /// Wipe persisted no-repeat memory (TestFlight reset).
+    static func clear(from defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: storageKey)
+    }
+
     /// Folds in ids served before this memory existed (DiscoveryHistoryManager),
     /// so tracks and artists from older builds don't come back either.
     mutating func absorb(trackIds tracks: Set<String>, artistIds artists: Set<String>) {
