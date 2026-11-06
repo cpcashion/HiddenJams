@@ -20,7 +20,7 @@ import Security
 
 /// Calendar-month discovery allowance. Mutable value type so tests can drive
 /// it with a fake clock and no actors.
-struct DiscoveryQuotaState: Equatable, Sendable {
+nonisolated struct DiscoveryQuotaState: Equatable, Sendable {
     static let freeMonthlyLimit = 50
 
     var month: String
@@ -82,13 +82,13 @@ struct DiscoveryQuotaState: Equatable, Sendable {
 
 // MARK: - Persistence
 
-protocol DiscoveryQuotaStore: AnyObject {
+nonisolated protocol DiscoveryQuotaStore: AnyObject {
     func load() -> DiscoveryQuotaManager.StoredQuota?
     func save(_ quota: DiscoveryQuotaManager.StoredQuota)
     func clear()
 }
 
-final class KeychainDiscoveryQuotaStore: DiscoveryQuotaStore {
+nonisolated final class KeychainDiscoveryQuotaStore: DiscoveryQuotaStore {
     private let service = "com.chris.GettingStarted.HiddenJams.quota"
     private let account = "monthlyDiscovery"
 
@@ -135,7 +135,7 @@ final class KeychainDiscoveryQuotaStore: DiscoveryQuotaStore {
     }
 }
 
-final class InMemoryDiscoveryQuotaStore: DiscoveryQuotaStore {
+nonisolated final class InMemoryDiscoveryQuotaStore: DiscoveryQuotaStore {
     var stored: DiscoveryQuotaManager.StoredQuota?
     func load() -> DiscoveryQuotaManager.StoredQuota? { stored }
     func save(_ quota: DiscoveryQuotaManager.StoredQuota) { stored = quota }

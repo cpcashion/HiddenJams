@@ -12,7 +12,7 @@ import Foundation
 import Testing
 @testable import HiddenJams
 
-struct DiscoveryQuotaManagerTests {
+nonisolated struct DiscoveryQuotaManagerTests {
 
     private static let tz = TimeZone(secondsFromGMT: 0)!
 
