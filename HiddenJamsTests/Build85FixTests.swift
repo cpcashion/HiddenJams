@@ -57,28 +57,38 @@ nonisolated struct Build85FixTests {
 
     @Test func prefetchLatchClearsOnEmptyAndRetries() {
         var latch = PrefetchLatch()
-        #expect(latch.begin())
-        #expect(!latch.begin()) // held
+        let first = latch.begin()
+        #expect(first)
+        let second = latch.begin()
+        #expect(!second) // held
         let retry = latch.finish(.empty)
         #expect(!latch.isHeld)
         #expect(retry)
-        #expect(latch.begin())
-        #expect(latch.finish(.appended(3)) == false)
+        let third = latch.begin()
+        #expect(third)
+        let afterAppend = latch.finish(.appended(3))
+        #expect(afterAppend == false)
         #expect(latch.emptyOrFailedCount == 0)
     }
 
     @Test func prefetchLatchStopsAfterExhaustedOrMaxRetries() {
         var latch = PrefetchLatch()
-        #expect(latch.begin())
-        #expect(latch.finish(.exhausted) == false)
+        let started = latch.begin()
+        #expect(started)
+        let exhaustedRetry = latch.finish(.exhausted)
+        #expect(exhaustedRetry == false)
 
         latch.reset()
         for _ in 1...PrefetchLatch.maxEmptyRetries {
-            #expect(latch.begin())
-            #expect(latch.finish(.failed))
+            let began = latch.begin()
+            #expect(began)
+            let shouldRetry = latch.finish(.failed)
+            #expect(shouldRetry)
         }
-        #expect(latch.begin())
-        #expect(latch.finish(.failed) == false)
+        let lastBegin = latch.begin()
+        #expect(lastBegin)
+        let noMore = latch.finish(.failed)
+        #expect(noMore == false)
     }
 
     // MARK: - Finding 5
