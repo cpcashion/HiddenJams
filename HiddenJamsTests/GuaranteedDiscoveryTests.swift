@@ -206,10 +206,12 @@ struct GuaranteedDiscoveryTests {
 
         let discovery = EnhancedHiddenGemsDiscovery()
         // The genre-order lottery is random per run, so assert the
-        // statistical property over several runs: jazz (0.9 weight) must
-        // dominate the large majority of them. (A single draw flakes ~10%.)
+        // statistical property over enough trials that a ~10% miss on a
+        // single draw cannot flake CI: jazz (0.9 weight) must be the
+        // majority in at least 28 of 40 runs. (15 runs requiring 12 was
+        // only ~94% reliable and failed a green-commit rerun.)
         var jazzMajorityRuns = 0
-        let runs = 15
+        let runs = 40
         for _ in 0..<runs {
             let tracks = try await discovery.itunesGenreFallbackCandidates(
                 profile: profile,
@@ -222,7 +224,7 @@ struct GuaranteedDiscoveryTests {
             let jazzCount = tracks.filter { $0.name.hasPrefix("Jazz Song") }.count
             if jazzCount > tracks.count / 2 { jazzMajorityRuns += 1 }
         }
-        #expect(jazzMajorityRuns >= 12,
+        #expect(jazzMajorityRuns >= 28,
                 "jazz should dominate most runs with 0.9 weight (got \(jazzMajorityRuns)/\(runs))")
     }
 
