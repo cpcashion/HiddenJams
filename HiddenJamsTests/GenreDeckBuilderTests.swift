@@ -2,10 +2,11 @@
 //  GenreDeckBuilderTests.swift
 //  HiddenJamsTests
 //
-//  The Discover deck contract (Chris, 2026-10-18): pick a genre and get 50
-//  tracks, every one in that genre, the most obscure first per the slider.
-//  When the slider leaves too few, popularity is raised in the background
-//  to keep the deck at 50. Runs against a stub Spotify, no network.
+//  The Discover deck contract (Chris, 2026-10-18, revised 2026-11-10): pick
+//  a genre and get 50 tracks, every one in that genre, the most obscure
+//  first per the slider. The slider is a limit: a short deck may be topped
+//  up with tracks at most two steps above it (+20 popularity), never with
+//  popular ones. Runs against a stub Spotify, no network.
 //
 
 import Testing
@@ -168,11 +169,13 @@ struct GenreDeckBuilderTests {
 
     @Test func mostObscureComeFirstAndPopularityIsRaisedOnlyToFill() async {
         var stub = StubCatalog()
-        stub.addGenre("drum and bass", idPrefix: "dnb", artistGenres: ["neurofunk"], artists: 120)
+        stub.addGenre("drum and bass", idPrefix: "dnb", artistGenres: ["neurofunk"], artists: 160)
 
         let deck = await build(stub, genres: ["drum and bass"], ceiling: 15)
 
-        #expect(deck.tracks.count == 50, "popularity is raised in the background to keep the deck full")
+        #expect(deck.tracks.count == 50, "popularity is raised a little in the background to keep the deck full")
+        #expect(deck.tracks.allSatisfy { $0.popularity <= 35 },
+                "never more than two steps (+20 popularity) above the slider")
         let levels = deck.tracks.map {
             GenreDeckBuilder.relaxationLevel(popularity: $0.popularity, followers: 500,
                                              popularityCeiling: 15, followerCeiling: 2_000)
@@ -181,6 +184,52 @@ struct GenreDeckBuilderTests {
         #expect(zip(levels, levels.dropFirst()).allSatisfy { $0 <= $1 },
                 "every track inside the slider comes before any relaxed one")
         #expect(deck.relaxedCount == levels.filter { $0 > 0 }.count)
+    }
+
+    @Test func popularTracksNeverFillADeepDeck() async {
+        var stub = StubCatalog()
+        // 40 well-known house artists and only 10 obscure ones.
+        for index in 0..<40 {
+            let artist = Self.artist("known-\(index)", genres: ["deep house"], followers: 400_000)
+            stub.artistsById["known-\(index)"] = artist
+            stub.addEverywhere(Self.track("known-t\(index)", artist: artist, popularity: 60,
+                                          name: "Known \(index)"), for: "house")
+        }
+        for index in 0..<10 {
+            let artist = Self.artist("unheard-\(index)", genres: ["deep house"])
+            stub.artistsById["unheard-\(index)"] = artist
+            stub.addEverywhere(Self.track("unheard-t\(index)", artist: artist, popularity: 5,
+                                          name: "Unheard \(index)"), for: "house")
+        }
+
+        let deck = await build(stub, genres: ["house"], ceiling: 15)
+
+        #expect(deck.tracks.count == 10, "a short deck beats a deck padded with popular tracks")
+        #expect(deck.tracks.allSatisfy { $0.id.hasPrefix("unheard-") })
+        #expect(deck.stats["over_slider", default: 0] > 0)
+    }
+
+    @Test func deepSliderRunsOnlyNarrowSearches() {
+        let families = GenreMatcher(selections: ["house"]).families
+        func queries(_ slider: Double) -> [String] {
+            (0..<10).flatMap { _ in
+                GenreDeckBuilder.searchPlan(families: families, slider: slider, pages: 12,
+                                            only: Set(families.indices), broaden: [], skipping: [])
+            }.map(\.query)
+        }
+        let deep = queries(0)
+        #expect(deep.allSatisfy { $0.contains("year:") }, "every deep search is cut down to a release year")
+        #expect(deep.allSatisfy { $0.hasPrefix("genre:\"") && $0.components(separatedBy: " year:").count == 2
+                                  && !$0.components(separatedBy: " year:")[1].contains(" ") },
+                "genre and year only: never title words")
+        #expect(queries(1).contains { !$0.contains("year:") }, "the popular end still reads broad searches")
+    }
+
+    @Test func jointCreditsAreCheckedByTheirLeadArtist() {
+        #expect(EnhancedHiddenGemsDiscovery.leadArtistName(in: "Big Star & Guest") == "Big Star")
+        #expect(EnhancedHiddenGemsDiscovery.leadArtistName(in: "Big Star feat. Guest") == "Big Star")
+        #expect(EnhancedHiddenGemsDiscovery.leadArtistName(in: "Big Star, Guest & Other") == "Big Star")
+        #expect(EnhancedHiddenGemsDiscovery.leadArtistName(in: "Solo Artist") == nil)
     }
 
     @Test func hotSliderReadsThePopularEnd() async {
@@ -212,7 +261,7 @@ struct GenreDeckBuilderTests {
 
     @Test func noArtistGetsMoreThanOneTrack() async {
         var stub = StubCatalog()
-        stub.addGenre("house", idPrefix: "house", artistGenres: ["deep house"], artists: 120)
+        stub.addGenre("house", idPrefix: "house", artistGenres: ["deep house"], artists: 160)
         let prolific = Self.artist("prolific", genres: ["house"])
         stub.artistsById["prolific"] = prolific
         for index in 0..<30 {
@@ -430,7 +479,7 @@ struct GenreDeckBuilderTests {
 
     @Test func buildingFinishesWithoutWaitingOutItsBudget() async {
         var stub = StubCatalog()
-        stub.addGenre("ambient", idPrefix: "ambient", artistGenres: ["dark ambient"], artists: 120)
+        stub.addGenre("ambient", idPrefix: "ambient", artistGenres: ["dark ambient"], artists: 160)
 
         let started = Date()
         let deck = await build(stub, genres: ["ambient"], ceiling: 15)

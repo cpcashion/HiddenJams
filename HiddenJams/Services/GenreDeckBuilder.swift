@@ -7,11 +7,13 @@
 //   - Every track is verified against the genres the user picked, using the
 //     credited artist's Spotify genres (GenreMatcher). Nothing gets in on a
 //     search result alone.
-//   - The slider decides where to look: at Deep it reads the obscure tail of
-//     Spotify's results first, at Hot the popular head.
-//   - The deck always aims for `target` tracks (50). When there aren't enough
-//     within the slider's limits, popularity is raised step by step in the
-//     background, and those tracks go after the ones that fit.
+//   - The slider decides where to look: at Deep it searches each genre one
+//     release year at a time and reads the obscure tail, at Hot it reads the
+//     popular head of broad genre searches.
+//   - The slider is a limit. The deck aims for `target` tracks (50) inside
+//     it; a short deck may be topped up with tracks at most `maxRelaxation`
+//     steps above it (default 2: +20 popularity, 9x followers), placed after
+//     the ones that fit. Anything further out is never served.
 //   - Previews are resolved up front (Deezer, by ISRC), so the deck is made of
 //     tracks that can actually play.
 //   - Searches, artist lookups and previews all run in parallel against a
@@ -53,6 +55,12 @@ struct GenreDeckRequest {
     /// (or back to back). Counted over every credited artist.
     var maxTracksPerArtist = 1
     var timeBudget: TimeInterval = 9
+    /// How far above the slider a track may be and still fill a short deck.
+    /// Each step is +10 popularity and 3x the followers, so 2 means at most
+    /// +20 popularity and 9x followers. Anything further out is never served:
+    /// the builder keeps searching for music that fits instead of padding the
+    /// deck with popular tracks.
+    var maxRelaxation = 2
 }
 
 struct GenreDeckResult {
@@ -390,6 +398,10 @@ final class GenreDeckBuilder {
     /// Discover tap reads a different slice of Spotify's results.
     static let depthSpread = 0.25
 
+    /// Below this slider position every search is a narrow one (see
+    /// `searchPlan`).
+    static let deepSliderCutoff = 0.5
+
     /// Which searches to run: each family's Spotify genres, plain and in
     /// random release-year slices (each slice has its own 1,000-result
     /// window, so the reachable pool is many times larger than one query's),
@@ -423,12 +435,30 @@ final class GenreDeckBuilder {
             var queries: [String] = []
             for genre in genres {
                 let base = "genre:\"\(genre)\""
-                queries.append(base)
                 let single = year - Int.random(in: 0...yearSpan)
-                queries.append("\(base) year:\(single)")
-                let from = year - Int.random(in: 1...yearSpan)
-                let to = min(year, from + Int.random(in: 1...4))
-                queries.append("\(base) year:\(from)-\(to)")
+                if slider < deepSliderCutoff {
+                    // Deep end: Spotify only ever returns the first 1,000
+                    // results of a search, most popular first, so a broad
+                    // genre search can't reach unheard music however far in
+                    // it is read. The same genre cut down to one release
+                    // year has a much shorter result list, whose tail really
+                    // is the obscure end, so every search here is the genre
+                    // in a single year. Genre and year only: nothing is ever
+                    // searched by words in a title.
+                    var years = Set([single])
+                    for _ in 0..<6 where years.count < 3 {
+                        years.insert(year - Int.random(in: 0...yearSpan))
+                    }
+                    for slice in years {
+                        queries.append("\(base) year:\(slice)")
+                    }
+                } else {
+                    queries.append(base)
+                    queries.append("\(base) year:\(single)")
+                    let from = year - Int.random(in: 1...yearSpan)
+                    let to = min(year, from + Int.random(in: 1...4))
+                    queries.append("\(base) year:\(from)-\(to)")
+                }
             }
             queries.shuffle()
             var used = Set<String>()
@@ -532,18 +562,23 @@ final class GenreDeckBuilder {
             return .rejected("script")
         }
 
+        // The slider is a limit, not a suggestion: a track too far above it
+        // is out, however short the deck is.
+        let level = Self.relaxationLevel(
+            popularity: track.popularity,
+            followers: primary.followers?.total,
+            popularityCeiling: request.popularityCeiling,
+            followerCeiling: request.followerCeiling
+        )
+        if level > max(0, request.maxRelaxation) { return .rejected("over_slider") }
+
         var artists = track.artists
         artists[0] = primary
         return .accepted(Candidate(
             track: track.withArtists(artists),
             family: match.family,
             tier: match.tier,
-            level: Self.relaxationLevel(
-                popularity: track.popularity,
-                followers: primary.followers?.total,
-                popularityCeiling: request.popularityCeiling,
-                followerCeiling: request.followerCeiling
-            ),
+            level: level,
             artistKey: artistId,
             artistIds: Self.artistIds(of: track),
             closeness: abs(Double(track.popularity) - targetPopularity) + Double.random(in: 0..<3)

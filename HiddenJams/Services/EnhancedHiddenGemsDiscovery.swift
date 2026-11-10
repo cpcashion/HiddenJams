@@ -671,6 +671,16 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             request.timeBudget = 14
             request.maxSearchWaves = 8
         }
+        // Toward the obscure end the builder runs narrow searches (short
+        // result lists whose tail is the unheard music). Each one yields
+        // fewer tracks than a broad search, so it gets more waves and more
+        // time to reach a full deck inside the slider.
+        let deepSlider = GenreDeckBuilder.sliderPosition(popularityCeiling: popularityThreshold)
+            < GenreDeckBuilder.deepSliderCutoff
+        if deepSlider {
+            request.timeBudget = max(request.timeBudget, 16)
+            request.maxSearchWaves = max(request.maxSearchWaves, 12)
+        }
 
         let catalog = SpotifyGenreDeckCatalog(token: token)
         let builder = GenreDeckBuilder(catalog: catalog)
@@ -684,10 +694,23 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         var lastStats: [String: Int] = [:]
         var lastPlayable = 0
         var lastRelaxed = 0
-        let maxPasses = 3
+        // The slider is a hard limit now (GenreDeckRequest.maxRelaxation), so
+        // a deck can't be padded with popular tracks. A full deck comes from
+        // searching longer instead: more passes, each reading new pages,
+        // until the deck is full, a pass turns up nothing new, or the
+        // loading screen has been up long enough.
+        let maxPasses = deepSlider ? 5 : 3
+        let passesStarted = Date()
+        let passBudget: TimeInterval = 30
         for pass in 1...maxPasses {
             let remaining = count - accumulated.count
             guard remaining > 0 else { break }
+            if pass > 1 {
+                if Date().timeIntervalSince(passesStarted) > passBudget { break }
+                // The user moved on (new genres, new Discover tap): stop
+                // searching for a deck nobody is waiting for.
+                if await MainActor.run(body: { self.isStaleDiscovery(generation) }) { break }
+            }
             request.target = remaining
             // Later passes already know more of the catalog is spent; spend
             // a little longer searching rather than stopping at ~40.
@@ -715,12 +738,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             // admit recorded as a colliding artist/song).
             served.apply(to: &request)
             if accumulated.count >= count { break }
-            if deck.tracks.count < remaining {
-                // Builder itself came up short of what we asked — further
-                // passes with the same exclusions rarely help; one more try
-                // with a bigger budget is enough, then stop.
-                if pass >= 2 { break }
-            }
+            // A short pass is not a reason to stop: every pass draws new
+            // random release years and offsets, so the next one
+            // reads a different part of Spotify. Only a pass that finds
+            // nothing new (above) or the time limit ends the search.
         }
         served.save(to: servedMemoryDefaults)
 
@@ -1252,8 +1273,22 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     tags: Set(info.tagNames.map(Self.normGenreTag))
                 )
             } catch let error as LastFmError {
-                if case .decodingError = error { return nil }
-                throw error
+                guard case .decodingError = error else { throw error }
+                // Last.fm doesn't know this exact credit. For a joint credit
+                // ("Big Star & Guest", "Big Star feat. Guest") that says
+                // nothing about obscurity: look up the lead artist before
+                // treating the track as unheard.
+                guard let lead = Self.leadArtistName(in: artist) else { return nil }
+                do {
+                    let info = try await self.lastFmService.getArtistInfo(name: lead)
+                    return VerifiedArtist(
+                        listeners: info.listeners,
+                        tags: Set(info.tagNames.map(Self.normGenreTag))
+                    )
+                } catch let error as LastFmError {
+                    if case .decodingError = error { return nil }
+                    throw error
+                }
             }
         }
 
@@ -1395,6 +1430,27 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         // above is empty too (no playable tracks gathered) — nothing to serve.
         print("🍏 iTunes fallback: catalog reachable, but no playable tracks gathered")
         return []
+    }
+
+    /// The first-named artist of a joint credit ("A & B", "A feat. B",
+    /// "A, B", "A x B"), or nil when the credit names one artist.
+    /// (Internal for unit tests.)
+    static func leadArtistName(in credit: String) -> String? {
+        let separators = [" feat. ", " feat ", " ft. ", " ft ", " featuring ", " with ",
+                          " & ", ", ", " x ", " vs. ", " vs ", " and "]
+        let lower = credit.lowercased()
+        var cut: String.Index?
+        for separator in separators {
+            guard let range = lower.range(of: separator) else { continue }
+            if cut == nil || range.lowerBound < cut! { cut = range.lowerBound }
+        }
+        guard let cut else { return nil }
+        // `lower` and `credit` can differ in length for a few characters, so
+        // cut by character offset rather than reusing the index directly.
+        let offset = lower.distance(from: lower.startIndex, to: cut)
+        guard offset > 0, offset < credit.count else { return nil }
+        let lead = String(credit.prefix(offset)).trimmingCharacters(in: .whitespaces)
+        return lead.count >= 2 ? lead : nil
     }
 
     /// Progressive-relaxation ladder for the guaranteed fallback: the user's
