@@ -219,8 +219,9 @@ struct GenreDeckBuilderTests {
         }
         let deep = queries(0)
         #expect(deep.allSatisfy { $0.contains("year:") }, "every deep search is cut down to a release year")
-        #expect(deep.contains { !$0.hasPrefix("genre:") }, "some are narrowed further by a title word")
-        #expect(deep.allSatisfy { StubCatalog.genre(in: $0) != "" }, "and every one still names its genre")
+        #expect(deep.allSatisfy { $0.hasPrefix("genre:\"") && $0.components(separatedBy: " year:").count == 2
+                                  && !$0.components(separatedBy: " year:")[1].contains(" ") },
+                "genre and year only: never title words")
         #expect(queries(1).contains { !$0.contains("year:") }, "the popular end still reads broad searches")
     }
 

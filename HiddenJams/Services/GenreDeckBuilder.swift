@@ -7,9 +7,9 @@
 //   - Every track is verified against the genres the user picked, using the
 //     credited artist's Spotify genres (GenreMatcher). Nothing gets in on a
 //     search result alone.
-//   - The slider decides where to look: at Deep it runs narrow searches (one
-//     release year, plus a common title word) and reads their obscure tail,
-//     at Hot it reads the popular head of broad ones.
+//   - The slider decides where to look: at Deep it searches each genre one
+//     release year at a time and reads the obscure tail, at Hot it reads the
+//     popular head of broad genre searches.
 //   - The slider is a limit. The deck aims for `target` tracks (50) inside
 //     it; a short deck may be topped up with tracks at most `maxRelaxation`
 //     steps above it (default 2: +20 popularity, 9x followers), placed after
@@ -402,16 +402,6 @@ final class GenreDeckBuilder {
     /// `searchPlan`).
     static let deepSliderCutoff = 0.5
 
-    /// Common title words used to cut a genre + year search down to a short
-    /// result list. Chosen to be frequent in song titles across genres.
-    static let narrowingWords = [
-        "love", "night", "time", "day", "heart", "dream", "home", "blue", "sun", "moon",
-        "rain", "fire", "light", "dark", "road", "city", "summer", "winter", "river", "sky",
-        "gold", "ghost", "king", "dance", "song", "soul", "life", "world", "baby", "girl",
-        "boy", "black", "white", "red", "high", "low", "stone", "wild", "star", "sea",
-        "one", "two", "last", "first", "new", "old", "little", "long", "good", "bad",
-    ]
-
     /// Which searches to run: each family's Spotify genres, plain and in
     /// random release-year slices (each slice has its own 1,000-result
     /// window, so the reachable pool is many times larger than one query's),
@@ -449,15 +439,18 @@ final class GenreDeckBuilder {
                 if slider < deepSliderCutoff {
                     // Deep end: Spotify only ever returns the first 1,000
                     // results of a search, most popular first, so a broad
-                    // search can't reach unheard music however far in it is
-                    // read. Narrow searches (one release year, plus a common
-                    // title word) have short result lists whose tail really
-                    // is the obscure end, so every search here is narrow.
-                    queries.append("\(base) year:\(single)")
-                    for _ in 0..<2 {
-                        let wordYear = year - Int.random(in: 0...yearSpan)
-                        let word = narrowingWords.randomElement() ?? "love"
-                        queries.append("\(word) \(base) year:\(wordYear)")
+                    // genre search can't reach unheard music however far in
+                    // it is read. The same genre cut down to one release
+                    // year has a much shorter result list, whose tail really
+                    // is the obscure end, so every search here is the genre
+                    // in a single year. Genre and year only: nothing is ever
+                    // searched by words in a title.
+                    var years = Set([single])
+                    for _ in 0..<6 where years.count < 3 {
+                        years.insert(year - Int.random(in: 0...yearSpan))
+                    }
+                    for slice in years {
+                        queries.append("\(base) year:\(slice)")
                     }
                 } else {
                     queries.append(base)

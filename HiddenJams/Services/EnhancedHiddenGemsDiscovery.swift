@@ -739,7 +739,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             served.apply(to: &request)
             if accumulated.count >= count { break }
             // A short pass is not a reason to stop: every pass draws new
-            // random release years, title words and offsets, so the next one
+            // random release years and offsets, so the next one
             // reads a different part of Spotify. Only a pass that finds
             // nothing new (above) or the time limit ends the search.
         }
