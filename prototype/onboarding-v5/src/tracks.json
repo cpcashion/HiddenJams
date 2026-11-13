@@ -1,0 +1,98 @@
+[
+ {
+  "file": "nala.jpg",
+  "track": "Space 1",
+  "artist": "Nala Sinephro",
+  "album": "Space 1.8",
+  "year": "2021",
+  "genre": "Jazz"
+ },
+ {
+  "file": "ana.jpg",
+  "track": "Electric Fish",
+  "artist": "Ana Frango Elétrico",
+  "album": "Me Chama De Gato Que Eu Sou Sua",
+  "year": "2023",
+  "genre": "Indie Pop"
+ },
+ {
+  "file": "hermanos.jpg",
+  "track": "El Bueno Y El Malo",
+  "artist": "Hermanos Gutiérrez",
+  "album": "El Bueno Y El Malo",
+  "year": "2022",
+  "genre": "Instrumental"
+ },
+ {
+  "file": "yazmin.jpg",
+  "track": "Morning Matters",
+  "artist": "Yazmin Lacey",
+  "album": "Morning Matters - EP",
+  "year": "2020",
+  "genre": "R&B/Soul"
+ },
+ {
+  "file": "mndsgn.jpg",
+  "track": "Camelblues",
+  "artist": "Mndsgn",
+  "album": "Yawn Zen",
+  "year": "2014",
+  "genre": "Electronic"
+ },
+ {
+  "file": "cleo.jpg",
+  "track": "Why Don't You",
+  "artist": "Cleo Sol",
+  "album": "Rose in the Dark",
+  "year": "2017",
+  "genre": "R&B/Soul"
+ },
+ {
+  "file": "khruangbin.jpg",
+  "track": "Maria También",
+  "artist": "Khruangbin",
+  "album": "Con Todo El Mundo",
+  "year": "2017",
+  "genre": "Indie Rock"
+ },
+ {
+  "file": "arooj.jpg",
+  "track": "Mohabbat",
+  "artist": "Arooj Aftab",
+  "album": "Vulture Prince",
+  "year": "2021",
+  "genre": "Worldwide"
+ },
+ {
+  "file": "tirzah.jpg",
+  "track": "Gladly",
+  "artist": "Tirzah",
+  "album": "Devotion",
+  "year": "2018",
+  "genre": "Alternative"
+ },
+ {
+  "file": "sault.jpg",
+  "track": "Wildfires",
+  "artist": "Sault",
+  "album": "Untitled (Black Is)",
+  "year": "2020",
+  "genre": "Alternative"
+ },
+ {
+  "file": "limperatrice.jpg",
+  "track": "Vanille fraise",
+  "artist": "L'Impératrice",
+  "album": "Vanille fraise - Single",
+  "year": "2017",
+  "genre": "Electronic"
+ },
+ {
+  "file": "men.jpg",
+  "track": "Show Me How",
+  "artist": "Men I Trust",
+  "album": "Show Me How - Single",
+  "year": "2018",
+  "genre": "Pop"
+ }
+]
