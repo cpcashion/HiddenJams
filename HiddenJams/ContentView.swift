@@ -14,6 +14,10 @@ struct ContentView: View {
     @StateObject private var audioManager = AudioPreviewManager()
     @State private var selectedTab: MainTabView.Tab = .home
     @State private var showExpandedPlayer = false
+    /// Set ONLY by the taste profile's final "Start digging" (onboarding
+    /// v5). Existing installs already have it: earlier builds set it on
+    /// every launch with a connected source.
+    @AppStorage(DiscoveryQuotaManager.onboardingCompletedKey) private var onboardingCompleted = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -21,7 +25,7 @@ struct ContentView: View {
             Theme.Colors.backgroundGradient
                 .ignoresSafeArea()
 
-            if sourceManager.hasConnectedSource {
+            if sourceManager.hasConnectedSource && onboardingCompleted {
                 MainTabView(selectedTab: $selectedTab)
                     .environmentObject(audioManager)
                     .transition(.opacity.combined(with: .scale))
@@ -36,6 +40,14 @@ struct ContentView: View {
                     .zIndex(2)
                     .padding(.bottom, 92)
                     .animation(.easeInOut, value: audioManager.currentTrack?.id)
+            } else if sourceManager.hasConnectedSource {
+                // Connected, onboarding not finished: analysis + taste
+                // profile reveal, then MainTabView.
+                TasteProfileFlowView(onFinish: {
+                    withAnimation(.easeInOut) { onboardingCompleted = true }
+                })
+                .transition(.opacity)
+                .zIndex(2)
             } else {
                 // Show Onboarding (which now includes Login/Connect) whenever no music source is connected
                 OnboardingView(isPresented: .constant(true))
@@ -44,6 +56,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut, value: sourceManager.hasConnectedSource)
+        .animation(.easeInOut, value: onboardingCompleted)
         .sheet(isPresented: $showExpandedPlayer) {
             ExpandedPlayerView()
                 .environmentObject(audioManager)
@@ -54,14 +67,8 @@ struct ContentView: View {
             SourceAppOpener.shared.currentTrackProvider = { [weak manager] in
                 manager?.currentTrack
             }
-            if sourceManager.hasConnectedSource {
-                DiscoveryQuotaManager.shared.markOnboardingCompleted()
-            }
-        }
-        .onChange(of: sourceManager.hasConnectedSource) { connected in
-            if connected {
-                DiscoveryQuotaManager.shared.markOnboardingCompleted()
-            }
+            // Onboarding completion is no longer implied by a connection:
+            // it's set by TasteProfileFlowView's "Start digging".
         }
         .onOpenURL { url in
             // Handle OAuth callback

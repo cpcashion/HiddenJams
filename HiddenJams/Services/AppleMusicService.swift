@@ -116,6 +116,31 @@ class AppleMusicService: ObservableObject {
         return tracks
     }
 
+    // MARK: - Play Counts (taste profile)
+
+    /// Library songs with their play counts, most-played first. Used only by
+    /// the post-sign-in taste profile (Apple has no "top artists" API, so
+    /// favourites are derived from `Song.playCount`). Songs never played
+    /// are kept with playCount 0 so small libraries still count.
+    func fetchLibraryPlayStats(limit: Int = 1000) async throws -> [AppleLibraryPlayStat] {
+        guard isAuthorized else { throw AppleMusicError.notAuthorized }
+        var request = MusicLibraryRequest<Song>()
+        request.sort(by: \.playCount, ascending: false)
+        request.limit = limit
+        let response = try await request.response()
+        return response.items.compactMap { song in
+            guard !song.title.isEmpty else { return nil }
+            return AppleLibraryPlayStat(
+                id: song.id.rawValue,
+                title: song.title,
+                artistName: song.artistName.isEmpty ? "Unknown Artist" : song.artistName,
+                genreNames: song.genreNames ?? [],
+                playCount: song.playCount ?? 0,
+                artwork: song.artwork
+            )
+        }
+    }
+
     // MARK: - Hidden Gems Playlist
 
     /// The playlist swiped-right gems land in — the Apple Music mirror of the
@@ -222,6 +247,18 @@ enum AppleMusicError: LocalizedError {
             return "We couldn't check what's underground right now — the popularity lookup is temporarily unavailable. Try again in a bit."
         }
     }
+}
+
+/// One Apple Music library song with its on-device play count.
+struct AppleLibraryPlayStat: Identifiable {
+    let id: String
+    let title: String
+    let artistName: String
+    let genreNames: [String]
+    let playCount: Int
+    /// MusicKit artwork (library artwork uses a `musicKit://` URL, so it is
+    /// drawn with `ArtworkImage`, not `AsyncImage`).
+    let artwork: Artwork?
 }
 
 // MARK: - MusicKit Song → LibraryTrack

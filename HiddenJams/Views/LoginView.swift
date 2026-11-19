@@ -76,7 +76,7 @@ struct LoginView: View {
                     // Apple Music button
                     connectButton(
                         title: sourceManager.appleMusicConnected ? "Apple Music Connected ✓" : "Connect with Apple Music",
-                        icon: "apple.logo",
+                        icon: "music.note", // TODO(brand): official Apple Music badge
                         disabled: sourceManager.appleMusicConnected,
                         action: { connectAppleMusic() }
                     )
