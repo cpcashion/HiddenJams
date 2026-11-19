@@ -59,7 +59,7 @@ enum TasteRarity {
 
     /// Same tier cut-offs as `RarityService` so the profile reads on the
     /// same ladder as the card badges.
-    static func tier(forScore score: Int) -> ArtistRarity.Tier {
+    nonisolated static func tier(forScore score: Int) -> ArtistRarity.Tier {
         switch score {
         case 95...: return .mythic
         case 85..<95: return .ultraRare
@@ -74,14 +74,14 @@ enum TasteRarity {
     /// TODO(Launch Phase 2): swap for RarityProvider's static
     /// `pseudoPopularity(listeners:)` (rarity = 100 - pseudoPopularity) so
     /// discovery and the taste profile share one mapping.
-    static func score(forListeners listeners: Int) -> Int {
+    nonisolated static func score(forListeners listeners: Int) -> Int {
         guard listeners > 1_000 else { return 100 }
         let raw = 100 - (log10(Double(listeners)) - 3) * 18.75
         return max(0, min(100, Int(raw.rounded())))
     }
 
     /// Tier weights for the profile score (known 0 … mythic 1).
-    static func weight(for tier: ArtistRarity.Tier) -> Double {
+    nonisolated static func weight(for tier: ArtistRarity.Tier) -> Double {
         switch tier {
         case .known: return 0
         case .emerging: return 0.35

@@ -159,7 +159,7 @@ struct TasteLoadingView: View {
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 12)
-        .onChange(of: model.lines.filter(\.done).count) { _ in
+        .onChange(of: model.lines.filter(\.done).count) {
             if let last = model.lines.last(where: \.done) {
                 AccessibilityNotification.Announcement(last.text + (last.count.map { ", \($0)" } ?? "")).post()
             }

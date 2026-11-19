@@ -47,7 +47,7 @@ struct OnboardingView: View {
                     .padding(.bottom, 16)
             }
         }
-        .onChange(of: currentPage) { _ in
+        .onChange(of: currentPage) {
             connectError = nil
             // Also persisted on every pill toggle; nothing picked → key stays unset.
             GenreCatalog.saveOnboardingPicks(genrePicks)
