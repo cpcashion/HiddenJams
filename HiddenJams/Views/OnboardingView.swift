@@ -18,7 +18,11 @@ struct OnboardingView: View {
     @EnvironmentObject var sourceManager: MusicSourceManager
     @Binding var isPresented: Bool
 
+    #if DEBUG
+    @State private var currentPage = OnboardingSnapshotHooks.introPage   // tooling branch only
+    #else
     @State private var currentPage = 0
+    #endif
     @State private var genrePicks: Set<String> = GenreCatalog.loadSelected() ?? []
     @State private var isConnectingAppleMusic = false
     @State private var connectError: String?
