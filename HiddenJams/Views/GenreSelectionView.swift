@@ -11,15 +11,8 @@ struct GenreSelectionView: View {
     // Optional: Pass in user's top genres to make it dynamic
     var topGenres: [String] = []
     
-    // Common genres to allow filtering
-    let commonGenres = [
-        "Pop", "Rock", "Hip Hop", "Rap", "Country",
-        "R&B", "Electronic", "Dance", "Indie", "Alternative",
-        "Classical", "Jazz", "Blues", "Metal", "Punk",
-        "Folk", "Reggae", "Soul", "Funk", "Latin", 
-        "Reggaeton", "K-Pop", "Anime", "Gospel", "Christian", "Worship",
-        "Drum and Bass", "Jungle", "House", "Techno", "Ambient"  // Added electronic sub-genres
-    ]
+    // Common genres to allow filtering (shared with onboarding screen 4).
+    var commonGenres: [String] { GenreCatalog.common }
     
     var body: some View {
         NavigationView {

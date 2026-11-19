@@ -26,7 +26,9 @@ enum MusicSource: String, Codable, CaseIterable, Hashable {
     var systemIconName: String {
         switch self {
         case .spotify: return "music.note.list"
-        case .appleMusic: return "apple.logo"
+        // TODO(brand): official Apple Music badge, unmodified, once bundled.
+        // Never `apple.logo` (Apple Music identity guidelines).
+        case .appleMusic: return "music.note"
         }
     }
 }

@@ -345,7 +345,7 @@ struct ProfileView: View {
             )
             ProfileRowDivider()
             sourceRow(
-                icon: "apple.logo",
+                icon: "music.note", // TODO(brand): official Apple Music badge
                 name: "Apple Music",
                 connected: sourceManager.appleMusicConnected,
                 connect: { connectAppleMusic() },
