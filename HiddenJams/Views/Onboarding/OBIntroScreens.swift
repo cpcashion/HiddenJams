@@ -62,7 +62,7 @@ struct OBIntroScreen: View {
                     }
                     .obRise(0.2)
                 OBStatLine().padding(.top, 14).obRise(0.34)
-                OBMono(text: "Source: Luminate 2025 Year-End Music Report", size: 9.5, opacity: 0.42)
+                OBMono(text: "Source: Luminate 2025 Year-End Music Report", size: 9.5, opacity: 1) // .src .42 is overridden by rise()
                     .padding(.top, 10)
                     .obRise(0.44)
             }
@@ -655,7 +655,7 @@ struct OBConnectScreen: View {
                 OBSub(text: "Streaming pushes what’s trending and promoted. Connect your music and we’ll dig up what you’d never hear otherwise.",
                       maxCh: 33)
                     .padding(.top, 12).obRise(0.22)
-                OBMono(text: "We only save songs you keep.", size: 10, opacity: 0.5)
+                OBMono(text: "We only save songs you keep.", size: 10, opacity: 1) // .foot .5 overridden by rise()
                     .padding(.top, 14).obRise(0.3)
             }
             .padding(.top, 30)

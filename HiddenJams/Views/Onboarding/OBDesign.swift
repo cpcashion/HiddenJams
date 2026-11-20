@@ -335,7 +335,8 @@ struct OBSub: View {
     var size: CGFloat = 16
     var maxCh: CGFloat = 31
     var centered = false
-    var opacity: Double = 0.74
+    /// CSS says .74, but framer's rise() leaves an inline opacity: 1 that wins.
+    var opacity: Double = 1
 
     var body: some View {
         let ui = OBFont.ui(.medium, size)
@@ -343,7 +344,7 @@ struct OBSub: View {
         let lineBox = size * 1.32
         // CSS centres the 1.15em content area in the 1.32em line box.
         let half = (lineBox - size * 1.15) / 2
-        OBSub.styled(text, size: size)
+        OBSub.styled(OBSub.pretty(text, size: size, width: OBFont.ch(size) * maxCh), size: size)
             .tracking(-0.005 * size)
             .foregroundStyle(OB.paper)
             .lineSpacing(max(0, lineBox - natural))
@@ -353,6 +354,27 @@ struct OBSub: View {
             .padding(.bottom, max(0, lineBox - natural - half))
             .frame(maxWidth: OBFont.ch(size) * maxCh, alignment: centered ? .center : .leading)
             .opacity(opacity)
+    }
+
+    /// CSS `text-wrap: pretty`: Chrome never leaves one word alone on the
+    /// last line; it pulls the previous word down with it.
+    static func pretty(_ s: String, size: CGFloat, width: CGFloat) -> String {
+        let words = s.components(separatedBy: " ")
+        guard words.count > 2 else { return s }
+        let kern = -0.005 * size
+        func w(_ t: String) -> CGFloat {
+            OBFont.width(t.replacingOccurrences(of: "**", with: ""), .medium, size, kern: kern)
+        }
+        var lines: [[String]] = [[]]
+        for word in words {
+            let candidate = (lines[lines.count - 1] + [word]).joined(separator: " ")
+            if !lines[lines.count - 1].isEmpty && w(candidate) > width { lines.append([word]) }
+            else { lines[lines.count - 1].append(word) }
+        }
+        guard lines.count > 1, lines[lines.count - 1].count == 1, lines[lines.count - 2].count > 2 else { return s }
+        let moved = lines[lines.count - 2].removeLast()
+        lines[lines.count - 1].insert(moved, at: 0)
+        return lines.map { $0.joined(separator: " ") }.joined(separator: "\n")
     }
 
     static func styled(_ s: String, size: CGFloat) -> Text {
