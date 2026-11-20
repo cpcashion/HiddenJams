@@ -48,10 +48,21 @@ enum OnboardingParityFixtures {
     }
 
     /// Drives `model` exactly like Analyze.tsx until cancelled.
+    static func applied(_ t: Double) -> TasteProfileFlowModel {
+        let m = TasteProfileFlowModel()
+        apply(t, m, apple: false, empty: false)
+        print("HJSNAP-STEP applied \(t) lines=\(m.lines.count)")
+        return m
+    }
+
     static func runLoadingClock(_ model: TasteProfileFlowModel, apple: Bool, empty: Bool) async {
         let start = Date()
+        var tick = 0
+        print("HJSNAP-STEP clock start")
         while !Task.isCancelled {
             let t = Date().timeIntervalSince(start) * 1000
+            if tick < 4 || tick % 30 == 0 { print("HJSNAP-STEP tick \(tick) t=\(Int(t))") }
+            tick += 1
             apply(t, model, apple: apple, empty: empty)
             try? await Task.sleep(for: .milliseconds(16))
         }
@@ -129,6 +140,12 @@ enum OnboardingParityFixtures {
         case "probe-loading-static":
             TasteProfileFlowContent(model: TasteProfileFlowModel(lines: [], progress: 0.4, cloudGenres: loadingGenres, filledCount: 3),
                                     picks: ordered, onFinish: {}, start: nil, autoReveal: false)
+        case "probe-loading-lines":
+            TasteProfileFlowContent(model: applied(5000), picks: ordered, onFinish: {}, start: nil, autoReveal: false)
+        case "probe-loading-t0":
+            TasteProfileFlowContent(model: applied(100), picks: ordered, onFinish: {}, start: nil, autoReveal: false)
+        case "probe-loading-rows":
+            OBMetricsReader { OBLoadingScreen(model: applied(5000)) }
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
