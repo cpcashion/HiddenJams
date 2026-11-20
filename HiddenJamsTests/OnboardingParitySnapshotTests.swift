@@ -186,8 +186,15 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         list += screens
         // The live-clock loading fixture crashes the CI test host, so only the
         // frozen frames above are captured (identical render at each offset).
+        // Hidden-but-live windows from earlier shots slow later ones on the CI
+        // simulator, so a run can capture just the screens it needs, in order.
+        if !Self.only.isEmpty {
+            return Self.only.compactMap { n in list.first { $0.name == n } }
+        }
         return list
     }
+    /// Shots to capture this run (empty = all).
+    private static let only: [String] = ["static-keep", "11-fresh", "10-deepest"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.
