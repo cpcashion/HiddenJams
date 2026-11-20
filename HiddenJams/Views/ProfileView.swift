@@ -337,7 +337,7 @@ struct ProfileView: View {
         ProfileGroup("Music services",
                      footer: sourceManager.connectedSources.count == 2 ? "Blending both libraries for your recommendations." : nil) {
             sourceRow(
-                icon: "music.note.list",
+                brand: .spotify,
                 name: "Spotify",
                 connected: sourceManager.spotifyConnected,
                 connect: { authManager.startAuth() },
@@ -345,7 +345,7 @@ struct ProfileView: View {
             )
             ProfileRowDivider()
             sourceRow(
-                icon: "music.note", // TODO(brand): official Apple Music badge
+                brand: .appleMusic,
                 name: "Apple Music",
                 connected: sourceManager.appleMusicConnected,
                 connect: { connectAppleMusic() },
@@ -354,11 +354,17 @@ struct ProfileView: View {
         }
     }
 
-    private func sourceRow(icon: String, name: String, connected: Bool,
+    private func sourceRow(brand: OBBrandTile.Brand, name: String, connected: Bool,
                            connect: @escaping () -> Void, disconnect: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
-            ProfileIconBadge(icon: icon, tint: connected ? Theme.Colors.lime : Theme.Colors.chipFill,
-                             foreground: connected ? Theme.Colors.textOnPastel : Theme.Colors.textTertiary)
+            // Official, unmodified marks (no tile): Spotify monochrome white
+            // logo on a dark background ("Using our logo"), Apple Music colour
+            // icon (Identity Guidelines, "Apple Music Icon").
+            Image(brand == .spotify ? "brand-spotify-icon-white" : "brand-applemusic-icon")
+                .resizable().interpolation(.high).scaledToFit()
+                .frame(width: 24, height: 24)
+                .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(.system(size: 15, weight: .medium))
@@ -380,13 +386,8 @@ struct ProfileView: View {
                 }
                 .accessibilityLabel("\(name) options")
             } else {
-                Button("Connect") { connect() }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Theme.Colors.buttonText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .brandGlass(Theme.Colors.ctaFill, in: Capsule())
-                    .disabled(isConnectingAppleMusic)
+                OBBrandButton(brand: brand, busy: brand == .appleMusic && isConnectingAppleMusic,
+                              compact: true) { connect() }
             }
         }
         .padding(.horizontal, 16)

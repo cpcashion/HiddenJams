@@ -2,10 +2,11 @@
 //  OnboardingView.swift
 //  HiddenJams
 //
-//  Onboarding v5 (Chris approved Nov 18, 2026). Five pages before sign-in
-//  inside the app's own paged TabView (so the dots are the live app's
-//  dots), one Next in the same slot on every page. Page 5 swaps the Next
-//  slot for the two connect buttons. After a service connects, ContentView
+//  Onboarding v5, built to the approved prototype
+//  (https://cpcashion.github.io/hiddenjams-onboarding-v4/v5/). Five screens
+//  before sign-in over the animated glow, with the prototype's page dots
+//  and one flat lime Next in the same slot on every screen; screen 5 swaps
+//  it for the two connect buttons. After a service connects, ContentView
 //  shows TasteProfileFlowView; onboarding is only marked complete on its
 //  final "Start digging".
 //
@@ -18,79 +19,26 @@ struct OnboardingView: View {
     @EnvironmentObject var sourceManager: MusicSourceManager
     @Binding var isPresented: Bool
 
-    @State private var currentPage = 0
-    @State private var genrePicks: Set<String> = GenreCatalog.loadSelected() ?? []
     @State private var isConnectingAppleMusic = false
     @State private var connectError: String?
 
-    private let pageCount = 5
-    private var isConnectPage: Bool { currentPage == pageCount - 1 }
-
     var body: some View {
-        ZStack {
-            Theme.Colors.backgroundGradient
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                TabView(selection: $currentPage) {
-                    OnboardingStatPage(isActive: currentPage == 0).tag(0)
-                    OnboardingKeepDemoPage(isActive: currentPage == 1).tag(1)
-                    OnboardingRarityPage(isActive: currentPage == 2).tag(2)
-                    OnboardingMoodPage(picks: $genrePicks).tag(3)
-                    OnboardingConnectPage(isActive: currentPage == 4).tag(4)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .always))
-                .indexViewStyle(.page(backgroundDisplayMode: .always))
-
-                bottomSlot
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
-            }
-        }
-        .onChange(of: currentPage) {
-            connectError = nil
-            // Also persisted on every pill toggle; nothing picked → key stays unset.
-            GenreCatalog.saveOnboardingPicks(genrePicks)
-        }
-    }
-
-    // MARK: - Bottom slot (Next, or the connect buttons on page 5)
-
-    @ViewBuilder
-    private var bottomSlot: some View {
-        if isConnectPage {
-            VStack(spacing: 12) {
-                ServiceConnectButton(source: .spotify) {
-                    connectError = nil
-                    GenreCatalog.saveOnboardingPicks(genrePicks)
-                    authManager.startAuth()
-                }
-                ServiceConnectButton(source: .appleMusic, busy: isConnectingAppleMusic) {
-                    GenreCatalog.saveOnboardingPicks(genrePicks)
-                    connectAppleMusic()
-                }
-                if let connectError {
-                    VStack(spacing: 6) {
-                        Text(connectError)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.Colors.error)
-                            .multilineTextAlignment(.center)
-                        Button("Open Settings") {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.lime)
-                    }
-                    .padding(.horizontal, 22)
-                }
-            }
-        } else {
-            OnboardingNextButton {
-                withAnimation { currentPage = min(currentPage + 1, pageCount - 1) }
-            }
-        }
+        OnboardingPager(
+            startPage: 0,
+            initialPicks: TasteCopy.orderedPicks(GenreCatalog.loadSelected() ?? []),
+            connectingApple: isConnectingAppleMusic,
+            connectError: $connectError,
+            onSpotify: { picks in
+                connectError = nil
+                GenreCatalog.saveOnboardingPicks(Set(picks))
+                authManager.startAuth()
+            },
+            onApple: { picks in
+                GenreCatalog.saveOnboardingPicks(Set(picks))
+                connectAppleMusic()
+            },
+            persist: { picks in GenreCatalog.saveOnboardingPicks(Set(picks)) }
+        )
     }
 
     private func connectAppleMusic() {
@@ -111,6 +59,126 @@ struct OnboardingView: View {
     }
 }
 
+/// The five screens, glow, dots and dock (no service objects needed, so the
+/// DEBUG parity captures render exactly this).
+struct OnboardingPager: View {
+    let connectingApple: Bool
+    @Binding var connectError: String?
+    let onSpotify: ([String]) -> Void
+    let onApple: ([String]) -> Void
+    let persist: ([String]) -> Void
+
+    @State private var page: Int
+    @State private var direction: CGFloat = 1
+    /// Picks, lowercased (the `selectedGenres` set, kept sorted).
+    @State private var picks: [String]
+    @State private var pulse = 0
+
+    private let pageCount = 5
+    private var isConnectPage: Bool { page == pageCount - 1 }
+
+    init(startPage: Int, initialPicks: [String], connectingApple: Bool, connectError: Binding<String?>,
+         onSpotify: @escaping ([String]) -> Void, onApple: @escaping ([String]) -> Void,
+         persist: @escaping ([String]) -> Void) {
+        _page = State(initialValue: startPage)
+        _picks = State(initialValue: initialPicks)
+        self.connectingApple = connectingApple
+        _connectError = connectError
+        self.onSpotify = onSpotify
+        self.onApple = onApple
+        self.persist = persist
+    }
+
+    private var pickSet: Binding<Set<String>> {
+        Binding(get: { Set(picks) }, set: { picks = $0.map { $0.lowercased() }.sorted() })
+    }
+
+    var body: some View {
+        OBMetricsReader {
+            ZStack {
+                OBGlowBackground(screen: page, pulseToken: pulse)
+
+                ZStack {
+                    screen(page)
+                        .id(page)
+                        .transition(.obPage(direction))
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(swipe)
+
+                OBDock(dots: (count: pageCount, index: page), two: isConnectPage) {
+                    if isConnectPage {
+                        OBBrandButton(brand: .spotify) { onSpotify(picks) }
+                        OBBrandButton(brand: .appleMusic, busy: connectingApple) { onApple(picks) }
+                    } else {
+                        OBNextButton { go(page + 1) }
+                    }
+                }
+                errorBanner
+            }
+        }
+        .onChange(of: page) {
+            connectError = nil
+            // Also persisted on every pill toggle; nothing picked → key stays unset.
+            persist(picks)
+        }
+        .onChange(of: picks) { persist(picks) }
+    }
+
+    @ViewBuilder
+    private func screen(_ i: Int) -> some View {
+        switch i {
+        case 0: OBIntroScreen()
+        case 1: OBKeepScreen()
+        case 2: OBRarityDemoScreen()
+        case 3: OBMoodScreen(picks: pickSet, onTap: { pulse += 1 })
+        default: OBConnectScreen()
+        }
+    }
+
+    private func go(_ n: Int) {
+        let target = max(0, min(pageCount - 1, n))
+        guard target != page else { return }
+        direction = target > page ? 1 : -1
+        withAnimation(OB.pageSpring) { page = target }
+    }
+
+    /// Like the prototype: a horizontal swipe of ≥70pt (and ≤50pt vertical)
+    /// moves one screen; never required, Next always works.
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onEnded { v in
+                let dx = v.translation.width, dy = v.translation.height
+                guard abs(dx) >= 70, abs(dy) <= 50 else { return }
+                if dx < 0 && page <= 3 { go(page + 1) } else if dx > 0 && page >= 1 { go(page - 1) }
+            }
+    }
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let connectError, isConnectPage {
+            VStack(spacing: 6) {
+                Text(connectError)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.Colors.error)
+                    .multilineTextAlignment(.center)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OB.lime)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 16).fill(OB.surface.opacity(0.95)))
+            .padding(.horizontal, 22)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, 200)
+        }
+    }
+}
+
 #Preview("Onboarding v5") {
     let auth = SpotifyAuthManager()
     let apple = AppleMusicService()
@@ -118,5 +186,4 @@ struct OnboardingView: View {
         .environmentObject(auth)
         .environmentObject(apple)
         .environmentObject(MusicSourceManager(spotifyAuth: auth, appleMusic: apple))
-        .preferredColorScheme(.dark)
 }
