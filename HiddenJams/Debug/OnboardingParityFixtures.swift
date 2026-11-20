@@ -14,6 +14,8 @@
 import SwiftUI
 
 enum OnboardingParityFixtures {
+    static var muteAnnouncements = false
+
     static let picks: Set<String> = ["soul", "jazz", "funk", "ambient"]
 
     static let loadingGenres = ["soul", "jazz", "funk", "indie", "ambient", "folk", "electronic", "blues", "latin", "alternative"]
@@ -147,23 +149,20 @@ enum OnboardingParityFixtures {
             TasteProfileFlowContent(model: applied(100), picks: ordered, onFinish: {}, start: nil, autoReveal: false)
         case "probe-loading-rows":
             OBMetricsReader { OBLoadingScreen(model: applied(5000)) }
-        case "probe-dyn-lines":
-            // Cloud preset, lines arrive while on screen.
-            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: [], progress: 0, cloudGenres: loadingGenres, filledCount: 0),
+        case "probe-dyn-a", "probe-dyn-b", "probe-dyn-c":
+            // a: states/values change, muted announcements; b: same, announcements on;
+            // c: rows inserted on screen, muted.
+            let insert = name == "probe-dyn-c"
+            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: insert ? [] : applied(100).lines, progress: 0,
+                                                                 cloudGenres: loadingGenres, filledCount: 0),
                                     picks: ordered, onFinish: {}, start: { m in
+                muteAnnouncements = name != "probe-dyn-b"
                 try? await Task.sleep(for: .milliseconds(300))
-                print("HJSNAP-STEP dyn-lines apply main=\(Thread.isMainThread)")
+                print("HJSNAP-STEP \(name) apply")
                 apply(1000, m, apple: false, empty: false)
-                print("HJSNAP-STEP dyn-lines applied")
-            }, autoReveal: false)
-        case "probe-dyn-cloud":
-            // Lines preset, cloud arrives while on screen.
-            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: applied(1000).lines, progress: 0, cloudGenres: [], filledCount: 0),
-                                    picks: ordered, onFinish: {}, start: { m in
+                print("HJSNAP-STEP \(name) applied")
                 try? await Task.sleep(for: .milliseconds(300))
-                print("HJSNAP-STEP dyn-cloud apply main=\(Thread.isMainThread)")
-                apply(1000, m, apple: false, empty: false)
-                print("HJSNAP-STEP dyn-cloud applied")
+                print("HJSNAP-STEP \(name) survived")
             }, autoReveal: false)
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
