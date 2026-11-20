@@ -26,14 +26,13 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return FileManager.default.fileExists(atPath: marker.path)
     }
 
+    private func step(_ s: String) { print("HJSNAP-STEP \(s)"); fflush(stdout) }
+
     private func show(_ name: String) {
-        let auth = SpotifyAuthManager()
-        let apple = AppleMusicService()
-        let root = OnboardingParityFixtures.screen(name)
-            .environmentObject(auth)
-            .environmentObject(apple)
-            .environmentObject(MusicSourceManager(spotifyAuth: auth, appleMusic: apple))
-        let hc = UIHostingController(rootView: AnyView(root))
+        step("show \(name)")
+        // The onboarding screens only read the auth/source managers inside
+        // button actions, which the captures never tap.
+        let hc = UIHostingController(rootView: AnyView(OnboardingParityFixtures.screen(name)))
         hc.overrideUserInterfaceStyle = .dark
         hc.view.backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 15 / 255, alpha: 1)
         if window == nil {
@@ -43,8 +42,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
             w.overrideUserInterfaceStyle = .dark
             window = w
         }
+        step("window ready")
         window?.rootViewController = hc
         window?.makeKeyAndVisible()
+        step("visible")
     }
 
     private func spin(until t: Date) {
@@ -89,8 +90,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     func testCaptureOnboardingParity() throws {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
+        step("begin")
         show("01-intro")
         spin(until: Date().addingTimeInterval(1.5))
+        step("first spin done")
         if let w = window {
             print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
         }
