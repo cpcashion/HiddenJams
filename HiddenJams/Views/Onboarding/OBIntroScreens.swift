@@ -273,8 +273,14 @@ struct OBKeepScreen: View {
 
     private func runScript() async {
         guard !reduceMotion else { return }
+        // Waits are scheduled against the script's start, like the
+        // prototype's timeline, so a slow frame never delays later steps.
+        let start = Date()
+        var due = 0.0
         func wait(_ ms: Int) async -> Bool {
-            try? await Task.sleep(for: .milliseconds(ms))
+            due += Double(ms) / 1000
+            let left = start.addingTimeInterval(due).timeIntervalSinceNow
+            if left > 0 { try? await Task.sleep(for: .seconds(left)) }
             return !Task.isCancelled
         }
         var n = 0
