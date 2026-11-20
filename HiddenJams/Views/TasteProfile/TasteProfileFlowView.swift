@@ -169,7 +169,10 @@ struct TasteProfileFlowContent: View {
             switch chapter {
             case .genres: OBGenresChapter(genres: p.topGenres, picks: Set(picks))
             case .rarity: OBRarityChapter(score: p.rarityScore ?? 0)
-            case .signature: OBSignatureChapter(artists: p.signatureArtists)
+            case .signature:
+                // Signature art is Spotify's unless the profile has no Spotify source.
+                OBSignatureChapter(artists: p.signatureArtists,
+                                   tilted: !p.sources.isEmpty && !p.sources.contains(.spotify))
             case .deepest:
                 if let cut = p.deepestCut {
                     OBDeepestChapter(cut: cut, picks: picks,

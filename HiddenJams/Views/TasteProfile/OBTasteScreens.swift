@@ -409,6 +409,9 @@ struct OBRarityChapter: View {
 
 struct OBSignatureChapter: View {
     let artists: [TasteProfile.SignatureArtist]
+    /// Prototype tilts (-5° / 0° / 4°) and 18pt corners. Only for artwork that
+    /// isn't Spotify's: Spotify art stays upright (the approved deviation).
+    var tilted = false
     @Environment(\.obMetrics) private var m
 
     var body: some View {
@@ -421,7 +424,7 @@ struct OBSignatureChapter: View {
             OBDisplayTitle(markup: "Your\n[signature]\nartists.", size: m.displayL).obRise(0.05)
             HStack(alignment: .bottom, spacing: 8) {
                 ForEach(Array(artists.prefix(3).enumerated()), id: \.element.name) { k, a in
-                    OBSignatureTile(artist: a, k: k, width: inner * (k == 0 ? 0.39 : 0.29) * shrink)
+                    OBSignatureTile(artist: a, k: k, width: inner * (k == 0 ? 0.39 : 0.29) * shrink, tilted: tilted)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -440,15 +443,18 @@ private struct OBSignatureTile: View {
     let artist: TasteProfile.SignatureArtist
     let k: Int
     let width: CGFloat
+    var tilted = false
     @State private var on = false
 
     var body: some View {
+        let r: CGFloat = tilted ? 18 : 8
+        let angle: Double = tilted ? [-5, 0, 4][min(k, 2)] : 0
         VStack(spacing: 4) {
             OBRemoteArt(url: artist.imageURL)
                 .frame(width: width, height: width)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .obRing(cornerRadius: 8, color: k == 0 ? OB.lime : Color.white.opacity(0.1), width: k == 0 ? 2 : 1)
-                .obShadow(RoundedRectangle(cornerRadius: 8), color: .black.opacity(0.7), y: 24, blur: 40, spread: -14)
+                .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
+                .obRing(cornerRadius: r, color: k == 0 ? OB.lime : Color.white.opacity(0.1), width: k == 0 ? 2 : 1)
+                .obShadow(RoundedRectangle(cornerRadius: r), color: .black.opacity(0.7), y: 24, blur: 40, spread: -14)
             Text(artist.name)
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(OB.paper)
                 .multilineTextAlignment(.center).lineLimit(2)
@@ -457,6 +463,7 @@ private struct OBSignatureTile: View {
         }
         .frame(width: width)
         .padding(.bottom, k == 0 ? 18 : 0)
+        .rotationEffect(.degrees(on ? angle : 0))
         .offset(y: on ? 0 : 40)
         .opacity(on ? 1 : 0)
         .onAppear { withAnimation(OB.spring(160, 16).delay(0.3 + Double(k) * 0.2)) { on = true } }

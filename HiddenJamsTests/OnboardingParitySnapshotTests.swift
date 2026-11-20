@@ -82,6 +82,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         window = w
         step("window ready")
         OnboardingParityFixtures.epoch = Date()
+        OnboardingParityFixtures.settleGlow = true
         window?.rootViewController = hc
         window?.makeKeyAndVisible()
         step("visible scene=\(scene.activationState.rawValue) app=\(UIApplication.shared.applicationState.rawValue)")
@@ -163,6 +164,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
             Shot(name: "07-genres", motion: [0.2, 0.5, 0.8], settled: 3.0),
             Shot(name: "08-rarity", motion: [0.2, 0.5, 0.9, 1.4], settled: 3.0),
             Shot(name: "09-artists", motion: [0.3, 0.6], settled: 3.0),
+            Shot(name: "09-artists-apple", settled: 3.0),
             Shot(name: "10-deepest", motion: [0.3, 0.6], settled: 3.0),
             Shot(name: "10-deepest-spotify", settled: 3.0),
             Shot(name: "10-deepest-nopicks", settled: 3.0),
@@ -194,9 +196,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return list
     }
     /// Shots to capture this run (empty = all).
-    private static let only: [String] = ["static-keep", "11-fresh", "10-deepest",
-                                         "static:06-loading:8700", "static:06-loading-apple:8700", "static:06-loading-empty:4100",
-                                         "11-fresh-nopicks", "10-deepest-nopicks", "10-deepest-spotify"]
+    private static let only: [String] = ["09-artists", "09-artists-apple", "07-genres"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.

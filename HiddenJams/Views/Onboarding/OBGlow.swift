@@ -62,7 +62,17 @@ final class OBGlowField {
 
     func step(to date: Date, screen: Int, pulseToken: Int) {
         if pulseToken != lastPulseToken { lastPulseToken = pulseToken; pulse = 1 }
-        let dt = min(0.1, max(0, last.map { date.timeIntervalSince($0) } ?? 0))
+        // Real elapsed time (like three.js's clock), so slow frames don't
+        // stretch the cross-fade; k = 1 - e^(-3.2·dt) is stable for any dt.
+        let dt = min(2, max(0, last.map { date.timeIntervalSince($0) } ?? 0))
+        #if DEBUG
+        // Parity captures compare against the prototype's settled background.
+        if last == nil && OnboardingParityFixtures.settleGlow {
+            last = date
+            blooms = targets(screen)
+            return
+        }
+        #endif
         last = date
         time += dt
         let t = targets(screen)

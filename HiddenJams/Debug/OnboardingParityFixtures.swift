@@ -20,6 +20,8 @@ enum OnboardingParityFixtures {
     /// A frozen frame of the 02 keep script (nil = the script runs).
     struct KeepPin { var index: Int; var x: CGFloat; var finger: Double; var hintKeep: Bool; var kept: Int }
     static var keepPin: KeepPin?
+    /// Start the glow at the screen's settled blooms (the prototype frames are settled).
+    static var settleGlow = false
     /// The prototype frame at 8.6 s: card 3 swiping right (x ≈ 108, Keep
     /// stamp at ~0.98, finger down), card 1 saved, card 2 skipped.
     static let keepAt8600 = KeepPin(index: 2, x: 108.3, finger: 1, hintKeep: true, kept: 1)
@@ -138,6 +140,7 @@ enum OnboardingParityFixtures {
         case "10-deepest": reveal(page: 3, picks: ordered, spotify: false)
         case "10-deepest-spotify": reveal(page: 3, picks: ordered, spotify: true)
         case "10-deepest-nopicks": reveal(page: 3, picks: [], spotify: false)
+        case "09-artists-apple": reveal(page: 2, picks: ordered, sources: [.appleMusic])
         case "11-fresh": reveal(page: 0, picks: ordered, empty: true)
         case "11-fresh-nopicks": reveal(page: 0, picks: [], empty: true)
         case "probe-font": Text("Most music").font(OBFont.cabinet(.black, 60)).foregroundStyle(.white)
@@ -201,8 +204,10 @@ enum OnboardingParityFixtures {
                         onSpotify: { _ in }, onApple: { _ in }, persist: { _ in })
     }
 
-    private static func reveal(page: Int, picks: [String], empty: Bool = false, spotify: Bool? = nil) -> some View {
-        let p = profile(empty: empty)
+    private static func reveal(page: Int, picks: [String], empty: Bool = false, spotify: Bool? = nil,
+                               sources: [MusicSource] = []) -> some View {
+        var p = profile(empty: empty)
+        p.sources = sources
         return TasteProfileFlowContent(
             model: TasteProfileFlowModel(lines: [], progress: 1, cloudGenres: [], filledCount: 0,
                                          isEmptyLibrary: empty, profile: p, isFinished: true),
