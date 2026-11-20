@@ -61,9 +61,10 @@ enum OnboardingParityFixtures {
         print("HJSNAP-STEP clock start")
         while !Task.isCancelled {
             let t = Date().timeIntervalSince(start) * 1000
-            if tick < 4 || tick % 30 == 0 { print("HJSNAP-STEP tick \(tick) t=\(Int(t))") }
+            if tick < 4 || tick % 30 == 0 { print("HJSNAP-STEP tick \(tick) t=\(Int(t)) main=\(Thread.isMainThread)") }
             tick += 1
             apply(t, model, apple: apple, empty: empty)
+            if tick < 4 { print("HJSNAP-STEP tick applied") }
             try? await Task.sleep(for: .milliseconds(16))
         }
     }
@@ -146,6 +147,24 @@ enum OnboardingParityFixtures {
             TasteProfileFlowContent(model: applied(100), picks: ordered, onFinish: {}, start: nil, autoReveal: false)
         case "probe-loading-rows":
             OBMetricsReader { OBLoadingScreen(model: applied(5000)) }
+        case "probe-dyn-lines":
+            // Cloud preset, lines arrive while on screen.
+            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: [], progress: 0, cloudGenres: loadingGenres, filledCount: 0),
+                                    picks: ordered, onFinish: {}, start: { m in
+                try? await Task.sleep(for: .milliseconds(300))
+                print("HJSNAP-STEP dyn-lines apply main=\(Thread.isMainThread)")
+                apply(1000, m, apple: false, empty: false)
+                print("HJSNAP-STEP dyn-lines applied")
+            }, autoReveal: false)
+        case "probe-dyn-cloud":
+            // Lines preset, cloud arrives while on screen.
+            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: applied(1000).lines, progress: 0, cloudGenres: [], filledCount: 0),
+                                    picks: ordered, onFinish: {}, start: { m in
+                try? await Task.sleep(for: .milliseconds(300))
+                print("HJSNAP-STEP dyn-cloud apply main=\(Thread.isMainThread)")
+                apply(1000, m, apple: false, empty: false)
+                print("HJSNAP-STEP dyn-cloud applied")
+            }, autoReveal: false)
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
