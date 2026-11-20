@@ -51,9 +51,9 @@ enum OnboardingParityFixtures {
     }
 
     /// Drives `model` exactly like Analyze.tsx until cancelled.
-    static func applied(_ t: Double) -> TasteProfileFlowModel {
+    static func applied(_ t: Double, apple: Bool = false, empty: Bool = false) -> TasteProfileFlowModel {
         let m = TasteProfileFlowModel()
-        apply(t, m, apple: false, empty: false)
+        apply(t, m, apple: apple, empty: empty)
         OnboardingParityFixtures.log("HJSNAP-STEP applied \(t) lines=\(m.lines.count)")
         return m
     }
@@ -113,7 +113,9 @@ enum OnboardingParityFixtures {
         case "05-connect": pager(4, ordered)
         case "06-loading", "06-loading-apple", "06-loading-empty":
             let apple = name.hasSuffix("apple"), empty = name.hasSuffix("empty")
-            TasteProfileFlowContent(model: TasteProfileFlowModel(), picks: ordered, onFinish: {},
+            // Analyze.tsx renders every stage line and the genre cloud from
+            // t = 0, so the model starts at the t = 0 state and the clock moves it.
+            TasteProfileFlowContent(model: applied(0, apple: apple, empty: empty), picks: ordered, onFinish: {},
                                     start: { m in await runLoadingClock(m, apple: apple, empty: empty) },
                                     autoReveal: false)
         case "07-genres": reveal(page: 0, picks: ordered)

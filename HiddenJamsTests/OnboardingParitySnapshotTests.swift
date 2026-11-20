@@ -186,13 +186,13 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         capture("11-fresh", motion: [0.3], settled: 3.0)
         capture("11-fresh-nopicks", motion: [], settled: 3.0)
         capture("probe-loading-static", motion: [], settled: 1.5)
+        capture("06-loading", motion: [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], settled: 8.7)
+        capture("06-loading-apple", motion: [4.2], settled: 8.7)
+        capture("06-loading-empty", motion: [1.0, 2.2], settled: 4.1)
         capture("probe-dyn-a", motion: [], settled: 1.2)
         capture("probe-dyn-c", motion: [], settled: 1.2)
         capture("probe-dyn-b", motion: [], settled: 1.2)
         OnboardingParityFixtures.muteAnnouncements = false
-        capture("06-loading", motion: [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], settled: 8.7)
-        capture("06-loading-apple", motion: [4.2], settled: 8.7)
-        capture("06-loading-empty", motion: [1.0, 2.2], settled: 4.1)
         window?.isHidden = true
         window = nil
         print("HJSNAP-DONE")
