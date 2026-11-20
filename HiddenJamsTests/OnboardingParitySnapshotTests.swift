@@ -86,17 +86,25 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         // On the CI simulator the host scene isn't foreground-active, so
         // display links (SwiftUI animations, TimelineView) barely tick.
         // A layout pass makes the hosting view render at the current time.
+        var iters = 0, worst = 0.0
+        let began = Date()
         while Date() < t {
+            let it = Date()
+            iters += 1
+            defer { worst = max(worst, Date().timeIntervalSince(it)) }
             if let v = window?.rootViewController?.view {
                 v.setNeedsLayout()
                 v.layoutIfNeeded()
             }
             RunLoop.main.run(until: min(t, Date().addingTimeInterval(1.0 / 60)))
         }
+        print(String(format: "HJSNAP-PERF spin %.2fs iters=%d worst=%.0fms", Date().timeIntervalSince(began), iters, worst * 1000))
     }
 
     private func emit(_ file: String, settled: Bool) {
         guard let w = window else { return }
+        let e0 = Date()
+        defer { print(String(format: "HJSNAP-PERF emit %@ %.0fms", file, Date().timeIntervalSince(e0) * 1000)) }
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = settled ? 3 : 1.5
         fmt.opaque = true

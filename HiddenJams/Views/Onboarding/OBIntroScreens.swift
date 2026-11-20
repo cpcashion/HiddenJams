@@ -198,7 +198,7 @@ private struct OBStatText: View, Animatable {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, (size * 1.32 - size * 1.15) / 2)
             .frame(maxWidth: OBFont.ch(size) * 31, alignment: .leading)
-            .opacity(0.74)
+            .opacity(1) // .sub .74 is overridden by rise()
     }
 }
 
