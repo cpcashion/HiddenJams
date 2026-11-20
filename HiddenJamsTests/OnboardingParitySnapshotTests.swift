@@ -122,7 +122,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("begin")
         dumpCrashReports()
-        for probe in ["probe-dock", "probe-docknil", "probe-pager", "probe-onb-env", "probe-flow", "probe-onb"] where attempt(probe) {
+        for probe in ["probe-flow", "probe-onb"] where attempt(probe) {
             show(probe)
             spin(until: Date().addingTimeInterval(0.6))
             step("ok \(probe)")
@@ -155,5 +155,24 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         window?.isHidden = true
         window = nil
         print("HJSNAP-DONE")
+    }
+}
+
+
+/// Runs after the snapshot class (alphabetical); if that crashed, prints
+/// the simulator crash report so the cause shows up in the CI log.
+final class ParityCrashDumpTests: XCTestCase {
+    func testDumpParityCrashReports() throws {
+        let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("ParityCapture.enabled")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: marker.path))
+        let d = "/Users/runner/Library/Logs/DiagnosticReports"
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: d)) ?? []
+        print("HJCRASH-DIR \(files.count) files")
+        for f in files.sorted() where f.hasPrefix("HiddenJams") {
+            guard let text = try? String(contentsOfFile: d + "/" + f, encoding: .utf8) else { continue }
+            print("HJCRASH-FILE \(f)")
+            for line in text.split(separator: "\n") { print("HJCRASH \(line.prefix(4000))") }
+        }
+        fflush(stdout)
     }
 }
