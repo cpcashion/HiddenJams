@@ -91,6 +91,12 @@ final class OnboardingParitySnapshotTests: XCTestCase {
     func testCaptureOnboardingParity() throws {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("begin")
+        for probe in ["probe-font", "probe-title", "probe-cover", "probe-sub", "probe-cta", "probe-dots", "probe-spotify",
+                      "probe-apple", "probe-marquee", "probe-glow", "probe-intro"] {
+            show(probe)
+            spin(until: Date().addingTimeInterval(0.5))
+            step("ok \(probe)")
+        }
         show("01-intro")
         spin(until: Date().addingTimeInterval(1.5))
         step("first spin done")

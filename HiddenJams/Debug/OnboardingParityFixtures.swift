@@ -109,6 +109,17 @@ enum OnboardingParityFixtures {
         case "10-deepest-nopicks": reveal(page: 3, picks: [], spotify: false)
         case "11-fresh": reveal(page: 0, picks: ordered, empty: true)
         case "11-fresh-nopicks": reveal(page: 0, picks: [], empty: true)
+        case "probe-font": Text("Most music").font(OBFont.cabinet(.black, 60)).foregroundStyle(.white)
+        case "probe-title": OBMetricsReader { OBDisplayTitle(markup: "Most music\n[heard.]", size: 61.9) }
+        case "probe-cover": OBCover(art: "obcover-mesa", size: 120, radius: 16)
+        case "probe-glow": OBGlowBackground(screen: 0)
+        case "probe-marquee": OBMarquee(items: OBCatalog.tracks, cover: 70, radius: 14, duration: 38)
+        case "probe-sub": OBMetricsReader { OBSub(text: "Swipe right to save a song to your **Hidden Jams** playlist.") }
+        case "probe-cta": OBNextButton {}.padding()
+        case "probe-dots": OBPageDots(count: 5, index: 0)
+        case "probe-spotify": OBBrandTile(brand: .spotify)
+        case "probe-apple": OBBrandTile(brand: .appleMusic)
+        case "probe-intro": OBMetricsReader { OBIntroScreen() }
         default: Color.red
         }
     }

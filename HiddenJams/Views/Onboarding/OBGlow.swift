@@ -108,12 +108,23 @@ final class OBGlowField {
                 px[o + 2] = UInt8(max(0, min(255, (col.z * 255).rounded())))
             }
         }
-        let data = Data(px) as CFData
-        guard let provider = CGDataProvider(data: data) else { return nil }
-        return CGImage(width: gw, height: gh, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: gw * 4,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        return Self.image(px, width: gw, height: gh, alpha: .noneSkipLast)
+    }
+
+    /// Copies RGBA bytes into a bitmap context and returns its image
+    /// (no CFData bridging).
+    static func image(_ bytes: [UInt8], width: Int, height: Int, alpha: CGImageAlphaInfo) -> CGImage? {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                  space: space, bitmapInfo: alpha.rawValue),
+              let dst = ctx.data else { return nil }
+        let rowBytes = ctx.bytesPerRow
+        bytes.withUnsafeBytes { src in
+            for y in 0..<height {
+                memcpy(dst + y * rowBytes, src.baseAddress! + y * width * 4, width * 4)
+            }
+        }
+        return ctx.makeImage()
     }
 
     /// ±1.4% grain tiles (white for +, black for −), regenerated offsets per frame.
@@ -135,13 +146,7 @@ final class OBGlowField {
                 dark[i * 4 + 3] = a
             }
         }
-        func make(_ b: [UInt8]) -> CGImage? {
-            guard let p = CGDataProvider(data: Data(b) as CFData) else { return nil }
-            return CGImage(width: n, height: n, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: n * 4,
-                           space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                           provider: p, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-        }
+        func make(_ b: [UInt8]) -> CGImage? { image(b, width: n, height: n, alpha: .premultipliedLast) }
         return (make(light), make(dark))
     }()
 }
