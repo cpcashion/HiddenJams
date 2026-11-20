@@ -39,6 +39,13 @@
 	</array>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Hidden Jams analyzes the songs in your Apple Music library to build your taste profile and find underground music you'll love. Your library never leaves your device except as anonymized statistics.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>CabinetGrotesk-Medium.otf</string>
+		<string>CabinetGrotesk-Bold.otf</string>
+		<string>CabinetGrotesk-Extrabold.otf</string>
+		<string>CabinetGrotesk-Black.otf</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

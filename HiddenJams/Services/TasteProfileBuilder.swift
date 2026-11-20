@@ -18,6 +18,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 import MusicKit
 
 // MARK: - Model
@@ -171,20 +172,36 @@ final class TasteProfileFlowModel: ObservableObject {
         }
     }
 
+    enum LineState: Equatable { case wait, run, done }
+
+    /// One line of the "Digging through your library" list. Every line is
+    /// listed up front (waiting), runs, then lands with its real count.
     struct StageLine: Identifiable, Equatable {
         let stage: Stage
-        let text: String
+        var text: String
+        /// Real result as shown ("1,284", "72/100"); nil = no count.
         var count: String?
-        var done: Bool
+        /// The same number for the count-up; `outOf100` appends "/100".
+        var value: Double?
+        var outOf100 = false
+        var state: LineState
+        var done: Bool { state == .done }
         var id: Int { stage.rawValue }
     }
 
     @Published private(set) var lines: [StageLine] = []
     @Published private(set) var progress: Double = 0
-    @Published private(set) var filledGenres: [String] = []
+    /// Genre pills under the list, and how many of them are lit.
+    @Published private(set) var cloudGenres: [String] = []
+    @Published private(set) var filledCount: Int = 0
+    /// Known once the library is read: fewer than 10 songs.
+    @Published private(set) var isEmptyLibrary = false
     @Published private(set) var isSlow = false
     @Published private(set) var isFinished = false
     @Published private(set) var profile: TasteProfile?
+    /// Real runs animate counts as they land; the DEBUG parity clock
+    /// drives them frame by frame like the prototype.
+    private(set) var animatesCounts = true
 
     /// Each line stays at least this long, even when the work is instant.
     var minimumDwell: Duration = .milliseconds(600)
@@ -200,12 +217,31 @@ final class TasteProfileFlowModel: ObservableObject {
 
     init() {}
 
-    /// Static state for SwiftUI previews.
-    init(previewLines: [StageLine], progress: Double, genres: [String]) {
-        self.lines = previewLines
+    /// Fixed state (previews and the DEBUG parity fixtures).
+    init(lines: [StageLine], progress: Double, cloudGenres: [String], filledCount: Int,
+         isEmptyLibrary: Bool = false, profile: TasteProfile? = nil, isFinished: Bool = false) {
+        self.lines = lines
         self.progress = progress
-        self.filledGenres = genres
+        self.cloudGenres = cloudGenres
+        self.filledCount = filledCount
+        self.isEmptyLibrary = isEmptyLibrary
+        self.profile = profile
+        self.isFinished = isFinished
         self.hasStarted = true
+    }
+
+    /// Sets every published field at once (used by the DEBUG parity clock).
+    func apply(lines: [StageLine], progress: Double, cloudGenres: [String], filledCount: Int,
+               isEmptyLibrary: Bool, profile: TasteProfile?, isFinished: Bool) {
+        hasStarted = true
+        animatesCounts = false
+        if self.lines != lines { self.lines = lines }
+        if self.progress != progress { self.progress = progress }
+        if self.cloudGenres != cloudGenres { self.cloudGenres = cloudGenres }
+        if self.filledCount != filledCount { self.filledCount = filledCount }
+        if self.isEmptyLibrary != isEmptyLibrary { self.isEmptyLibrary = isEmptyLibrary }
+        if self.profile != profile { self.profile = profile }
+        if self.isFinished != isFinished { self.isFinished = isFinished }
     }
 
     static func connectedText(_ sources: [MusicSource]) -> String {
@@ -226,6 +262,16 @@ final class TasteProfileFlowModel: ObservableObject {
         let usesSpotify = sources.contains(.spotify) && spotifyToken != nil
         let usesApple = sources.contains(.appleMusic)
         let appleOnly = usesApple && !usesSpotify
+
+        // Every line is listed up front, like the prototype.
+        lines = [
+            StageLine(stage: .connected, text: Self.connectedText(sources), state: .wait),
+            StageLine(stage: .artists, text: appleOnly ? "Finding the artists you play most" : "Pulling in your top artists", state: .wait),
+            StageLine(stage: .songs, text: appleOnly ? "Reading your library" : "Reading your saved songs", state: .wait),
+            StageLine(stage: .genres, text: "Sorting your genres", state: .wait),
+            StageLine(stage: .rarity, text: "Checking how rare it all is", state: .wait),
+            StageLine(stage: .deepest, text: "Finding your deepest cut", state: .wait),
+        ]
 
         // 1 · Connected
         await stage(.connected, Self.connectedText(sources)) { nil }
@@ -249,7 +295,7 @@ final class TasteProfileFlowModel: ObservableObject {
                 applePlays = (try? await appleMusic.fetchLibraryPlayStats()) ?? []
                 for s in applePlays where s.artistName != "Unknown Artist" { addArtist(s.artistName, 1 + Double(s.playCount)) }
             }
-            return artistWeights.isEmpty ? nil : artistWeights.count.formatted()
+            return artistWeights.isEmpty ? nil : artistWeights.count
         }
 
         // 3 · Songs (the app's own library analysis; real progress)
@@ -264,14 +310,22 @@ final class TasteProfileFlowModel: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(150))
             }
             let count = max(analyzer.libraryTracks.count, applePlays.count)
-            return count > 0 ? count.formatted() : nil
+            return count
         }
         let library = analyzer.libraryTracks
         let librarySize = max(library.count, applePlays.count)
 
         var profile = TasteProfile(librarySize: librarySize, sources: sources, generatedAt: Date())
+        if profile.isEmptyLibrary {
+            // Prototype's empty variant: three lines, "Looking around…".
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isEmptyLibrary = true
+                lines.removeAll { $0.stage.rawValue > Stage.songs.rawValue }
+            }
+        }
 
         // 4 · Genres
+        if !profile.isEmptyLibrary {
         await stage(.genres, "Sorting your genres") {
             var labels: [String: Double] = [:]
             for t in library where t.source == .spotify {
@@ -287,11 +341,13 @@ final class TasteProfileFlowModel: ObservableObject {
                 for g in s.genreNames { labels[g, default: 0] += 1 + Double(s.playCount) }
             }
             profile.topGenres = TasteProfileBuilder.genreShares(weightedLabels: labels)
-            for share in profile.topGenres {
-                self.filledGenres.append(share.genre)
+            for share in profile.topGenres.prefix(10) {
+                self.cloudGenres.append(share.genre)
+                self.filledCount = self.cloudGenres.count
                 try? await Task.sleep(for: .milliseconds(120))
             }
             return nil
+        }
         }
 
         let ranked = TasteProfileBuilder.rankedArtists(artistWeights)
@@ -306,18 +362,24 @@ final class TasteProfileFlowModel: ObservableObject {
                 if let result = TasteProfileBuilder.profileScore(artistWeights: ranked, rarities: rarities) {
                     profile.rarityScore = result.score
                     profile.ratedArtistCount = result.rated
-                    return "\(result.score)/100"
+                    return result.score
                 }
                 return nil
             }
 
             // 6 · Deepest cut
-            if !rarities.isEmpty {
+            if rarities.isEmpty {
+                lines.removeAll { $0.stage == .deepest }
+            } else {
                 await stage(.deepest, "Finding your deepest cut") {
                     profile.deepestCut = Self.deepestCut(library: library, applePlays: applePlays, rarities: rarities)
                     return nil
                 }
             }
+        }
+
+        if ranked.isEmpty || profile.isEmptyLibrary {
+            lines.removeAll { $0.stage == .rarity || $0.stage == .deepest }
         }
 
         // Signature artists: Spotify only (no top-artists list for Apple).
@@ -363,22 +425,30 @@ final class TasteProfileFlowModel: ObservableObject {
 
     // MARK: - Stage runner
 
-    private func stage(_ stage: Stage, _ text: String, work: () async -> String?) async {
-        lines.append(StageLine(stage: stage, text: text, count: nil, done: false))
+    private func stage(_ stage: Stage, _ text: String, work: () async -> Int?) async {
+        if let i = lines.firstIndex(where: { $0.stage == stage }) {
+            lines[i].text = text
+            lines[i].state = .run
+        } else {
+            lines.append(StageLine(stage: stage, text: text, state: .run))
+        }
         isSlow = false
         let began = ContinuousClock.now
         let slowWatch = Task { [slowAfter] in
             try? await Task.sleep(for: .seconds(slowAfter))
             if !Task.isCancelled { self.isSlow = true }
         }
-        let count = await work()
+        let value = await work()
         slowWatch.cancel()
         isSlow = false
         let elapsed = ContinuousClock.now - began
         if elapsed < minimumDwell { try? await Task.sleep(for: minimumDwell - elapsed) }
         if let i = lines.firstIndex(where: { $0.stage == stage }) {
-            lines[i].count = count
-            lines[i].done = true
+            let outOf100 = stage == .rarity
+            lines[i].value = value.map(Double.init)
+            lines[i].outOf100 = outOf100
+            lines[i].count = value.map { outOf100 ? "\($0)/100" : $0.formatted() }
+            lines[i].state = .done
         }
         completedWeight += stage.weight
         progress = completedWeight / totalWeight
