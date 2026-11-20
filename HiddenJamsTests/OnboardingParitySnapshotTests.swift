@@ -63,13 +63,19 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         let hc = UIHostingController(rootView: AnyView(OnboardingParityFixtures.screen(name)))
         hc.overrideUserInterfaceStyle = .dark
         hc.view.backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 15 / 255, alpha: 1)
-        if window == nil {
-            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
-            let w = UIWindow(windowScene: scene)
-            w.windowLevel = .alert + 1
-            w.overrideUserInterfaceStyle = .dark
-            window = w
+        // A fresh window per state: reusing one window by swapping its root
+        // left some screens frozen at their first frame.
+        if let old = window {
+            old.isHidden = true
+            old.rootViewController = nil
+            window = nil
+            spin(until: Date().addingTimeInterval(0.15))
         }
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        let w = UIWindow(windowScene: scene)
+        w.windowLevel = .alert + 1
+        w.overrideUserInterfaceStyle = .dark
+        window = w
         step("window ready")
         window?.rootViewController = hc
         window?.makeKeyAndVisible()
@@ -122,7 +128,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("begin")
         dumpCrashReports()
-        for probe in ["probe-flow", "probe-onb"] where attempt(probe) {
+        for probe in [String]() where attempt(probe) {
             show(probe)
             spin(until: Date().addingTimeInterval(0.6))
             step("ok \(probe)")
@@ -141,9 +147,6 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         capture("04a-mood-none", motion: [0.3], settled: 2.0)
         capture("04-mood", motion: [], settled: 2.0)
         capture("05-connect", motion: [0.4, 1.2, 2.0], settled: 3.5)
-        capture("06-loading", motion: [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], settled: 8.7)
-        capture("06-loading-apple", motion: [4.2], settled: 8.7)
-        capture("06-loading-empty", motion: [1.0, 2.2], settled: 4.1)
         capture("07-genres", motion: [0.2, 0.5, 0.8], settled: 3.0)
         capture("08-rarity", motion: [0.2, 0.5, 0.9, 1.4], settled: 3.0)
         capture("09-artists", motion: [0.3, 0.6], settled: 3.0)
@@ -152,6 +155,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         capture("10-deepest-nopicks", motion: [], settled: 3.0)
         capture("11-fresh", motion: [0.3], settled: 3.0)
         capture("11-fresh-nopicks", motion: [], settled: 3.0)
+        capture("probe-loading-static", motion: [], settled: 1.5)
+        capture("06-loading", motion: [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], settled: 8.7)
+        capture("06-loading-apple", motion: [4.2], settled: 8.7)
+        capture("06-loading-empty", motion: [1.0, 2.2], settled: 4.1)
         window?.isHidden = true
         window = nil
         print("HJSNAP-DONE")
@@ -166,7 +173,7 @@ final class ParityCrashDumpTests: XCTestCase {
         let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("ParityCapture.enabled")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: marker.path))
         let d = "/Users/runner/Library/Logs/DiagnosticReports"
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: d)) ?? []
+        let files = (FileManager.default.subpaths(atPath: d) ?? []).filter { !$0.hasSuffix("Retired") }
         print("HJCRASH-DIR \(files.count) files")
         for f in files.sorted() {
             print("HJCRASH-NAME \(f)")

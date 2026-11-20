@@ -126,6 +126,9 @@ enum OnboardingParityFixtures {
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { _ in })
         }
+        case "probe-loading-static":
+            TasteProfileFlowContent(model: TasteProfileFlowModel(lines: [], progress: 0.4, cloudGenres: loadingGenres, filledCount: 3),
+                                    picks: ordered, onFinish: {}, start: nil, autoReveal: false)
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
