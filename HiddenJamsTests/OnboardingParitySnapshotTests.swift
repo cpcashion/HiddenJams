@@ -56,6 +56,8 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     private func step(_ s: String) { print("HJSNAP-STEP \(s)"); fflush(stdout) }
 
+    private static var retired: [UIWindow] = []
+
     private func show(_ name: String) async {
         step("show \(name)")
         // The onboarding screens only read the auth/source managers inside
@@ -65,9 +67,11 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         hc.view.backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 15 / 255, alpha: 1)
         // A fresh window per state: reusing one window by swapping its root
         // left some screens frozen at their first frame.
+        // Old windows are hidden but kept alive: tearing them down hit a
+        // host malloc crash (freed static 0x262543f40) on the next swap.
         if let old = window {
             old.isHidden = true
-            old.rootViewController = nil
+            Self.retired.append(old)
             window = nil
             await spin(until: Date().addingTimeInterval(0.15))
         }
@@ -223,6 +227,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         }
         for shot in Self.shots { await run(shot) }
         window?.isHidden = true
+        if let w = window { Self.retired.append(w) }
         window = nil
         print("HJSNAP-DONE pass \(pass)")
     }
