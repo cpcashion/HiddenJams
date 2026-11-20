@@ -12,6 +12,7 @@
 //
 
 import SwiftUI
+import CoreImage
 import UIKit
 import CoreText
 
@@ -825,6 +826,83 @@ struct OBCover: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .circular))
             .accessibilityHidden(true)
+    }
+}
+
+/// CSS colour filters baked into the artwork once (CoreImage colour matrix in
+/// sRGB, no colour management), so no live layer filters are needed.
+enum OBArtFilter: Hashable {
+    /// `grayscale(1) brightness(.38) contrast(.9)` → .342·gray + .05
+    case quiet
+    /// `saturate(1.15)`
+    case lit
+    /// `brightness(.6) saturate(.9)`
+    case under
+    /// `brightness(.42)`
+    case under2
+
+    private static func saturate(_ s: CGFloat) -> [[CGFloat]] {
+        [[0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s],
+         [0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s],
+         [0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s]]
+    }
+    var matrix: (m: [[CGFloat]], bias: CGFloat) {
+        switch self {
+        case .quiet:
+            let g: [CGFloat] = [0.2126 * 0.342, 0.7152 * 0.342, 0.0722 * 0.342]
+            return ([g, g, g], 0.05)
+        case .lit: return (Self.saturate(1.15), 0)
+        case .under: return (Self.saturate(0.9).map { $0.map { $0 * 0.6 } }, 0)
+        case .under2: return ([[0.42, 0, 0], [0, 0.42, 0], [0, 0, 0.42]], 0)
+        }
+    }
+}
+
+@MainActor
+enum OBArtCache {
+    private static var store: [String: UIImage] = [:]
+    private static let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+
+    static func image(_ art: String, _ f: OBArtFilter) -> UIImage? {
+        let key = "\(art)|\(f)"
+        if let hit = store[key] { return hit }
+        guard let ui = UIImage(named: art), let cg = ui.cgImage else { return nil }
+        let input = CIImage(cgImage: cg, options: [.colorSpace: NSNull()])
+        let (m, b) = f.matrix
+        guard let filter = CIFilter(name: "CIColorMatrix") else { return nil }
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(x: m[0][0], y: m[0][1], z: m[0][2], w: 0), forKey: "inputRVector")
+        filter.setValue(CIVector(x: m[1][0], y: m[1][1], z: m[1][2], w: 0), forKey: "inputGVector")
+        filter.setValue(CIVector(x: m[2][0], y: m[2][1], z: m[2][2], w: 0), forKey: "inputBVector")
+        filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        filter.setValue(CIVector(x: b, y: b, z: b, w: 0), forKey: "inputBiasVector")
+        guard let out = filter.outputImage,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let made = context.createCGImage(out, from: input.extent, format: .RGBA8, colorSpace: space) else { return nil }
+        let img = UIImage(cgImage: made, scale: ui.scale, orientation: ui.imageOrientation)
+        store[key] = img
+        return img
+    }
+}
+
+/// `OBCover` with a baked CSS filter (falls back to the plain art).
+struct OBFilteredCover: View {
+    let art: String
+    let filter: OBArtFilter
+    var size: CGFloat
+    var radius: CGFloat
+    var body: some View {
+        Group {
+            if let img = OBArtCache.image(art, filter) {
+                Image(uiImage: img).resizable().interpolation(.high)
+            } else {
+                Image(art).resizable().interpolation(.high)
+            }
+        }
+        .aspectRatio(contentMode: .fill)
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .circular))
+        .accessibilityHidden(true)
     }
 }
 

@@ -119,11 +119,14 @@ private struct OBCloudCoverView: View {
         // quiet: grayscale(1) brightness(.38) contrast(.9) → out = .342·gray + .05
         // lit (quiet = -1): saturate(1.15)
         let q = max(0, quiet), l = max(0, -quiet)
-        return OBCover(art: art, size: size, radius: 16)
-            .saturation(1 + 0.15 * l)
-            .grayscale(q)
-            .colorMultiply(Color(white: 1 - q * (1 - 0.342)))
-            .brightness(0.05 * q)
+        // The CSS filters are baked into copies of the art and cross-faded
+        // (live layer filters crashed the CI simulator's software renderer).
+        return ZStack {
+            OBCover(art: art, size: size, radius: 16)
+            if q > 0 { OBFilteredCover(art: art, filter: .quiet, size: size, radius: 16).opacity(q) }
+            if l > 0 { OBFilteredCover(art: art, filter: .lit, size: size, radius: 16).opacity(l) }
+        }
+            .opacity(1 - 0.2 * q) // .cv.quiet opacity .8
             .overlay(RoundedRectangle(cornerRadius: 16.5).stroke(Color.white.opacity(0.1), lineWidth: 1).padding(-0.5))
             .obRing(cornerRadius: 16, color: OB.lime.opacity(glow), width: 2)
             .obShadow(RoundedRectangle(cornerRadius: 16), color: OB.lime.opacity(0.45 * glow), blur: 42, spread: 6)
@@ -238,11 +241,9 @@ struct OBKeepScreen: View {
                 .padding(.top, 12).obRise(0.2)
 
             ZStack {
-                OBCover(art: n2.art, size: card, radius: 24)
-                    .colorMultiply(Color(white: 0.42))
+                OBFilteredCover(art: n2.art, filter: .under2, size: card, radius: 24)
                     .scaleEffect(0.88).offset(y: 26)
-                OBCover(art: n1.art, size: card, radius: 24)
-                    .saturation(0.9).colorMultiply(Color(white: 0.6))
+                OBFilteredCover(art: n1.art, filter: .under, size: card, radius: 24)
                     .scaleEffect(0.94).offset(y: 14)
                 OBKeepCard(x: x, track: top, plays: OBKeepDeck.plays[index % OBKeepDeck.plays.count],
                            size: card, finger: finger)
