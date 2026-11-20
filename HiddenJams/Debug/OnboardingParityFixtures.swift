@@ -17,6 +17,13 @@ enum OnboardingParityFixtures {
     static var muteAnnouncements = false
     /// When the parity test put the current screen on screen (scripted screens time from here).
     static var epoch: Date?
+    /// A frozen frame of the 02 keep script (nil = the script runs).
+    struct KeepPin { var index: Int; var x: CGFloat; var finger: Double; var hintKeep: Bool; var kept: Int }
+    static var keepPin: KeepPin?
+    /// The prototype frame at 8.6 s: card 3 swiping right (x ≈ 108, Keep
+    /// stamp at ~0.98, finger down), card 1 saved, card 2 skipped.
+    static let keepAt8600 = KeepPin(index: 2, x: 108.3, finger: 1, hintKeep: true, kept: 1)
+    private static func pin(_ p: KeepPin?) -> Bool { keepPin = p; return true }
     static func log(_ s: String) { print(s); fflush(stdout) }
 
     static let picks: Set<String> = ["soul", "jazz", "funk", "ambient"]
@@ -108,7 +115,12 @@ enum OnboardingParityFixtures {
         let ordered = TasteCopy.orderedPicks(picks)
         switch name {
         case "01-intro": pager(0, [])
-        case "02-keep": pager(1, [])
+        case "02-keep":
+            let _ = pin(nil)
+            pager(1, [])
+        case "static-keep":
+            let _ = pin(keepAt8600)
+            pager(1, [])
         case "03-rarity": pager(2, [])
         case "04a-mood-none": pager(3, [])
         case "04-mood": pager(3, ordered)

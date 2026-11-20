@@ -193,6 +193,7 @@ private struct OBStageRow: View {
                     .transition(.identity)
             }
         }
+        .frame(minHeight: 20) // .ln line box: rows sit 27pt apart with the 7pt gap
         .opacity(line.state == .wait ? 0.3 : line.state == .run ? 1 : 0.78)
         .animation(.easeInOut(duration: 0.3), value: line.state)
         .accessibilityElement(children: .combine)
@@ -239,6 +240,7 @@ private struct OBStartsWith: View {
         let colors = Theme.Colors.genreColors(for: shown)
         VStack(alignment: left ? .leading : .center, spacing: 9) {
             OBMono(text: "Starting with", size: 9.5, opacity: 0.5)
+                .offset(y: left ? -2 : 0) // measured: label sat 2.3pt low on 11
             if shown.isEmpty {
                 Text("a bit of everything").font(.system(size: 14)).foregroundStyle(OB.paper).opacity(0.75)
             } else {
@@ -278,7 +280,7 @@ struct OBGenresChapter: View {
             }
             .padding(.top, 22)
             OBSub(text: "That’s most of your library. We’ll still dig for the unexpected.", maxCh: 32)
-                .padding(.top, 12).obRise(0.6)
+                .padding(.top, 10).obRise(0.6) // measured: 12 sat 2.5pt low
         }
     }
 }
@@ -413,12 +415,15 @@ struct OBSignatureChapter: View {
 
     var body: some View {
         let inner = m.contentWidth - 16
+        // .sg widths 39% / 29% / 29% + two 8pt gaps overflow the row, so CSS
+        // flex-shrink scales all three by the same factor (131 / 97.5 / 97.5).
+        let shrink: CGFloat = min(1, (inner - 16) / (inner * (0.39 + 0.29 + 0.29)))
         OBScreen {
             OBEyebrow(text: "Your artists")
             OBDisplayTitle(markup: "Your\n[signature]\nartists.", size: m.displayL).obRise(0.05)
             HStack(alignment: .bottom, spacing: 8) {
                 ForEach(Array(artists.prefix(3).enumerated()), id: \.element.name) { k, a in
-                    OBSignatureTile(artist: a, k: k, width: inner * (k == 0 ? 0.39 : 0.29))
+                    OBSignatureTile(artist: a, k: k, width: inner * (k == 0 ? 0.39 : 0.29) * shrink)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -487,7 +492,7 @@ struct OBDeepestChapter: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 28)
 
-            VStack(spacing: 2) {
+            VStack(spacing: 4) { // measured: 2 put the artist line 2.4pt high
                 Text(cut.title).font(.system(size: 17, weight: .semibold))
                 Text(cut.artistName).font(.system(size: 14)).opacity(0.6)
             }
@@ -500,7 +505,7 @@ struct OBDeepestChapter: View {
 
             OBSub(text: "Hardly anyone has heard it. You have.", maxCh: 32, centered: true)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 12)
+                .padding(.top, 13) // with the 4pt gap above: matches the 3.3pt-high measurement
                 .obRise(0.8)
 
             Spacer(minLength: 12)

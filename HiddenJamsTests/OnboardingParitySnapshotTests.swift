@@ -156,7 +156,6 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         var list: [Shot] = []
         let screens: [Shot] = [
             Shot(name: "01-intro", motion: [0.4, 0.8, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 6.0),
-            Shot(name: "02-keep", motion: [0.5, 0.9, 1.1, 1.3, 1.5, 1.7, 1.9, 2.2, 2.6, 3.0, 3.5, 4.0, 5.0, 6.0, 7.5], settled: 8.6),
             Shot(name: "03-rarity", motion: [0.3, 0.6, 0.9, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 5.0),
             Shot(name: "04a-mood-none", motion: [0.3], settled: 2.0),
             Shot(name: "04-mood", settled: 2.0),
@@ -182,6 +181,8 @@ final class OnboardingParitySnapshotTests: XCTestCase {
                                  file: "static/\(n)_t\(String(format: "%05.2f", t)).jpg"))
             }
         }
+        // 02: the keep script frozen at the prototype's 8.6 s frame (no wall clock).
+        list.append(Shot(name: "static-keep", settled: 3.0, file: "02-keep.jpg"))
         list += screens
         // The live-clock loading fixture crashes the CI test host, so only the
         // frozen frames above are captured (identical render at each offset).

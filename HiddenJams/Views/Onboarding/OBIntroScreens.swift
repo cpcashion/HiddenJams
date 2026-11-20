@@ -272,6 +272,17 @@ struct OBKeepScreen: View {
     }
 
     private func runScript() async {
+        #if DEBUG
+        // Parity capture: hold one frame of the script (no clock).
+        if let pin = OnboardingParityFixtures.keepPin {
+            var tx = Transaction(); tx.disablesAnimations = true
+            withTransaction(tx) {
+                index = pin.index; x = pin.x; finger = pin.finger; hintKeep = pin.hintKeep
+                kept = (0..<pin.kept).map { OBKeepDeck.deck[$0 % OBKeepDeck.deck.count].art }
+            }
+            return
+        }
+        #endif
         guard !reduceMotion else { return }
         // Waits are scheduled against the script's start, like the
         // prototype's timeline, so a slow frame never delays later steps.
@@ -397,6 +408,13 @@ private struct OBPlaylistChip: View {
         HStack(spacing: 12) {
             // 2×2 mosaic, newest first
             let cells = (0..<4).map { k -> String? in kept.count - 1 - k >= 0 ? kept[kept.count - 1 - k] : nil }
+            // CSS grid quirk (auto rows in a 46pt box, 2pt gap): a row holding
+            // a cover takes 22pt of content and the free space is split evenly,
+            // so with 1–2 saved the top row is 33pt and the bottom row 11pt.
+            let c1: CGFloat = kept.count >= 1 ? 22 : 0
+            let c2: CGFloat = kept.count >= 3 ? 22 : 0
+            let free: CGFloat = 44 - c1 - c2
+            let rowH: [CGFloat] = [c1 + free / 2, c2 + free / 2]
             VStack(spacing: 2) {
                 ForEach(0..<2, id: \.self) { r in
                     HStack(spacing: 2) {
@@ -404,10 +422,10 @@ private struct OBPlaylistChip: View {
                             ZStack {
                                 OB.cell
                                 if let art = cells[r * 2 + c] {
-                                    OBMosaicCell(art: art).id("\(art)\(kept.count)")
+                                    OBMosaicCell(art: art, height: rowH[r]).id("\(art)\(kept.count)")
                                 }
                             }
-                            .frame(width: 22, height: 22)
+                            .frame(width: 22, height: rowH[r])
                             .clipped()
                         }
                     }
@@ -418,8 +436,11 @@ private struct OBPlaylistChip: View {
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .circular))
 
             VStack(alignment: .leading, spacing: 2) {
+                // prototype line boxes: 20pt and 17pt
                 Text("Hidden Jams").font(.system(size: 15, weight: .semibold)).foregroundStyle(OB.paper)
+                    .frame(height: 20)
                 Text("Playlist in your music app").font(.system(size: 12.5)).foregroundStyle(OB.paper).opacity(0.55)
+                    .frame(height: 17)
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -427,12 +448,14 @@ private struct OBPlaylistChip: View {
             (Text("\(kept.count)").fontWeight(.bold) + Text(" saved"))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(OB.ink)
+                .frame(height: 18) // prototype .pl-n line box (pill 30pt tall)
                 .padding(.vertical, 6).padding(.horizontal, 12)
                 .background(Capsule().fill(OB.lime))
                 .scaleEffect(scale)
                 .fixedSize()
         }
-        .padding(.leading, 10).padding(.trailing, 14).padding(.vertical, 10)
+        // CSS padding 10/14/10/10 plus the 1pt border (68pt tall, mosaic at x+11)
+        .padding(.leading, 11).padding(.trailing, 15).padding(.vertical, 11)
         .background(RoundedRectangle(cornerRadius: 22, style: .circular).fill(OB.surface.opacity(0.86)))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .circular).strokeBorder(OB.paper.opacity(0.07), lineWidth: 1))
         .onChange(of: bump) { _, _ in
@@ -445,10 +468,11 @@ private struct OBPlaylistChip: View {
 
 private struct OBMosaicCell: View {
     let art: String
+    var height: CGFloat = 22
     @State private var on = false
     var body: some View {
         Image(art).resizable().aspectRatio(contentMode: .fill)
-            .frame(width: 22, height: 22).clipped()
+            .frame(width: 22, height: height).clipped()
             .scaleEffect(on ? 1 : 0.4)
             .opacity(on ? 1 : 0)
             .onAppear { withAnimation(OB.spring(300, 18)) { on = true } }

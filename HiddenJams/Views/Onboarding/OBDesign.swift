@@ -673,6 +673,8 @@ struct OBCTAStyle: ButtonStyle {
             )
             .contentShape(Capsule())
             .scaleEffect(configuration.isPressed && enabled ? 0.97 : 1)
+            // CSS opacity fades the button as one layer (dark label stays dark).
+            .compositingGroup()
             .opacity(enabled ? 1 : 0.38)
             .animation(OB.spring(420, 32), value: configuration.isPressed)
             .animation(OB.spring(420, 32), value: enabled)
