@@ -143,64 +143,100 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         pending.removeAll()
     }
 
-    /// Shows a state, captures motion frames at each offset (s), then the settled frame.
-    private func capture(_ name: String, motion: [Double], settled: Double) async {
-        guard attempt(name) else { return }
-        defer { done(name) }
-        await show(name)
-        let t0 = Date()
-        for t in motion {
-            await spin(until: t0.addingTimeInterval(t))
-            emit("motion/\(name)_t\(String(format: "%05.2f", t)).jpg", settled: false)
+    /// One capture: a fixture name, motion offsets (s) and the settle time
+    /// (same names, offsets and settle times as shoot_proto_device.py).
+    private struct Shot { let name: String; var motion: [Double] = []; let settled: Double; var file: String? = nil }
+
+    private static var shots: [Shot] {
+        var list: [Shot] = [
+            Shot(name: "01-intro", motion: [0.4, 0.8, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 6.0),
+            Shot(name: "02-keep", motion: [0.5, 0.9, 1.1, 1.3, 1.5, 1.7, 1.9, 2.2, 2.6, 3.0, 3.5, 4.0, 5.0, 6.0, 7.5], settled: 8.6),
+            Shot(name: "03-rarity", motion: [0.3, 0.6, 0.9, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 5.0),
+            Shot(name: "04a-mood-none", motion: [0.3], settled: 2.0),
+            Shot(name: "04-mood", settled: 2.0),
+            Shot(name: "05-connect", motion: [0.4, 1.2, 2.0], settled: 3.5),
+            Shot(name: "07-genres", motion: [0.2, 0.5, 0.8], settled: 3.0),
+            Shot(name: "08-rarity", motion: [0.2, 0.5, 0.9, 1.4], settled: 3.0),
+            Shot(name: "09-artists", motion: [0.3, 0.6], settled: 3.0),
+            Shot(name: "10-deepest", motion: [0.3, 0.6], settled: 3.0),
+            Shot(name: "10-deepest-spotify", settled: 3.0),
+            Shot(name: "10-deepest-nopicks", settled: 3.0),
+            Shot(name: "11-fresh", motion: [0.3], settled: 3.0),
+            Shot(name: "11-fresh-nopicks", settled: 3.0),
+        ]
+        // Loading: the state frozen at each prototype offset (no clock task),
+        // written as static/NAME[_tSS.SS].jpg. Then the live clock versions.
+        let loading: [(String, [Double], Double)] = [("06-loading", [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], 8.7),
+                                                     ("06-loading-apple", [4.2], 8.7),
+                                                     ("06-loading-empty", [1.0, 2.2], 4.1)]
+        for (n, motion, settled) in loading {
+            list.append(Shot(name: "static:\(n):\(Int(settled * 1000))", settled: 1.6, file: "static/\(n).jpg"))
+            for t in motion {
+                list.append(Shot(name: "static:\(n):\(Int(t * 1000))", settled: 1.6,
+                                 file: "static/\(n)_t\(String(format: "%05.2f", t)).jpg"))
+            }
         }
-        await spin(until: t0.addingTimeInterval(settled))
-        emit("\(name).jpg", settled: true)
-        flush()
+        for (n, motion, settled) in loading { list.append(Shot(name: n, motion: motion, settled: settled)) }
+        return list
     }
 
-    func testCaptureOnboardingParity() async throws {
-        try XCTSkipUnless(Self.enabled, "parity captures are off")
-        step("begin")
-        dumpCrashReports()
-        for probe in [String]() where attempt(probe) {
-            await show(probe)
-            await spin(until: Date().addingTimeInterval(0.6))
-            step("ok \(probe)")
-            done(probe)
+    /// Host crashes are intermittent; a crashed shot is retried (up to
+    /// twice) by the next test method after xcodebuild relaunches the host.
+    private func tries(_ key: String) -> Int {
+        let f = Self.progressDir.appendingPathComponent("try-" + key.replacingOccurrences(of: "/", with: "_"))
+        return (try? String(contentsOf: f, encoding: .utf8)).flatMap { Int($0) } ?? 0
+    }
+    private func setTries(_ key: String, _ n: Int) {
+        try? FileManager.default.createDirectory(at: Self.progressDir, withIntermediateDirectories: true)
+        let f = Self.progressDir.appendingPathComponent("try-" + key.replacingOccurrences(of: "/", with: "_"))
+        try? "\(n)".write(to: f, atomically: true, encoding: .utf8)
+    }
+
+    private func run(_ shot: Shot) async {
+        let key = shot.file ?? shot.name
+        let n = tries(key)
+        if n < 0 { return }                       // done
+        if n >= 2 { step("GAVE-UP \(key)"); return }
+        setTries(key, n + 1)
+        await show(shot.name)
+        let t0 = Date()
+        for t in shot.motion {
+            await spin(until: t0.addingTimeInterval(t))
+            emit("motion/\(shot.name)_t\(String(format: "%05.2f", t)).jpg", settled: false)
         }
+        await spin(until: t0.addingTimeInterval(shot.settled))
+        emit(shot.file ?? "\(shot.name).jpg", settled: true)
+        flush()
+        setTries(key, -1)
+    }
+
+    private func runRemaining(_ pass: Int) async throws {
+        try XCTSkipUnless(Self.enabled, "parity captures are off")
+        step("pass \(pass)")
+        if pass == 1 { dumpCrashReports() }
+        let open = Self.shots.filter { let n = tries($0.file ?? $0.name); return n >= 0 && n < 2 }
+        guard !open.isEmpty else { step("nothing left"); return }
         await show("probe-intro")
-        await spin(until: Date().addingTimeInterval(1.5))
-        step("first spin done")
+        await spin(until: Date().addingTimeInterval(1.0))
         if let w = window {
             print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
         }
-        // Same names, offsets and settle times as shoot_proto_device.py.
-        await capture("01-intro", motion: [0.4, 0.8, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 6.0)
-        await capture("02-keep", motion: [0.5, 0.9, 1.1, 1.3, 1.5, 1.7, 1.9, 2.2, 2.6, 3.0, 3.5, 4.0, 5.0, 6.0, 7.5], settled: 8.6)
-        await capture("03-rarity", motion: [0.3, 0.6, 0.9, 1.2, 1.6, 2.0, 2.6, 3.4], settled: 5.0)
-        await capture("04a-mood-none", motion: [0.3], settled: 2.0)
-        await capture("04-mood", motion: [], settled: 2.0)
-        await capture("05-connect", motion: [0.4, 1.2, 2.0], settled: 3.5)
-        await capture("07-genres", motion: [0.2, 0.5, 0.8], settled: 3.0)
-        await capture("08-rarity", motion: [0.2, 0.5, 0.9, 1.4], settled: 3.0)
-        await capture("09-artists", motion: [0.3, 0.6], settled: 3.0)
-        await capture("10-deepest", motion: [0.3, 0.6], settled: 3.0)
-        await capture("10-deepest-spotify", motion: [], settled: 3.0)
-        await capture("10-deepest-nopicks", motion: [], settled: 3.0)
-        await capture("11-fresh", motion: [0.3], settled: 3.0)
-        await capture("11-fresh-nopicks", motion: [], settled: 3.0)
-        await capture("probe-loading-static", motion: [], settled: 1.5)
-        await capture("06-loading", motion: [0.3, 0.8, 1.5, 2.5, 3.4, 4.2, 5.2, 6.5, 7.8], settled: 8.7)
-        await capture("06-loading-apple", motion: [4.2], settled: 8.7)
-        await capture("06-loading-empty", motion: [1.0, 2.2], settled: 4.1)
-        await capture("probe-dyn-a", motion: [], settled: 1.2)
-        await capture("probe-dyn-c", motion: [], settled: 1.2)
-        await capture("probe-dyn-b", motion: [], settled: 1.2)
-        OnboardingParityFixtures.muteAnnouncements = false
+        for shot in Self.shots { await run(shot) }
         window?.isHidden = true
         window = nil
-        print("HJSNAP-DONE")
+        print("HJSNAP-DONE pass \(pass)")
     }
+
+    func testCapture01() async throws { try await runRemaining(1) }
+    func testCapture02() async throws { try await runRemaining(2) }
+    func testCapture03() async throws { try await runRemaining(3) }
+    func testCapture04() async throws { try await runRemaining(4) }
+    func testCapture05() async throws { try await runRemaining(5) }
+    func testCapture06() async throws { try await runRemaining(6) }
+    func testCapture07() async throws { try await runRemaining(7) }
+    func testCapture08() async throws { try await runRemaining(8) }
+    func testCapture09() async throws { try await runRemaining(9) }
+    func testCapture10() async throws { try await runRemaining(10) }
 }
 
 

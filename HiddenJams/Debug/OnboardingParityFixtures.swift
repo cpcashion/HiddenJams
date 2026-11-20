@@ -167,6 +167,14 @@ enum OnboardingParityFixtures {
                 try? await Task.sleep(for: .milliseconds(300))
                 OnboardingParityFixtures.log("HJSNAP-STEP \(name) survived")
             }, autoReveal: false)
+        case let n where n.hasPrefix("static:"):
+            // "static:06-loading-apple:4200" = the loading state frozen at t ms
+            // (no clock task); fallback if the live clock can't run in the host.
+            let parts = n.split(separator: ":")
+            let base = parts.count > 1 ? String(parts[1]) : "06-loading"
+            let t = parts.count > 2 ? Double(parts[2]) ?? 0 : 0
+            TasteProfileFlowContent(model: applied(t, apple: base.hasSuffix("apple"), empty: base.hasSuffix("empty")),
+                                    picks: ordered, onFinish: {}, start: nil, autoReveal: false)
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
