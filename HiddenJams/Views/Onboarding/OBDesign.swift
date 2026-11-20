@@ -819,22 +819,30 @@ struct OBMarquee: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let list = items + items
-        let total = CGFloat(list.count) * cover + CGFloat(list.count - 1) * gap
+        // CSS: two copies in a row sliding 0 → -50% (one copy per cycle).
+        // Each cover is offset on its own from x = 0 so nothing sits far
+        // outside the screen (SwiftUI culls far-offscreen layout).
+        let step = cover + gap
+        let period = CGFloat(items.count) * step
         TimelineView(.animation(paused: reduceMotion)) { tl in
             let t = tl.date.timeIntervalSince(start)
             let f = CGFloat((t / duration).truncatingRemainder(dividingBy: 1))
-            let x = -total / 2 * (reverse ? 1 - f : f)
-            HStack(spacing: gap) {
-                ForEach(Array(list.enumerated()), id: \.offset) { _, tr in
-                    OBCover(art: tr.art, size: cover, radius: radius)
-                        .obShadow(RoundedRectangle(cornerRadius: radius), color: shadow ? .black.opacity(0.7) : .clear,
-                                  y: 10, blur: 24, spread: -10)
+            let shift = period * (reverse ? 1 - f : f)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, tr in
+                    let x0 = (CGFloat(i) * step - shift).truncatingRemainder(dividingBy: period)
+                    let x = x0 < 0 ? x0 + period : x0
+                    ForEach([x, x - period, x + period], id: \.self) { xi in
+                        if xi > -step && xi < period + step {
+                            OBCover(art: tr.art, size: cover, radius: radius)
+                                .obShadow(RoundedRectangle(cornerRadius: radius), color: shadow ? .black.opacity(0.7) : .clear,
+                                          y: 10, blur: 24, spread: -10)
+                                .offset(x: xi)
+                        }
+                    }
                 }
             }
-            .fixedSize()
-            .offset(x: x)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(height: cover)
         .clipped()
