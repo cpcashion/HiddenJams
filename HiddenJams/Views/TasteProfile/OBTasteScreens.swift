@@ -570,7 +570,7 @@ struct OBFreshChapter: View {
                   size: 17)
                 .padding(.top, 14).obRise(0.2)
             OBStartsWith(picks: picks, max: 8, left: true)
-                .padding(.top, 22).obRise(0.35)
+                .padding(.top, 22 + 12).obRise(0.35) // .starts.left margin 22 + .starts padding 12
         }
     }
 }
