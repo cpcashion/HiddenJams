@@ -15,6 +15,8 @@ import SwiftUI
 
 enum OnboardingParityFixtures {
     static var muteAnnouncements = false
+    /// When the parity test put the current screen on screen (scripted screens time from here).
+    static var epoch: Date?
     static func log(_ s: String) { print(s); fflush(stdout) }
 
     static let picks: Set<String> = ["soul", "jazz", "funk", "ambient"]

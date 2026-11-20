@@ -275,7 +275,12 @@ struct OBKeepScreen: View {
         guard !reduceMotion else { return }
         // Waits are scheduled against the script's start, like the
         // prototype's timeline, so a slow frame never delays later steps.
+        #if DEBUG
+        // Parity captures pin the timeline to the moment the screen was shown.
+        let start = OnboardingParityFixtures.epoch ?? Date()
+        #else
         let start = Date()
+        #endif
         var due = 0.0
         func wait(_ ms: Int) async -> Bool {
             due += Double(ms) / 1000
