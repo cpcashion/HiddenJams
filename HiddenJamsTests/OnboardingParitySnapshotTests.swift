@@ -101,30 +101,41 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         print(String(format: "HJSNAP-PERF spin %.2fs iters=%d worst=%.0fms", Date().timeIntervalSince(began), iters, worst * 1000))
     }
 
+    /// Frames are rendered at their offsets but written out after the
+    /// state is done, so slow logging never delays the next frame.
+    private var pending: [(file: String, image: UIImage, settled: Bool, size: CGSize)] = []
+
     private func emit(_ file: String, settled: Bool) {
         guard let w = window else { return }
         let e0 = Date()
-        defer { print(String(format: "HJSNAP-PERF emit %@ %.0fms", file, Date().timeIntervalSince(e0) * 1000)) }
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = settled ? 3 : 1.5
         fmt.opaque = true
         let img = UIGraphicsImageRenderer(bounds: w.bounds, format: fmt).image { _ in
             _ = w.drawHierarchy(in: w.bounds, afterScreenUpdates: true)
         }
-        guard let data = img.jpegData(compressionQuality: settled ? 0.92 : 0.8) else {
-            print("HJSNAP-FAIL \(file)"); return
+        pending.append((file, img, settled, w.bounds.size))
+        print(String(format: "HJSNAP-PERF draw %@ %.0fms", file, Date().timeIntervalSince(e0) * 1000))
+    }
+
+    private func flush() {
+        for p in pending {
+            guard let data = p.image.jpegData(compressionQuality: p.settled ? 0.92 : 0.8) else {
+                print("HJSNAP-FAIL \(p.file)"); continue
+            }
+            let b64 = data.base64EncodedString()
+            var lines = ["HJSNAP-BEGIN \(p.file) \(data.count) \(Int(p.size.width))x\(Int(p.size.height))"]
+            var i = 0, idx = b64.startIndex
+            while idx < b64.endIndex {
+                let end = b64.index(idx, offsetBy: 6000, limitedBy: b64.endIndex) ?? b64.endIndex
+                lines.append("HJSNAP|\(p.file)|\(i)|\(b64[idx..<end])")
+                idx = end; i += 1
+            }
+            lines.append("HJSNAP-END \(p.file) \(i)")
+            print(lines.joined(separator: "\n"))
+            fflush(stdout)
         }
-        let b64 = data.base64EncodedString()
-        var lines = ["HJSNAP-BEGIN \(file) \(data.count) \(Int(w.bounds.width))x\(Int(w.bounds.height))"]
-        var i = 0, idx = b64.startIndex
-        while idx < b64.endIndex {
-            let end = b64.index(idx, offsetBy: 6000, limitedBy: b64.endIndex) ?? b64.endIndex
-            lines.append("HJSNAP|\(file)|\(i)|\(b64[idx..<end])")
-            idx = end; i += 1
-        }
-        lines.append("HJSNAP-END \(file) \(i)")
-        print(lines.joined(separator: "\n"))
-        fflush(stdout)
+        pending.removeAll()
     }
 
     /// Shows a state, captures motion frames at each offset (s), then the settled frame.
@@ -139,6 +150,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         }
         spin(until: t0.addingTimeInterval(settled))
         emit("\(name).jpg", settled: true)
+        flush()
     }
 
     func testCaptureOnboardingParity() throws {
