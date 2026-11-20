@@ -194,7 +194,9 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return list
     }
     /// Shots to capture this run (empty = all).
-    private static let only: [String] = ["static-keep", "11-fresh", "10-deepest"]
+    private static let only: [String] = ["static-keep", "11-fresh", "10-deepest",
+                                         "static:06-loading:8700", "static:06-loading-apple:8700", "static:06-loading-empty:4100",
+                                         "11-fresh-nopicks", "10-deepest-nopicks", "10-deepest-spotify"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.

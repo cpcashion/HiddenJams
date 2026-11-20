@@ -436,11 +436,8 @@ private struct OBPlaylistChip: View {
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .circular))
 
             VStack(alignment: .leading, spacing: 2) {
-                // prototype line boxes: 20pt and 17pt
                 Text("Hidden Jams").font(.system(size: 15, weight: .semibold)).foregroundStyle(OB.paper)
-                    .frame(height: 20)
                 Text("Playlist in your music app").font(.system(size: 12.5)).foregroundStyle(OB.paper).opacity(0.55)
-                    .frame(height: 17)
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -448,7 +445,6 @@ private struct OBPlaylistChip: View {
             (Text("\(kept.count)").fontWeight(.bold) + Text(" saved"))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(OB.ink)
-                .frame(height: 18) // prototype .pl-n line box (pill 30pt tall)
                 .padding(.vertical, 6).padding(.horizontal, 12)
                 .background(Capsule().fill(OB.lime))
                 .scaleEffect(scale)

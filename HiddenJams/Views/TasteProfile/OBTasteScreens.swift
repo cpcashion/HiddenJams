@@ -193,7 +193,6 @@ private struct OBStageRow: View {
                     .transition(.identity)
             }
         }
-        .frame(minHeight: 20) // .ln line box: rows sit 27pt apart with the 7pt gap
         .opacity(line.state == .wait ? 0.3 : line.state == .run ? 1 : 0.78)
         .animation(.easeInOut(duration: 0.3), value: line.state)
         .accessibilityElement(children: .combine)
@@ -240,7 +239,6 @@ private struct OBStartsWith: View {
         let colors = Theme.Colors.genreColors(for: shown)
         VStack(alignment: left ? .leading : .center, spacing: 9) {
             OBMono(text: "Starting with", size: 9.5, opacity: 0.5)
-                .offset(y: left ? -2 : 0) // measured: label sat 2.3pt low on 11
             if shown.isEmpty {
                 Text("a bit of everything").font(.system(size: 14)).foregroundStyle(OB.paper).opacity(0.75)
             } else {
@@ -280,7 +278,7 @@ struct OBGenresChapter: View {
             }
             .padding(.top, 22)
             OBSub(text: "That’s most of your library. We’ll still dig for the unexpected.", maxCh: 32)
-                .padding(.top, 10).obRise(0.6) // measured: 12 sat 2.5pt low
+                .padding(.top, 10).obRise(0.6) // measured 2.5pt low at 12 (Cabinet text + 15pt pill line boxes, font-independent)
         }
     }
 }
@@ -492,7 +490,7 @@ struct OBDeepestChapter: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 28)
 
-            VStack(spacing: 4) { // measured: 2 put the artist line 2.4pt high
+            VStack(spacing: 2) {
                 Text(cut.title).font(.system(size: 17, weight: .semibold))
                 Text(cut.artistName).font(.system(size: 14)).opacity(0.6)
             }
@@ -505,7 +503,7 @@ struct OBDeepestChapter: View {
 
             OBSub(text: "Hardly anyone has heard it. You have.", maxCh: 32, centered: true)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 13) // with the 4pt gap above: matches the 3.3pt-high measurement
+                .padding(.top, 12)
                 .obRise(0.8)
 
             Spacer(minLength: 12)
