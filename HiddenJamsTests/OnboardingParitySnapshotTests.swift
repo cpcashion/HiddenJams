@@ -79,11 +79,20 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         step("window ready")
         window?.rootViewController = hc
         window?.makeKeyAndVisible()
-        step("visible")
+        step("visible scene=\(scene.activationState.rawValue) app=\(UIApplication.shared.applicationState.rawValue)")
     }
 
     private func spin(until t: Date) {
-        while Date() < t { RunLoop.main.run(until: min(t, Date().addingTimeInterval(0.01))) }
+        // On the CI simulator the host scene isn't foreground-active, so
+        // display links (SwiftUI animations, TimelineView) barely tick.
+        // A layout pass makes the hosting view render at the current time.
+        while Date() < t {
+            if let v = window?.rootViewController?.view {
+                v.setNeedsLayout()
+                v.layoutIfNeeded()
+            }
+            RunLoop.main.run(until: min(t, Date().addingTimeInterval(1.0 / 60)))
+        }
     }
 
     private func emit(_ file: String, settled: Bool) {
