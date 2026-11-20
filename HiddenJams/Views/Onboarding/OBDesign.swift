@@ -715,20 +715,81 @@ struct OBBrandTile: View {
     }
 }
 
+/// Official native-brand connect buttons (Chris: overrides the prototype's
+/// lime pill + logo tile for these two buttons only).
+///
+/// Spotify — Spotify Design & Branding Guidelines
+/// (developer.spotify.com/documentation/design): "Using our colors" →
+/// Spotify Green #1ED760 fill; "Using our logo" → on a non-black/white
+/// background use the monochrome logo, black on light colours →
+/// unmodified Spotify_Primary_Logo_RGB_Black.png (2024 icon kit) at 24pt
+/// (≥21px "Minimum size"), never rotated/stretched ("Logo misuse");
+/// "Legibility" exclusion zone ½ icon height = 12pt (gap to text 12pt,
+/// 16pt above/below). Platform default sans-serif ("Fonts"). The guide has
+/// no login-button spec, so the wording is plain text, not the logo in a
+/// sentence.
+///
+/// Apple Music — Apple Music Identity Guidelines
+/// (marketing.services.apple/apple-music-identity-guidelines): badges and
+/// lockups carry a fixed "Listen on / Watch on / Pre-add on" message for
+/// linking to content (1.2, 2.2), may not be edited (1.7, 2.7), and a
+/// lockup may not sit next to other services' badges (2.3), so neither fits
+/// an account-connect button. "Apple Music Icon" → the unmodified colour
+/// icon (Apple_Music_Icon_RGB_sm_073120.svg, preferred version) on a
+/// high-contrast background, "Apple Music" in English, never altered.
+/// Guideline silent on buttons → conservative native choice: Apple's own
+/// white system-button style for dark backgrounds (as Sign in with Apple's
+/// white style), black SF semibold label.
 struct OBBrandButton: View {
     let brand: OBBrandTile.Brand
     var busy = false
+    /// Compact (32pt) variant for settings rows; label "Connect".
+    var compact = false
     let action: () -> Void
+
+    static let spotifyGreen = Color(red: 30 / 255, green: 215 / 255, blue: 96 / 255) // #1ED760
+
+    private var title: String {
+        if compact { return "Connect" }
+        return brand == .spotify ? "Continue with Spotify" : "Continue with Apple Music"
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                OBBrandTile(brand: brand)
-                Text(brand == .spotify ? "Continue with Spotify" : "Continue with Apple Music")
-                if busy { ProgressView().tint(OB.ink).padding(.leading, 4) }
+            HStack(spacing: compact ? 11 : 12) {
+                Group {
+                    if brand == .spotify {
+                        Image("brand-spotify-icon-black").resizable().interpolation(.high)
+                    } else {
+                        Image("brand-applemusic-icon").resizable().interpolation(.high)
+                    }
+                }
+                .scaledToFit()
+                .frame(width: compact ? 21 : 24, height: compact ? 21 : 24)
+                .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: compact ? 13 : 17, weight: .semibold))
+                    .lineLimit(1)
+                if busy { ProgressView().tint(.black) }
             }
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, compact ? 11 : 20)
+            .frame(maxWidth: compact ? nil : .infinity)
+            .frame(height: compact ? 32 : 56)
+            .background(Capsule().fill(brand == .spotify ? Self.spotifyGreen : Color.white))
+            .contentShape(Capsule())
         }
-        .buttonStyle(OBCTAStyle(brand: true))
+        .buttonStyle(OBBrandPressStyle())
         .disabled(busy)
+        .accessibilityLabel(brand == .spotify ? "Continue with Spotify" : "Continue with Apple Music")
+    }
+}
+
+private struct OBBrandPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }
 

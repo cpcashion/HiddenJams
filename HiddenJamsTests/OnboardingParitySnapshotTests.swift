@@ -196,7 +196,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return list
     }
     /// Shots to capture this run (empty = all).
-    private static let only: [String] = ["09-artists", "09-artists-apple", "07-genres"]
+    private static let only: [String] = ["05-connect"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.

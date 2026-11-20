@@ -62,24 +62,22 @@ struct LoginView: View {
                 // Connect buttons
                 VStack(spacing: Theme.Spacing.md) {
                     // Spotify button
-                    connectButton(
-                        title: sourceManager.spotifyConnected ? "Spotify Connected ✓" : "Connect with Spotify",
-                        icon: "music.note.list",
-                        disabled: sourceManager.spotifyConnected,
-                        action: {
+                    if sourceManager.spotifyConnected {
+                        connectedLabel("Spotify connected ✓")
+                    } else {
+                        OBBrandButton(brand: .spotify) {
                             withAnimation(.spring()) {
                                 authManager.startAuth()
                             }
                         }
-                    )
+                    }
 
                     // Apple Music button
-                    connectButton(
-                        title: sourceManager.appleMusicConnected ? "Apple Music Connected ✓" : "Connect with Apple Music",
-                        icon: "music.note", // TODO(brand): official Apple Music badge
-                        disabled: sourceManager.appleMusicConnected,
-                        action: { connectAppleMusic() }
-                    )
+                    if sourceManager.appleMusicConnected {
+                        connectedLabel("Apple Music connected ✓")
+                    } else {
+                        OBBrandButton(brand: .appleMusic, busy: isConnectingAppleMusic) { connectAppleMusic() }
+                    }
 
                     if sourceManager.hasConnectedSource {
                         Text("You can connect the other service too — we'll blend both libraries.")
@@ -124,31 +122,12 @@ struct LoginView: View {
 
     // MARK: - Connect Button
 
-    private func connectButton(
-        title: String,
-        icon: String,
-        disabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Spacing.md) {
-                Image(systemName: icon)
-                    .font(.title2)
-
-                Text(title)
-                    .font(Theme.Typography.headline)
-            }
-            .foregroundColor(.white)
+    private func connectedLabel(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Typography.headline)
+            .foregroundColor(Theme.Colors.textSecondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.md)
-            .background(Color.clear)
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.CornerRadius.lg)
-                    .stroke(Color.white, lineWidth: 1.5)
-            )
-            .opacity(disabled ? 0.5 : 1.0)
-        }
-        .disabled(disabled)
+            .frame(height: 56)
     }
 
     // MARK: - Apple Music
