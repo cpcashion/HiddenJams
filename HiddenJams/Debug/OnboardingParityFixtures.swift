@@ -119,9 +119,28 @@ enum OnboardingParityFixtures {
         case "probe-dots": OBPageDots(count: 5, index: 0)
         case "probe-spotify": OBBrandTile(brand: .spotify)
         case "probe-apple": OBBrandTile(brand: .appleMusic)
+        case "probe-dock": OBMetricsReader { OBDock(dots: (count: 5, index: 0)) { OBNextButton {} } }
+        case "probe-docknil": OBMetricsReader { OBDock(dots: nil) { OBNextButton {} } }
+        case "probe-pager": OBMetricsReader {
+            ZStack { OBIntroScreen().id(0).transition(.obPage(1)) }
+                .contentShape(Rectangle())
+                .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { _ in })
+        }
+        case "probe-onb-env": probeOnboardingWithEnv()
+        case "probe-flow": reveal(page: 0, picks: ordered)
+        case "probe-onb": OnboardingView(debugStartPage: 0, picks: [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
         default: Color.red
         }
+    }
+
+    private static func probeOnboardingWithEnv() -> some View {
+        let auth = SpotifyAuthManager()
+        let apple = AppleMusicService()
+        return OnboardingView(debugStartPage: 0, picks: [])
+            .environmentObject(auth)
+            .environmentObject(apple)
+            .environmentObject(MusicSourceManager(spotifyAuth: auth, appleMusic: apple))
     }
 
     private static func reveal(page: Int, picks: [String], empty: Bool = false, spotify: Bool? = nil) -> some View {

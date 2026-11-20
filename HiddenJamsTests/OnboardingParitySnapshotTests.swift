@@ -26,6 +26,34 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return FileManager.default.fileExists(atPath: marker.path)
     }
 
+    /// Survives a crash + relaunch: a state that crashed is skipped next time.
+    private static var progressDir: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent(".hjsnap-progress")
+    }
+    private func attempt(_ name: String) -> Bool {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.progressDir, withIntermediateDirectories: true)
+        let f = Self.progressDir.appendingPathComponent(name)
+        if fm.fileExists(atPath: f.path) { step("CRASHED-BEFORE \(name) (skipping)"); return false }
+        fm.createFile(atPath: f.path, contents: Data())
+        return true
+    }
+    private func done(_ name: String) { try? FileManager.default.removeItem(at: Self.progressDir.appendingPathComponent(name)) }
+
+    /// Prints the newest HiddenJams crash report's crashed-thread frames.
+    private func dumpCrashReports() {
+        let dirs = ["/Users/runner/Library/Logs/DiagnosticReports", NSHomeDirectory() + "/Library/Logs/DiagnosticReports"]
+        for d in dirs {
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: d) else { step("no dir \(d)"); continue }
+            for f in files.sorted() where f.hasPrefix("HiddenJams") {
+                guard let text = try? String(contentsOfFile: d + "/" + f, encoding: .utf8) else { continue }
+                step("CRASHREPORT \(f) \(text.count)")
+                for line in text.split(separator: "\n").prefix(400) { print("HJCRASH \(line.prefix(600))") }
+            }
+        }
+        fflush(stdout)
+    }
+
     private func step(_ s: String) { print("HJSNAP-STEP \(s)"); fflush(stdout) }
 
     private func show(_ name: String) {
@@ -78,6 +106,8 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     /// Shows a state, captures motion frames at each offset (s), then the settled frame.
     private func capture(_ name: String, motion: [Double], settled: Double) {
+        guard attempt(name) else { return }
+        defer { done(name) }
         show(name)
         let t0 = Date()
         for t in motion {
@@ -91,13 +121,14 @@ final class OnboardingParitySnapshotTests: XCTestCase {
     func testCaptureOnboardingParity() throws {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("begin")
-        for probe in ["probe-font", "probe-title", "probe-cover", "probe-sub", "probe-cta", "probe-dots", "probe-spotify",
-                      "probe-apple", "probe-marquee", "probe-glow", "probe-intro"] {
+        dumpCrashReports()
+        for probe in ["probe-dock", "probe-docknil", "probe-pager", "probe-onb-env", "probe-flow", "probe-onb"] where attempt(probe) {
             show(probe)
-            spin(until: Date().addingTimeInterval(0.5))
+            spin(until: Date().addingTimeInterval(0.6))
             step("ok \(probe)")
+            done(probe)
         }
-        show("01-intro")
+        show("probe-intro")
         spin(until: Date().addingTimeInterval(1.5))
         step("first spin done")
         if let w = window {
