@@ -111,6 +111,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = settled ? 3 : 1.5
         fmt.opaque = true
+        fmt.preferredRange = .standard // sRGB, like the prototype captures (not P3)
         let img = UIGraphicsImageRenderer(bounds: w.bounds, format: fmt).image { _ in
             _ = w.drawHierarchy(in: w.bounds, afterScreenUpdates: true)
         }
