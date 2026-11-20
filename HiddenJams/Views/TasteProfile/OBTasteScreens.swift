@@ -125,7 +125,7 @@ struct OBLoadingScreen: View {
         }
         .onChange(of: model.lines.filter(\.done).count) {
             #if DEBUG
-            print("HJSNAP-STEP announce muted=\(OnboardingParityFixtures.muteAnnouncements)")
+            OnboardingParityFixtures.log("HJSNAP-STEP announce muted=\(OnboardingParityFixtures.muteAnnouncements)")
             if OnboardingParityFixtures.muteAnnouncements { return }
             #endif
             if let last = model.lines.last(where: \.done) {

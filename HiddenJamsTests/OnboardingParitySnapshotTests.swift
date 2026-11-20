@@ -156,7 +156,6 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     func testCaptureOnboardingParity() throws {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
-        setvbuf(stdout, nil, _IONBF, 0)
         step("begin")
         dumpCrashReports()
         for probe in [String]() where attempt(probe) {

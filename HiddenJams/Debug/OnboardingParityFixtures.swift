@@ -15,6 +15,7 @@ import SwiftUI
 
 enum OnboardingParityFixtures {
     static var muteAnnouncements = false
+    static func log(_ s: String) { print(s); fflush(stdout) }
 
     static let picks: Set<String> = ["soul", "jazz", "funk", "ambient"]
 
@@ -53,20 +54,20 @@ enum OnboardingParityFixtures {
     static func applied(_ t: Double) -> TasteProfileFlowModel {
         let m = TasteProfileFlowModel()
         apply(t, m, apple: false, empty: false)
-        print("HJSNAP-STEP applied \(t) lines=\(m.lines.count)")
+        OnboardingParityFixtures.log("HJSNAP-STEP applied \(t) lines=\(m.lines.count)")
         return m
     }
 
     static func runLoadingClock(_ model: TasteProfileFlowModel, apple: Bool, empty: Bool) async {
         let start = Date()
         var tick = 0
-        print("HJSNAP-STEP clock start")
+        OnboardingParityFixtures.log("HJSNAP-STEP clock start")
         while !Task.isCancelled {
             let t = Date().timeIntervalSince(start) * 1000
-            if tick < 4 || tick % 30 == 0 { print("HJSNAP-STEP tick \(tick) t=\(Int(t)) main=\(Thread.isMainThread)") }
+            if tick < 4 || tick % 30 == 0 { OnboardingParityFixtures.log("HJSNAP-STEP tick \(tick) t=\(Int(t)) main=\(Thread.isMainThread)") }
             tick += 1
             apply(t, model, apple: apple, empty: empty)
-            if tick < 4 { print("HJSNAP-STEP tick applied") }
+            if tick < 4 { OnboardingParityFixtures.log("HJSNAP-STEP tick applied") }
             try? await Task.sleep(for: .milliseconds(16))
         }
     }
@@ -158,11 +159,11 @@ enum OnboardingParityFixtures {
                                     picks: ordered, onFinish: {}, start: { m in
                 muteAnnouncements = name != "probe-dyn-b"
                 try? await Task.sleep(for: .milliseconds(300))
-                print("HJSNAP-STEP \(name) apply")
+                OnboardingParityFixtures.log("HJSNAP-STEP \(name) apply")
                 apply(1000, m, apple: false, empty: false)
-                print("HJSNAP-STEP \(name) applied")
+                OnboardingParityFixtures.log("HJSNAP-STEP \(name) applied")
                 try? await Task.sleep(for: .milliseconds(300))
-                print("HJSNAP-STEP \(name) survived")
+                OnboardingParityFixtures.log("HJSNAP-STEP \(name) survived")
             }, autoReveal: false)
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
