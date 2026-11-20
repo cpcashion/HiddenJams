@@ -168,7 +168,9 @@ final class ParityCrashDumpTests: XCTestCase {
         let d = "/Users/runner/Library/Logs/DiagnosticReports"
         let files = (try? FileManager.default.contentsOfDirectory(atPath: d)) ?? []
         print("HJCRASH-DIR \(files.count) files")
-        for f in files.sorted() where f.hasPrefix("HiddenJams") {
+        for f in files.sorted() {
+            print("HJCRASH-NAME \(f)")
+            guard f.lowercased().contains("hiddenjams") || f.hasSuffix(".ips") else { continue }
             guard let text = try? String(contentsOfFile: d + "/" + f, encoding: .utf8) else { continue }
             print("HJCRASH-FILE \(f)")
             for line in text.split(separator: "\n") { print("HJCRASH \(line.prefix(4000))") }

@@ -90,12 +90,12 @@ enum OnboardingParityFixtures {
     static func screen(_ name: String) -> some View {
         let ordered = TasteCopy.orderedPicks(picks)
         switch name {
-        case "01-intro": OnboardingView(debugStartPage: 0, picks: [])
-        case "02-keep": OnboardingView(debugStartPage: 1, picks: [])
-        case "03-rarity": OnboardingView(debugStartPage: 2, picks: [])
-        case "04a-mood-none": OnboardingView(debugStartPage: 3, picks: [])
-        case "04-mood": OnboardingView(debugStartPage: 3, picks: picks)
-        case "05-connect": OnboardingView(debugStartPage: 4, picks: picks)
+        case "01-intro": pager(0, [])
+        case "02-keep": pager(1, [])
+        case "03-rarity": pager(2, [])
+        case "04a-mood-none": pager(3, [])
+        case "04-mood": pager(3, ordered)
+        case "05-connect": pager(4, ordered)
         case "06-loading", "06-loading-apple", "06-loading-empty":
             let apple = name.hasSuffix("apple"), empty = name.hasSuffix("empty")
             TasteProfileFlowContent(model: TasteProfileFlowModel(), picks: ordered, onFinish: {},
@@ -126,21 +126,16 @@ enum OnboardingParityFixtures {
                 .contentShape(Rectangle())
                 .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { _ in })
         }
-        case "probe-onb-env": probeOnboardingWithEnv()
         case "probe-flow": reveal(page: 0, picks: ordered)
-        case "probe-onb": OnboardingView(debugStartPage: 0, picks: [])
+        case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
         default: Color.red
         }
     }
 
-    private static func probeOnboardingWithEnv() -> some View {
-        let auth = SpotifyAuthManager()
-        let apple = AppleMusicService()
-        return OnboardingView(debugStartPage: 0, picks: [])
-            .environmentObject(auth)
-            .environmentObject(apple)
-            .environmentObject(MusicSourceManager(spotifyAuth: auth, appleMusic: apple))
+    private static func pager(_ page: Int, _ picks: [String]) -> some View {
+        OnboardingPager(startPage: page, initialPicks: picks, connectingApple: false, connectError: .constant(nil),
+                        onSpotify: { _ in }, onApple: { _ in }, persist: { _ in })
     }
 
     private static func reveal(page: Int, picks: [String], empty: Bool = false, spotify: Bool? = nil) -> some View {

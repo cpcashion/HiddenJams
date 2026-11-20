@@ -19,31 +19,79 @@ struct OnboardingView: View {
     @EnvironmentObject var sourceManager: MusicSourceManager
     @Binding var isPresented: Bool
 
-    @State private var page: Int
-    @State private var direction: CGFloat = 1
-    @State private var genrePicks: Set<String>
     @State private var isConnectingAppleMusic = false
     @State private var connectError: String?
+
+    var body: some View {
+        OnboardingPager(
+            startPage: 0,
+            initialPicks: TasteCopy.orderedPicks(GenreCatalog.loadSelected() ?? []),
+            connectingApple: isConnectingAppleMusic,
+            connectError: $connectError,
+            onSpotify: { picks in
+                connectError = nil
+                GenreCatalog.saveOnboardingPicks(Set(picks))
+                authManager.startAuth()
+            },
+            onApple: { picks in
+                GenreCatalog.saveOnboardingPicks(Set(picks))
+                connectAppleMusic()
+            },
+            persist: { picks in GenreCatalog.saveOnboardingPicks(Set(picks)) }
+        )
+    }
+
+    private func connectAppleMusic() {
+        isConnectingAppleMusic = true
+        connectError = nil
+        Task {
+            let authorized = await appleMusicService.requestAuthorization()
+            await MainActor.run {
+                isConnectingAppleMusic = false
+                if authorized {
+                    // The taste-profile flow reads the library next.
+                    sourceManager.refresh()
+                } else {
+                    connectError = "Apple Music access was not granted. You can enable it in Settings → Privacy → Media & Apple Music."
+                }
+            }
+        }
+    }
+}
+
+/// The five screens, glow, dots and dock (no service objects needed, so the
+/// DEBUG parity captures render exactly this).
+struct OnboardingPager: View {
+    let connectingApple: Bool
+    @Binding var connectError: String?
+    let onSpotify: ([String]) -> Void
+    let onApple: ([String]) -> Void
+    let persist: ([String]) -> Void
+
+    @State private var page: Int
+    @State private var direction: CGFloat = 1
+    /// Picks, lowercased (the `selectedGenres` set, kept sorted).
+    @State private var picks: [String]
     @State private var pulse = 0
 
     private let pageCount = 5
     private var isConnectPage: Bool { page == pageCount - 1 }
 
-    init(isPresented: Binding<Bool>) {
-        _isPresented = isPresented
-        _page = State(initialValue: 0)
-        _genrePicks = State(initialValue: GenreCatalog.loadSelected() ?? [])
+    init(startPage: Int, initialPicks: [String], connectingApple: Bool, connectError: Binding<String?>,
+         onSpotify: @escaping ([String]) -> Void, onApple: @escaping ([String]) -> Void,
+         persist: @escaping ([String]) -> Void) {
+        _page = State(initialValue: startPage)
+        _picks = State(initialValue: initialPicks)
+        self.connectingApple = connectingApple
+        _connectError = connectError
+        self.onSpotify = onSpotify
+        self.onApple = onApple
+        self.persist = persist
     }
 
-    #if DEBUG
-    /// Parity captures only: open on a given screen with given picks
-    /// (nothing is written to UserDefaults until a pill is tapped).
-    init(debugStartPage: Int, picks: Set<String>) {
-        _isPresented = .constant(true)
-        _page = State(initialValue: debugStartPage)
-        _genrePicks = State(initialValue: picks)
+    private var pickSet: Binding<Set<String>> {
+        Binding(get: { Set(picks) }, set: { picks = $0.map { $0.lowercased() }.sorted() })
     }
-    #endif
 
     var body: some View {
         OBMetricsReader {
@@ -60,30 +108,21 @@ struct OnboardingView: View {
 
                 OBDock(dots: (count: pageCount, index: page), two: isConnectPage) {
                     if isConnectPage {
-                        OBBrandButton(brand: .spotify) {
-                            connectError = nil
-                            GenreCatalog.saveOnboardingPicks(genrePicks)
-                            authManager.startAuth()
-                        }
-                        OBBrandButton(brand: .appleMusic, busy: isConnectingAppleMusic) {
-                            GenreCatalog.saveOnboardingPicks(genrePicks)
-                            connectAppleMusic()
-                        }
+                        OBBrandButton(brand: .spotify) { onSpotify(picks) }
+                        OBBrandButton(brand: .appleMusic, busy: connectingApple) { onApple(picks) }
                     } else {
                         OBNextButton { go(page + 1) }
                     }
                 }
-                .overlay(alignment: .bottom) { errorBanner }
+                errorBanner
             }
         }
-        .ignoresSafeArea(.keyboard)
-        .preferredColorScheme(.dark)
         .onChange(of: page) {
             connectError = nil
             // Also persisted on every pill toggle; nothing picked → key stays unset.
-            GenreCatalog.saveOnboardingPicks(genrePicks)
+            persist(picks)
         }
-        .onChange(of: genrePicks) { _, picks in GenreCatalog.saveOnboardingPicks(picks) }
+        .onChange(of: picks) { persist(picks) }
     }
 
     @ViewBuilder
@@ -92,7 +131,7 @@ struct OnboardingView: View {
         case 0: OBIntroScreen()
         case 1: OBKeepScreen()
         case 2: OBRarityDemoScreen()
-        case 3: OBMoodScreen(picks: $genrePicks, onTap: { pulse += 1 })
+        case 3: OBMoodScreen(picks: pickSet, onTap: { pulse += 1 })
         default: OBConnectScreen()
         }
     }
@@ -134,24 +173,8 @@ struct OnboardingView: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 16).fill(OB.surface.opacity(0.95)))
             .padding(.horizontal, 22)
+            .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, 200)
-        }
-    }
-
-    private func connectAppleMusic() {
-        isConnectingAppleMusic = true
-        connectError = nil
-        Task {
-            let authorized = await appleMusicService.requestAuthorization()
-            await MainActor.run {
-                isConnectingAppleMusic = false
-                if authorized {
-                    // The taste-profile flow reads the library next.
-                    sourceManager.refresh()
-                } else {
-                    connectError = "Apple Music access was not granted. You can enable it in Settings → Privacy → Media & Apple Music."
-                }
-            }
         }
     }
 }
