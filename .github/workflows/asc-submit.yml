@@ -1,0 +1,29 @@
+name: ASC preflight / submit
+
+on:
+  push:
+    branches: [ "asc/submit-1.6.1" ]
+    paths: [ "scripts/asc/**", ".github/workflows/asc-submit.yml" ]
+
+concurrency:
+  group: asc-submit
+  cancel-in-progress: false
+
+jobs:
+  asc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "pyjwt[crypto]" requests
+      - name: Run
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          set -a; . scripts/asc/mode.env; set +a
+          python3 scripts/asc/asc_submit.py
