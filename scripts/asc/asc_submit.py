@@ -24,9 +24,7 @@ WRITE = MODE == "submit"
 REVIEW_VIDEO = os.path.join(ASSETS, "app-review.mp4")
 NOTES_PUBKEY = os.path.join(HERE, "notes_pubkey.pem")
 AGE_ANSWERS = {"datingAndRelationships": False, "sharedLocation": False}
-SPOTIFY_PARA = ("Spotify sign-in is for invited testers only: Spotify limits our app to a small allowlist of accounts. "
-                "Please test with Apple Music, which gives the full experience. If you tap Spotify with a non-invited account, "
-                "the app shows \"Spotify is for invited testers only\" and offers Continue with Apple Music.")
+SPOTIFY_PARA = "Hidden Jams works with Spotify or Apple Music. Pick either during onboarding."
 
 SCREEN_MANIFEST = os.path.join(HERE, "screenshots.json")
 # Manifest format (see screenshots.json):
@@ -348,6 +346,10 @@ else:
             gap("review notes (as they would be submitted) still mention a demo login/sign-in information")
         else:
             print("  NOTES CHECK: no demo-login / sign-in-information mention in notes as submitted")
+        if re.search(r"invited|allow-?list|development mode|dev mode|testers only", final_notes, re.I):
+            gap("review notes (as they would be submitted) contain allowlist / dev-mode / invited-tester wording")
+        else:
+            print("  NOTES CHECK: no allowlist / dev-mode / invited-tester wording")
         demo_change = bool(a.get("demoAccountRequired")) or bool(a.get("demoAccountName")) or bool(a.get("demoAccountPassword"))
         if demo_change:
             print(f"  DEMO PLAN: set demoAccountRequired=false (currently {a.get('demoAccountRequired')}); clear demoAccountName (currently {present(a.get('demoAccountName'))}) and demoAccountPassword (currently {present(a.get('demoAccountPassword'))})")
