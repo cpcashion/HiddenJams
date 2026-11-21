@@ -1,13 +1,21 @@
 {
-  "enabled": false,
-  "_note": "HOLD: final 4-card set from Design (Nov 21 8:51); awaiting Chris on Spotify badges on cards 2-3. Set enabled=true only after confirmed. Replaces whole b80 set (no keeps).",
+  "enabled": true,
+  "_note": "Final 4-card set confirmed by Chris (Spotify badges kept, Nov 21 2:13 PM via Juno). Replaces whole b80 set. Uploads only in MODE=submit.",
   "locales": "all",
   "sets": {
     "APP_IPHONE_67": [
-      {"file": "01-home-1290x2796.png"},
-      {"file": "02-fun-addictive-1290x2796.png"},
-      {"file": "03-best-30-seconds-1290x2796.png"},
-      {"file": "05-stats-1290x2796.png"}
+      {
+        "file": "01-home-1290x2796.png"
+      },
+      {
+        "file": "02-fun-addictive-1290x2796.png"
+      },
+      {
+        "file": "03-best-30-seconds-1290x2796.png"
+      },
+      {
+        "file": "05-stats-1290x2796.png"
+      }
     ]
   }
 }
