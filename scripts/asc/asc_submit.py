@@ -149,6 +149,9 @@ def screenshot_plan(loc_id, L, apply=False):
             else:
                 gap(f"[{L}] {t}: bad manifest entry {e}"); ok = False
         dels = [x for x in shots if x["id"] not in kept_ids]
+        want_names = [(x["attributes"].get("fileName") if k == "keep" else os.path.basename(x)) for k, x in plan]
+        if ok and [x["attributes"].get("fileName") for x in shots] == want_names and all(state_of(x) == "COMPLETE" for x in shots):
+            print(f"     PLAN {t}: already matches manifest, no change"); continue
         print(f"     PLAN {t}: final order = " + ", ".join((x['attributes'].get('fileName') if k == 'keep' else 'NEW ' + os.path.basename(x)) for k, x in plan)
               + f" ; delete {[x['attributes'].get('fileName') for x in dels]}")
         if not ok or not apply or not m.get("enabled"): continue
@@ -182,6 +185,8 @@ def paywall_step(apply=False):
     print(f"  paywall file in branch: {have_file}; current review screenshot: {('present ' + str(state_of(cur))) if cur else 'MISSING'}")
     if not have_file:
         return cur
+    if cur and state_of(cur) == "COMPLETE" and cur["attributes"].get("fileName") == os.path.basename(PAYWALL_FILE):
+        print("  PLAN: paywall review screenshot already uploaded, no change"); return cur
     print("  PLAN: upload paywall-review.png as subscription review screenshot" + (" (replacing existing)" if cur else ""))
     if not apply: return cur
     if cur:
