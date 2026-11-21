@@ -20,7 +20,7 @@ BASE = "https://api.appstoreconnect.apple.com"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 PAYWALL_FILE = os.path.join(ASSETS, "paywall-review.png")
-WRITE = MODE == "submit"
+WRITE = MODE in ("submit", "promo")   # promo writes ONLY promotionalText, then exits
 REVIEW_VIDEO = os.path.join(ASSETS, "app-review.mp4")
 NOTES_PUBKEY = os.path.join(HERE, "notes_pubkey.pem")
 AGE_ANSWERS = {"datingAndRelationships": False, "sharedLocation": False}
@@ -246,6 +246,13 @@ def encrypt_for_box(text):
     ek = pub.encrypt(k, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
     b = lambda x: base64.b64encode(x).decode()
     return _j.dumps({"ek": b(ek), "n": b(n), "ct": b(ct)})
+
+if MODE in ("copy", "promo"):
+    sys.path.insert(0, HERE)
+    import copy_promo
+    if MODE == "copy":
+        copy_promo.copy_audit(get, APP_ID, SUB_ID); sys.exit(0)
+    copy_promo.promo(get, call, APP_ID, [x.strip() for x in os.environ.get("PROMO_VERSIONS", "1.6.1").split(",")])
 
 if MODE == "diag":
     sys.path.insert(0, HERE)
