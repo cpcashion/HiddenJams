@@ -115,7 +115,10 @@ struct MainTabView: View {
         }
         let beforeCount = discoveryEngine.discoveredGems.count
         let token = authManager.accessToken
-        let appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+        // Spotify users fall back to the non-Spotify engine while Spotify
+        // access is limited (invited testers only), so seed it like Apple users.
+        let usesSpotifyDeck = token != nil && !SpotifyAccessMonitor.shared.isLimitedNow
+        let appleSeeds = usesSpotifyDeck ? [] : profileAnalyzer.libraryTracks
         var selectedGenres: Set<String>? = nil
         if let selectedGenresData = UserDefaults.standard.data(forKey: "selectedGenres"),
            let decoded = try? JSONDecoder().decode(Set<String>.self, from: selectedGenresData) {
@@ -169,9 +172,15 @@ struct MainTabView: View {
         let isAppleMusicTrack = track.track.spotifyId?.hasPrefix("itunes:") ?? false
 
         if isAppleMusicTrack {
-            if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName),
-               !success {
-                print("⚠️ Apple Music save failed for '\(track.track.name)': \(message)")
+            if let (success, message) = await saveTrackToAppleMusicPlaylist(track, playlistName: playlistName) {
+                if !success {
+                    print("⚠️ Apple Music save failed for '\(track.track.name)': \(message)")
+                }
+            } else {
+                // Apple Music not connected (e.g. a Spotify user while
+                // Spotify is invited-testers-only gets the non-Spotify deck):
+                // keep the save in the in-app collection.
+                await MainActor.run { SavedGemsStore.shared.save(track) }
             }
             return
         }

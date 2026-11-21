@@ -386,7 +386,7 @@ struct GuaranteedDiscoveryTests {
 
         #expect(!tracks.isEmpty)
         // 200 listeners → pseudo-popularity well under the 15 threshold.
-        #expect(tracks.allSatisfy { $0.popularity < 15 })
+        #expect(tracks.allSatisfy { ($0.popularity ?? Int.max) < 15 })
     }
 
     @Test func listenerCapLadderShape() {

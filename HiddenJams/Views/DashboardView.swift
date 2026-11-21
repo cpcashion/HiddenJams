@@ -17,6 +17,8 @@ struct DashboardView: View {
     
     @State private var showGenreSelection = false
     @State private var showDiscoveryError = false
+    /// Spotify Development Mode: set when this user's Spotify access is limited.
+    @ObservedObject private var spotifyAccess = SpotifyAccessMonitor.shared
     @AppStorage("selectedGenres") private var selectedGenresData: Data = Data()
     
     // Popularity slider state
@@ -52,10 +54,18 @@ struct DashboardView: View {
                         // Header
                         headerView
                         
+                        // Spotify invited-testers-only (Development Mode): this
+                        // user's Spotify account can't use the Web API, so
+                        // offer the one-tap Apple Music path instead of a
+                        // library analysis that can't succeed.
+                        if showsSpotifyEarlyAccess {
+                            spotifyEarlyAccessCard
+                        }
+                        
                         // Analysis needed prompt — also shown when Apple Music
                         // was connected after the last analysis (e.g. a stale
                         // Spotify profile exists but no Apple tracks were read).
-                        if (profileAnalyzer.profile.totalTracksAnalyzed == 0 || needsAppleMusicAnalysis) && !profileAnalyzer.isAnalyzing {
+                        if (profileAnalyzer.profile.totalTracksAnalyzed == 0 || needsAppleMusicAnalysis) && !profileAnalyzer.isAnalyzing && !showsSpotifyEarlyAccess {
                             analyzePromptCard
                         }
                         
@@ -245,6 +255,80 @@ struct DashboardView: View {
         .pastelCard(Theme.Colors.lavender, padding: 24)
     }
     
+    // MARK: - Spotify Invited Testers Only
+
+    private var showsSpotifyEarlyAccess: Bool {
+        spotifyAccess.isLimited && authManager.accessToken != nil
+    }
+
+    private var spotifyEarlyAccessCard: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "music.note.house")
+                .font(.system(size: 36))
+                .foregroundColor(Theme.Colors.plumButton)
+
+            Text(SpotifyAccessGate.limitedTitle)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(Theme.Colors.textOnPastel)
+
+            Text(SpotifyAccessGate.limitedMessage)
+                .font(.system(size: 14))
+                .foregroundColor(Theme.Colors.textOnPastelSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: continueWithAppleMusic) {
+                HStack(spacing: 10) {
+                    Image(systemName: "applelogo")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(SpotifyAccessGate.continueButtonTitle)
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .brandGlass(Theme.Colors.plumButton, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(discoveryEngine.isDiscovering || profileAnalyzer.isAnalyzing)
+            .accessibilityIdentifier("spotifyEarlyAccessContinueAppleMusic")
+        }
+        .pastelCard(Theme.Colors.lavender, padding: 24)
+    }
+
+    /// One tap: connect Apple Music if needed (system prompt), read the
+    /// library if there is one, then run the non-Spotify discovery engine
+    /// (Last.fm + iTunes previews) and open the deck. Works even if Apple
+    /// Music access is declined or the library is empty.
+    private func continueWithAppleMusic() {
+        Task {
+            if !appleMusicService.isAuthorized {
+                _ = await appleMusicService.requestAuthorization()
+            }
+            var appleSeeds = profileAnalyzer.libraryTracks.filter { $0.source == .appleMusic }
+            if appleMusicService.isAuthorized && appleSeeds.isEmpty {
+                await MainActor.run { discoveryEngine.isDiscovering = true }
+                await discoveryEngine.updateProgress("Reading your Apple Music library...")
+                await profileAnalyzer.analyzeAllConnectedSources(spotifyToken: nil)
+                appleSeeds = profileAnalyzer.libraryTracks.filter { $0.source == .appleMusic }
+            }
+            await discoveryEngine.discoverHiddenGems(
+                profile: profileAnalyzer.profile,
+                userTracks: profileAnalyzer.userLibraryTracks.map { $0.id },
+                userLibrary: profileAnalyzer.userLibraryTracks,
+                selectedGenres: selectedGenres.isEmpty ? nil : selectedGenres,
+                token: nil,
+                appleMusicSeeds: appleSeeds,
+                count: 50,
+                popularityOverride: popularitySettings.popularityThreshold,
+                followerOverride: popularitySettings.followerThreshold
+            )
+            if !discoveryEngine.discoveredGems.isEmpty {
+                await MainActor.run { onShowPlayer() }
+            }
+        }
+    }
+
     // MARK: - Analysis Progress
     
     private var analysisProgressCard: some View {
@@ -347,8 +431,10 @@ struct DashboardView: View {
         Button(action: {
             Task {
                 let token = authManager.accessToken
-                // Apple Music-only users seed discovery from their library tracks
-                var appleSeeds = token == nil ? profileAnalyzer.libraryTracks : []
+                // Apple Music-only users (and Spotify users while Spotify is
+                // invited testers only) seed discovery from their library tracks
+                let usesSpotifyDeck = token != nil && !SpotifyAccessMonitor.shared.isLimitedNow
+                var appleSeeds = usesSpotifyDeck ? [] : profileAnalyzer.libraryTracks
 
                 // Self-heal: Apple Music connected but no Apple tracks analyzed
                 // yet (e.g. connected after the last analysis). Analyze first

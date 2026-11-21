@@ -14,6 +14,13 @@ class SpotifyAPIService: ObservableObject {
     
     private let baseURL = "https://api.spotify.com/v1"
     private var cancellables = Set<AnyCancellable>()
+    private let session: URLSession
+    private let accessMonitor: SpotifyAccessMonitor
+
+    init(session: URLSession = .shared, accessMonitor: SpotifyAccessMonitor = .shared) {
+        self.session = session
+        self.accessMonitor = accessMonitor
+    }
     
     // MARK: - User Profile
     
@@ -541,22 +548,23 @@ class SpotifyAPIService: ObservableObject {
     
     // MARK: - Generic Request Handler
     
-    private func makeRequest<T: Decodable>(url: URL, token: String, retryCount: Int = 0) async throws -> T {
+    func makeRequest<T: Decodable>(url: URL, token: String, retryCount: Int = 0) async throws -> T {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
         
-        // Handle Rate Limiting (429)
+        // Handle Rate Limiting (429): capped waits, fail fast on a long
+        // Retry-After (see SpotifyAccessGate.rateLimitWait).
         if httpResponse.statusCode == 429 {
-            if retryCount < 3 {
-                let retryAfter = Int(httpResponse.value(forHTTPHeaderField: "Retry-After") ?? "1") ?? 1
-                print("Rate limited. Waiting \(retryAfter) seconds...")
-                try await Task.sleep(nanoseconds: UInt64(retryAfter + 1) * 1_000_000_000)
+            let header = httpResponse.value(forHTTPHeaderField: "Retry-After")
+            if let wait = SpotifyAccessGate.rateLimitWait(retryAfterHeader: header, attempt: retryCount) {
+                print("Rate limited. Waiting \(wait) seconds (Retry-After: \(header ?? "-"))...")
+                try await Task.sleep(nanoseconds: UInt64(wait) * 1_000_000_000)
                 return try await makeRequest(url: url, token: token, retryCount: retryCount + 1)
             } else {
                 throw APIError.httpError(429)
@@ -564,6 +572,9 @@ class SpotifyAPIService: ObservableObject {
         }
         
         guard httpResponse.statusCode == 200 else {
+            if SpotifyAccessGate.isUserAccessDenied(status: httpResponse.statusCode, url: url, body: data) {
+                accessMonitor.recordAccessDenied()
+            }
             print("HTTP Error: \(httpResponse.statusCode) for URL: \(url.absoluteString)")
             if let responseBody = String(data: data, encoding: .utf8) {
                 print("Response Body: \(responseBody)")
@@ -575,6 +586,9 @@ class SpotifyAPIService: ObservableObject {
             let decoded = try JSONDecoder().decode(T.self, from: data)
             return decoded
         } catch {
+            if SpotifyAccessGate.isTrackFeedPath(url.path) {
+                accessMonitor.recordDecodeFailure()
+            }
             print("Decoding error: \(error)")
             if let jsonString = String(data: data, encoding: .utf8) {
                 print("Response JSON: \(jsonString)")

@@ -95,7 +95,7 @@ class AIMatchExplainer {
         }
         
         // Popularity similarity (weight: 0.1) - similar vibe
-        let popDiff = abs(Double(track1.popularity) - Double(track2.popularity))
+        let popDiff = abs(Double(track1.popularityOrNeutral) - Double(track2.popularityOrNeutral))
         let popScore = max(0, 1.0 - (popDiff / 100.0))
         score += popScore * 0.1
         

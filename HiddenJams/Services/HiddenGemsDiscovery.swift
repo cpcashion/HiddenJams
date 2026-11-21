@@ -83,7 +83,7 @@ class HiddenGemsDiscovery: ObservableObject {
             // Step 7: Apply additional filters
             albumTracks = albumTracks.filter { track in
                 !knownTrackIds.contains(track.id) &&
-                track.popularity < 20 &&  // Extra safety filter
+                track.popularityOrNeutral < 20 &&  // Extra safety filter
                 !isCompilationAlbum(track.album.name)
             }
             print("✅ Filtered to \(albumTracks.count) candidate tracks")
@@ -269,7 +269,7 @@ class HiddenGemsDiscovery: ObservableObject {
                 matchScore: score,
                 matchReasons: reasons,
                 streamCount: nil,
-                popularity: track.popularity
+                popularity: track.popularityOrNeutral
             )
         }.sorted { $0.matchScore > $1.matchScore }
     }
@@ -298,7 +298,7 @@ class HiddenGemsDiscovery: ObservableObject {
         score += genreMatch * 20.0
         
         // 4. Popularity Bonus (10 points) - Lower is better
-        let popularityBonus = max(0, (20.0 - Double(track.popularity)) / 20.0)
+        let popularityBonus = max(0, (20.0 - Double(track.popularityOrNeutral)) / 20.0)
         score += popularityBonus * 10.0
         
         return min(score, 100.0)

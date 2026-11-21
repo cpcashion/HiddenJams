@@ -183,7 +183,7 @@ final class LongTailDiscoveryService {
 
                 let tracks = try await spotifyAPI.getArtistTopTracks(artistId: artist.id, token: token)
                 for track in tracks {
-                    guard Double(track.popularity) < popularityThreshold,
+                    guard Double(track.popularityOrNeutral) < popularityThreshold,
                           seenTrackIds.insert(track.id).inserted else { continue }
                     candidates.append(track)
                     if candidates.count >= maxTracks { break }

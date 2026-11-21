@@ -546,7 +546,10 @@ final class GenreDeckBuilder {
             ),
             artistKey: artistId,
             artistIds: Self.artistIds(of: track),
-            closeness: abs(Double(track.popularity) - targetPopularity) + Double.random(in: 0..<3)
+            // Unknown popularity (Spotify Dev Mode): no slider distance, so
+            // ordering falls back to tier + search depth (page offsets).
+            closeness: (track.popularity.map { abs(Double($0) - targetPopularity) } ?? 0)
+                + Double.random(in: 0..<3)
         ))
     }
 
@@ -563,9 +566,11 @@ final class GenreDeckBuilder {
 
     /// 0 when the track fits the slider. Each step above allows +10
     /// popularity and 3x the followers.
-    static func relaxationLevel(popularity: Int, followers: Int?, popularityCeiling: Int, followerCeiling: Int) -> Int {
+    /// `popularity == nil` (Spotify Dev Mode) adds no relaxation: unknown is
+    /// neither "too popular" nor "rare".
+    static func relaxationLevel(popularity: Int?, followers: Int?, popularityCeiling: Int, followerCeiling: Int) -> Int {
         var level = 0
-        if popularity > popularityCeiling {
+        if let popularity, popularity > popularityCeiling {
             level = Int((Double(popularity - popularityCeiling) / 10).rounded(.up))
         }
         if let followers, followerCeiling > 0, followers > followerCeiling {
