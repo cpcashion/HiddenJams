@@ -21,6 +21,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 PAYWALL_FILE = os.path.join(ASSETS, "paywall-review.png")
 WRITE = MODE == "submit"
+REVIEW_VIDEO = os.path.join(ASSETS, "app-review.mp4")
+NOTES_PUBKEY = os.path.join(HERE, "notes_pubkey.pem")
+AGE_ANSWERS = {"datingAndRelationships": False, "sharedLocation": False}
+SPOTIFY_PARA = ("Spotify sign-in is for invited testers only: Spotify limits our app to a small allowlist of accounts. "
+                "Please test with Apple Music, which gives the full experience. If you tap Spotify with a non-invited account, "
+                "the app shows \"Spotify is for invited testers only\" and offers Continue with Apple Music.")
 
 SCREEN_MANIFEST = os.path.join(HERE, "screenshots.json")
 # Manifest format (see screenshots.json):
@@ -189,6 +195,46 @@ def paywall_step(apply=False):
     shot = get(f"/v1/subscriptions/{SUB_ID}/appStoreReviewScreenshot")
     return shot.get("data") if shot else None
 
+# ---------------- review notes ----------------
+import re
+CRED_RE = re.compile(r"password|passcode|\bpw\b|@|login\s*:|username|user\s*name", re.I)
+
+def transform_notes(notes):
+    """Replace every Spotify paragraph with SPOTIFY_PARA (at the first one's position); append if none.
+    Returns (new_notes, info dict). Never prints content (public logs)."""
+    notes = notes or ""
+    if SPOTIFY_PARA in notes:
+        return notes, {"changed": False, "reason": "already contains new Spotify paragraph"}
+    sep = "\n\n" if "\n\n" in notes else "\n"
+    paras = notes.split(sep) if notes else []
+    out, idx, removed_cred = [], [], False
+    for i, p in enumerate(paras):
+        if "spotify" in p.lower():
+            idx.append(i)
+            if CRED_RE.search(p): removed_cred = True
+            if len(idx) == 1: out.append(SPOTIFY_PARA)
+        else:
+            out.append(p)
+    if not idx:
+        out.append(SPOTIFY_PARA)
+    new = sep.join(x for x in out if x is not None).strip()
+    return new, {"changed": True, "paragraphs": len(paras), "spotify_paragraphs": idx,
+                 "removed_paragraph_has_possible_credentials": removed_cred,
+                 "old_len": len(notes), "new_len": len(new)}
+
+def encrypt_for_box(text):
+    """RSA-OAEP(SHA256) wrapped AES-256-GCM; only the private key on the Launch box can read it."""
+    import base64, json as _j
+    from cryptography.hazmat.primitives import serialization, hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    pub = serialization.load_pem_public_key(open(NOTES_PUBKEY, "rb").read())
+    k = AESGCM.generate_key(256); n = os.urandom(12)
+    ct = AESGCM(k).encrypt(n, text.encode(), None)
+    ek = pub.encrypt(k, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+    b = lambda x: base64.b64encode(x).decode()
+    return _j.dumps({"ek": b(ek), "n": b(n), "ct": b(ct)})
+
 # ================= build =================
 print(f"== MODE={MODE}  build {BUILD_NUMBER}  expected version {EXPECT_VERSION}")
 d = get("/v1/builds", {"filter[app]": APP_ID, "sort": "-uploadedDate", "limit": 6, "include": "preReleaseVersion"})
@@ -216,7 +262,11 @@ while True:
     time.sleep(120)
 
 if not build or build["attributes"].get("processingState") != "VALID":
-    gap(f"build {BUILD_NUMBER} not VALID (found={bool(build)}, state={build and build['attributes'].get('processingState')})")
+    st = build and build["attributes"].get("processingState")
+    gap(f"PENDING: build {BUILD_NUMBER} not VALID yet (found={bool(build)}, state={st})" if st not in ("FAILED", "INVALID")
+        else f"build {BUILD_NUMBER} processing {st}")
+    if WRITE:
+        print("SUBMIT ABORTED before any writes: build not VALID"); sys.exit(2)
 else:
     if mv != EXPECT_VERSION: gap(f"build marketing version {mv} != {EXPECT_VERSION}")
     if build["attributes"].get("usesNonExemptEncryption") is None:
@@ -269,11 +319,37 @@ else:
         if a.get("demoAccountRequired") and not (a.get("demoAccountName") and a.get("demoAccountPassword")):
             gap("demo account required but name/password missing")
         if not a.get("notes"): gap("review notes empty")
+        # --- notes update ---
+        new_notes, info = transform_notes(a.get("notes"))
+        print(f"  NOTES PLAN: {info}")
+        if info.get("changed"):
+            notes_ok = True
+            if len(new_notes) > 4000: gap(f"new review notes {len(new_notes)} > 4000 chars"); notes_ok = False
+            if info.get("removed_paragraph_has_possible_credentials"):
+                gap("a Spotify paragraph being replaced looks like it contains credentials/contact; needs human review before submit"); notes_ok = False
+            print("  NOTES_ENC_CURRENT " + encrypt_for_box(a.get("notes") or ""))
+            print("  NOTES_ENC_PROPOSED " + encrypt_for_box(new_notes))
+            if WRITE and notes_ok:
+                _, err = call("PATCH", f"/v1/appStoreReviewDetails/{rdd['id']}", {"data": {"type": "appStoreReviewDetails", "id": rdd["id"], "attributes": {"notes": new_notes}}})
+                print("  update notes ->", err or "ok")
+                if err: gap(f"review notes update failed {err}")
+        # --- review video attachment ---
         at = get(f"/v1/appStoreReviewDetails/{rdd['id']}/appStoreReviewAttachments")
         atts = (at or {}).get("data", [])
         for x in atts:
             print(f"  attachment {x['attributes'].get('fileName')} {x['attributes'].get('fileSize')}B state={state_of(x)}")
-        if not atts: note("no review attachment (video) on review detail")
+        vname = os.path.basename(REVIEW_VIDEO)
+        have_video = any(x["attributes"].get("fileName") == vname and state_of(x) == "COMPLETE" for x in atts)
+        if os.path.exists(REVIEW_VIDEO) and not have_video:
+            print(f"  VIDEO PLAN: upload {vname} ({os.path.getsize(REVIEW_VIDEO)}B) as App Review attachment")
+            if WRITE:
+                _, err = upload_asset("appStoreReviewAttachments", "appStoreReviewDetail", "appStoreReviewDetails", rdd["id"], REVIEW_VIDEO)
+                print("  upload review video ->", err or "COMPLETE")
+                if err: gap(f"review video upload failed: {err}")
+        elif have_video:
+            print("  VIDEO PLAN: already attached, no change")
+        elif not atts:
+            note("no review attachment (video) on review detail and no video file in branch")
 
 # ================= app info =================
 print("== App info / age rating / category")
@@ -290,7 +366,18 @@ for ai in (d or {}).get("data", []):
     nulls = [k for k, v in ara.items() if v is None]
     print(f"  ageRating null fields: {nulls}")
     if not ara: gap("age rating declaration missing")
-    elif nulls: note(f"age rating has null fields: {nulls}")
+    else:
+        missing_keys = [k for k in AGE_ANSWERS if k not in ara]
+        if missing_keys: gap(f"age rating API has no fields {missing_keys}")
+        change = {k: v for k, v in AGE_ANSWERS.items() if k in ara and ara.get(k) != v}
+        print(f"  AGE RATING PLAN: set {change}" if change else "  AGE RATING PLAN: no change")
+        if change and WRITE:
+            decl_id = ar["data"]["id"]
+            _, err = call("PATCH", f"/v1/ageRatingDeclarations/{decl_id}", {"data": {"type": "ageRatingDeclarations", "id": decl_id, "attributes": change}})
+            print("  update age rating ->", err or "ok")
+            if err: gap(f"age rating update failed {err}")
+        rest = [k for k in nulls if k not in AGE_ANSWERS and k not in ("kidsAgeBand", "gracRatingClassificationNumber", "developerAgeRatingInfoUrl")]
+        if rest: note(f"age rating has other null fields: {rest}")
     ld = get(f"/v1/appInfos/{ai['id']}/appInfoLocalizations")
     for l in (ld or {}).get("data", []):
         la = l["attributes"]
