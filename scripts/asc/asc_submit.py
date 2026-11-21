@@ -199,27 +199,36 @@ def paywall_step(apply=False):
 import re
 CRED_RE = re.compile(r"password|passcode|\bpw\b|@|login\s*:|username|user\s*name", re.I)
 
+SPOTIFY_REQ_RE = re.compile(r"requires a Spotify|demo Spotify|Spotify (account|login)\b", re.I)
+
 def transform_notes(notes):
-    """Replace every Spotify paragraph with SPOTIFY_PARA (at the first one's position); append if none.
-    Returns (new_notes, info dict). Never prints content (public logs)."""
+    """Sentence-level: drop sentences that tell the reviewer to use Spotify (requires a Spotify account /
+    demo Spotify login); put SPOTIFY_PARA where the first one was; keep everything else (incl. factual
+    mentions like 'Spotify OAuth' in the video description). Never prints content (public logs)."""
     notes = notes or ""
     if SPOTIFY_PARA in notes:
         return notes, {"changed": False, "reason": "already contains new Spotify paragraph"}
     sep = "\n\n" if "\n\n" in notes else "\n"
     paras = notes.split(sep) if notes else []
-    out, idx, removed_cred = [], [], False
+    out, removed, inserted, cred = [], [], False, False
     for i, p in enumerate(paras):
-        if "spotify" in p.lower():
-            idx.append(i)
-            if CRED_RE.search(p): removed_cred = True
-            if len(idx) == 1: out.append(SPOTIFY_PARA)
-        else:
-            out.append(p)
-    if not idx:
+        sents = re.split(r"(?<=[.!?])\s+", p.strip())
+        keep = []
+        for j, x in enumerate(sents):
+            if SPOTIFY_REQ_RE.search(x):
+                removed.append((i, j))
+                if CRED_RE.search(x): cred = True
+            else:
+                keep.append(x)
+        if len(keep) < len(sents) and not inserted:
+            out.append(SPOTIFY_PARA); inserted = True
+        if keep:
+            out.append(" ".join(keep))
+    if not inserted:
         out.append(SPOTIFY_PARA)
-    new = sep.join(x for x in out if x is not None).strip()
-    return new, {"changed": True, "paragraphs": len(paras), "spotify_paragraphs": idx,
-                 "removed_paragraph_has_possible_credentials": removed_cred,
+    new = sep.join(out).strip()
+    return new, {"changed": True, "paragraphs": len(paras), "removed_sentences(para,idx)": removed,
+                 "removed_sentence_has_possible_credentials": cred,
                  "old_len": len(notes), "new_len": len(new)}
 
 def encrypt_for_box(text):
@@ -325,8 +334,8 @@ else:
         if info.get("changed"):
             notes_ok = True
             if len(new_notes) > 4000: gap(f"new review notes {len(new_notes)} > 4000 chars"); notes_ok = False
-            if info.get("removed_paragraph_has_possible_credentials"):
-                gap("a Spotify paragraph being replaced looks like it contains credentials/contact; needs human review before submit"); notes_ok = False
+            if info.get("removed_sentence_has_possible_credentials"):
+                gap("a Spotify sentence being removed looks like it contains credentials/contact; needs human review before submit"); notes_ok = False
             print("  NOTES_ENC_CURRENT " + encrypt_for_box(a.get("notes") or ""))
             print("  NOTES_ENC_PROPOSED " + encrypt_for_box(new_notes))
             if WRITE and notes_ok:
