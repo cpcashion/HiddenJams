@@ -312,3 +312,13 @@ final class DiscoveryQuotaManager: ObservableObject {
         ))
     }
 }
+
+#if DEBUG
+extension DiscoveryQuotaManager {
+    /// Capture fixtures only (parity snapshots): shows "Track N of 50" in the
+    /// player header without touching the stored quota.
+    func setUsedThisMonthForCapture(_ n: Int) {
+        usedThisMonth = n
+    }
+}
+#endif

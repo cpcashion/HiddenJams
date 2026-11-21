@@ -102,6 +102,11 @@ final class OnboardingParitySnapshotTests: XCTestCase {
                 v.setNeedsLayout()
                 v.layoutIfNeeded()
             }
+            // A presented sheet lives in its own controller's view.
+            if let pv = window?.rootViewController?.presentedViewController?.view {
+                pv.setNeedsLayout()
+                pv.layoutIfNeeded()
+            }
             // Yield the main actor instead of spinning the run loop inside
             // a main-actor job: nested spinning ran the screens' .task jobs
             // re-entrantly and crashed the host (malloc 0x262543f40).
@@ -204,6 +209,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         list.append(Shot(name: "facts:new:1", settled: 2.0, file: "b88/facts_new_1.jpg"))
         list.append(Shot(name: "facts-live", motion: [4.1, 4.2, 4.3, 4.45], settled: 5.5, file: "b88/facts_live.jpg"))
         list.append(Shot(name: "profile-after", settled: 3.0, file: "b88/profile_after.jpg", scrollBottom: true))
+        // Rarity sheet presented for real over the real player (Liquid Glass,
+        // system grab handle, .medium detent): fixed and pre-fix.
+        list.append(Shot(name: "glass:new", settled: 4.0, file: "b88/glass_new.jpg"))
+        list.append(Shot(name: "glass:old", settled: 4.0, file: "b88/glass_old.jpg"))
         // The live-clock loading fixture crashes the CI test host, so only the
         // frozen frames above are captured (identical render at each offset).
         // Hidden-but-live windows from earlier shots slow later ones on the CI
@@ -216,7 +225,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
     /// Shots to capture this run (empty = all).
     /// Build 88 fixes were captured with: the sheet:{old,new}:{se,promax}:{medium,large}
     /// states, facts:old:0, facts:new:0, facts:new:1, profile-after (run 44906538787).
-    private static let only: [String] = []
+    private static let only: [String] = ["glass:new", "glass:old"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.
@@ -244,6 +253,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         }
         await spin(until: t0.addingTimeInterval(shot.settled))
         emit(shot.file ?? "\(shot.name).jpg", settled: true)
+        if let pvc = window?.rootViewController?.presentedViewController {
+            let sheet = pvc.sheetPresentationController
+            step("presented \(type(of: pvc)) frame=\(pvc.view.frame) detent=\(sheet?.selectedDetentIdentifier?.rawValue ?? "nil") grabber=\(sheet?.prefersGrabberVisible ?? false)")
+        }
         if shot.scrollBottom, let root = window?.rootViewController?.view, let sv = Self.mainScrollView(in: root) {
             let maxY = max(-sv.adjustedContentInset.top,
                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)

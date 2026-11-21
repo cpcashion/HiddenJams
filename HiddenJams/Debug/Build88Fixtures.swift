@@ -9,6 +9,7 @@
 
 #if DEBUG
 import SwiftUI
+import UIKit
 import Combine
 
 enum Build88Fixtures {
@@ -27,6 +28,53 @@ enum Build88Fixtures {
     static let rarity = ArtistRarity(tier: .ultraRare, score: 94, followers: 871, popularity: 6,
                                      lastFmListeners: 19_800, lastFmPlaycount: 79_200,
                                      genres: ["minimal techno"], artistName: "Earthrumental")
+
+    // MARK: Real player + real presented sheet (Liquid Glass)
+
+    /// A generated cover (the onboarding art), written to a file so the
+    /// player's AsyncImage loads it like a remote cover.
+    static let coverURL: URL? = {
+        guard let img = UIImage(named: "obcover-ember"), let data = img.jpegData(compressionQuality: 0.9) else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("b88-cover.jpg")
+        try? data.write(to: url)
+        return url
+    }()
+
+    /// Three Spotify-style deck tracks by the artist in Chris's screenshot.
+    /// Popularity 6 + 871 followers make the player's own rarity lookup
+    /// land on ULTRA RARE 94 without a Spotify token.
+    static let deck: [RecommendedTrack] = (1...3).map { i in
+        let artist = SpotifyArtist(
+            spotifyId: "b88artist", name: "Earthrumental", genres: ["minimal techno"],
+            popularity: 6, images: nil, followers: SpotifyFollowers(total: 871))
+        let images: [SpotifyImage] = coverURL.map { [SpotifyImage(url: $0, height: 640, width: 640)] } ?? []
+        let album = SpotifyAlbum(
+            spotifyId: "b88album", name: "Earthrumental Music", images: images,
+            releaseDate: nil, tracks: nil, artists: nil)
+        let track = SpotifyTrack(
+            spotifyId: "b88track\(i)", name: "Track \(i)", artists: [artist],
+            album: album, popularity: 6, previewUrl: nil,
+            uri: "spotify:track:b88track\(i)", durationMs: 180_000)
+        return RecommendedTrack(
+            id: "b88track\(i)", spotifyURI: "spotify:track:b88track\(i)", track: track,
+            matchScore: 0.9, obscurityScore: 0.9, recencyScore: 0.5,
+            totalScore: 0.8, obscurityReason: "capture",
+            matchExplanation: "capture", similarToTrack: nil, similarityReasons: [])
+    }
+
+    /// Player state on deck track 2 (no playback: the queue is preset, so
+    /// the player's syncQueue sees no change and never calls loadQueue).
+    /// Static so these objects are never torn down during the test run.
+    static let playerEnv: PlayerEnv = {
+        let e = PlayerEnv()
+        e.audio.queue = deck
+        e.audio.currentIndex = 1
+        e.audio.currentTrack = deck[1]
+        let quota = DiscoveryQuotaManager.shared
+        if quota.isUnlimited { quota.simulateFreeTier = true }
+        quota.setUsedThisMonthForCapture(2)
+        return e
+    }()
 
     static let quiz = "Which of these songs was released in 1996?\n✓ Smashing Pumpkins - 1979"
 
@@ -55,6 +103,8 @@ enum Build88Fixtures {
             FactsCanvas(legacy: false)
         } else if name == "profile-after" {
             ProfileCanvas()
+        } else if p.first == "glass", p.count == 2 {
+            PlayerSheetCanvas(legacy: p[1] == "old")
         } else {
             Color.red
         }
@@ -96,6 +146,48 @@ private struct SheetCanvas: View {
         .scaleEffect(s, anchor: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea()
+    }
+}
+
+final class PlayerEnv: ObservableObject {
+    let audio = AudioPreviewManager()
+    let auth = SpotifyAuthManager()
+}
+
+/// The real discovery player (PlaylistPlayerView, "Track 2 of 50") with the
+/// real RaritySheet presented over it by SwiftUI's .sheet, so UIKit draws
+/// the actual Liquid Glass sheet, its corner radius and the system grab
+/// handle at the .medium detent. Presented without animation shortly after
+/// the player appears.
+private struct PlayerSheetCanvas: View {
+    let legacy: Bool
+    @ObservedObject private var env = Build88Fixtures.playerEnv
+    @State private var showSheet = false
+    var body: some View {
+        // Laid out as MainTabView does on the Play tab: the player, then
+        // the Liquid tab bar on top.
+        ZStack(alignment: .bottom) {
+            PlaylistPlayerView(recommendations: Build88Fixtures.deck, onSave: { _ in })
+            LiquidTabBar(selectedTab: .constant(.player))
+                .padding(.horizontal, Theme.Spacing.lg)
+                .padding(.bottom, 20)
+        }
+        .ignoresSafeArea()
+            .environmentObject(env.audio)
+            .environmentObject(env.auth)
+            .sheet(isPresented: $showSheet) {
+                if legacy {
+                    RaritySheetLegacy(rarity: Build88Fixtures.rarity, trackName: Build88Fixtures.deck[1].track.name)
+                } else {
+                    RaritySheet(rarity: Build88Fixtures.rarity, trackName: Build88Fixtures.deck[1].track.name)
+                }
+            }
+            .task {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { showSheet = true }
+            }
     }
 }
 
