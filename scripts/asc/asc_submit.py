@@ -16,22 +16,18 @@ EXPECT_VERSION = os.environ.get("EXPECT_VERSION", "1.6.1")
 SUB_ID = os.environ.get("SUB_ID", "6831179739")
 MODE = os.environ.get("MODE", "preflight")
 WAIT_MIN = int(os.environ.get("WAIT_MIN", "0"))
-POSITIONAL = os.environ.get("SCREEN_POSITIONAL", "0") == "1"   # fallback: replace slots 2 and 3
 BASE = "https://api.appstoreconnect.apple.com"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 PAYWALL_FILE = os.path.join(ASSETS, "paywall-review.png")
 WRITE = MODE == "submit"
 
-# Screenshot swap plan: (match keywords in existing fileName, slot index if positional, new file stem)
-SWAPS = [
-    (("swipe",), 1, "02-best-30-seconds"),   # replaces 02-swipe
-    (("rarity",), 2, "01-fun-addictive"),    # replaces 03-rarity
-]
-# Final order: home, fun-addictive, best-30-seconds, profile, stats
-ORDER_KEYS = [("home",), ("fun-addictive",), ("best-30-seconds",), ("profile",), ("stat",)]
-SIZE_FOR_WIDTH = {1320: "1320x2868", 1290: "1290x2796"}
-SIZE_FOR_TYPE = {"APP_IPHONE_69": "1320x2868", "APP_IPHONE_67": None}  # 67 accepts both; decided by existing width
+SCREEN_MANIFEST = os.path.join(HERE, "screenshots.json")
+# Manifest format (see screenshots.json):
+# { "enabled": bool,                      # false = never touch screenshots, even in submit mode
+#   "locales": ["en-US"] | "all",
+#   "sets": { "<DISPLAY_TYPE>": [ {"keep": "<substring of existing ASC fileName>"} | {"file": "<name in assets/>"}, ... ] } }
+# Each list is the exact final set, in order. Existing screenshots not kept are deleted (after uploads succeed).
 
 def token():
     now = int(time.time())
@@ -93,70 +89,84 @@ def upload_asset(create_type, rel_name, rel_type, rel_id, path):
 
 def match(fname, keys): return any(k in (fname or "").lower() for k in keys)
 
-# ---------------- screenshots ----------------
+# ---------------- screenshots (manifest-driven) ----------------
+def load_manifest():
+    import json
+    if not os.path.exists(SCREEN_MANIFEST): return None
+    return json.load(open(SCREEN_MANIFEST))
+
+MANIFEST = load_manifest()
+
+def png_size(path):
+    with open(path, "rb") as f:
+        h = f.read(24)
+    return (int.from_bytes(h[16:20], "big"), int.from_bytes(h[20:24], "big")) if h[:8] == b"\x89PNG\r\n\x1a\n" else (None, None)
+
 def screenshot_plan(loc_id, L, apply=False):
     sd = get(f"/v1/appStoreVersionLocalizations/{loc_id}/appScreenshotSets", {"limit": 50})
+    sets = {s["attributes"]["screenshotDisplayType"]: s for s in (sd or {}).get("data", [])}
     types = {}
-    for s in (sd or {}).get("data", []):
-        t = s["attributes"]["screenshotDisplayType"]
+    current = {}
+    for t, s in sets.items():
         sc = get(f"/v1/appScreenshotSets/{s['id']}/appScreenshots", {"limit": 20})
         shots = (sc or {}).get("data", [])
-        types[t] = len(shots)
-        desc = []
-        for x in shots:
-            ia = x["attributes"].get("imageAsset") or {}
-            desc.append(f"{x['attributes'].get('fileName')}({ia.get('width')}x{ia.get('height')},{state_of(x)})")
+        current[t] = shots; types[t] = len(shots)
+        desc = [f"{x['attributes'].get('fileName')}({(x['attributes'].get('imageAsset') or {}).get('width')}x{(x['attributes'].get('imageAsset') or {}).get('height')},{state_of(x)})" for x in shots]
         print(f"     {t}: {len(shots)} -> {desc}")
         if any(state_of(x) != "COMPLETE" for x in shots): gap(f"[{L}] {t} has non-COMPLETE screenshots")
-        if t not in ("APP_IPHONE_69", "APP_IPHONE_67") or not shots:
-            continue
-        # decide asset size
-        w = (shots[0]["attributes"].get("imageAsset") or {}).get("width")
-        size = SIZE_FOR_TYPE.get(t) or SIZE_FOR_WIDTH.get(w)
-        if not size:
-            gap(f"[{L}] {t}: can't map existing width {w} to a new asset size"); continue
-        targets = []
-        for keys, slot, stem in SWAPS:
-            hit = [x for x in shots if match(x["attributes"].get("fileName"), keys)]
-            if len(hit) == 1: targets.append((hit[0], stem))
-            elif POSITIONAL and len(shots) == 5: targets.append((shots[slot], stem))
+    m = MANIFEST
+    if not m:
+        print("     screenshots.json absent: no screenshot changes planned"); return types
+    if not m.get("enabled"):
+        print("     screenshots.json enabled=false: screenshot changes on hold (validated only)")
+    locs = m.get("locales", "all")
+    if locs != "all" and L not in locs:
+        return types
+    for t, entries in (m.get("sets") or {}).items():
+        if t not in sets:
+            gap(f"[{L}] manifest set {t} has no existing screenshot set in ASC (creating sets not supported)"); continue
+        shots = current[t]
+        if not 1 <= len(entries) <= 10: gap(f"[{L}] {t}: manifest needs 1-10 entries"); continue
+        plan, ok, kept_ids = [], True, set()
+        widths = {(x["attributes"].get("imageAsset") or {}).get("width") for x in shots}
+        for e in entries:
+            if "keep" in e:
+                hit = [x for x in shots if e["keep"].lower() in (x["attributes"].get("fileName") or "").lower() and x["id"] not in kept_ids]
+                if len(hit) != 1:
+                    gap(f"[{L}] {t}: keep '{e['keep']}' matched {len(hit)} existing screenshots"); ok = False; continue
+                kept_ids.add(hit[0]["id"]); plan.append(("keep", hit[0]))
+            elif "file" in e:
+                path = os.path.join(ASSETS, e["file"])
+                if not os.path.exists(path): gap(f"[{L}] {t}: file {e['file']} not in scripts/asc/assets"); ok = False; continue
+                w, h = png_size(path)
+                if widths and w not in widths and not (t == "APP_IPHONE_67" and w in (1290, 1320)):
+                    gap(f"[{L}] {t}: {e['file']} is {w}x{h}, existing set widths {widths}"); ok = False
+                plan.append(("upload", path))
             else:
-                gap(f"[{L}] {t}: can't identify screenshot to replace with {stem} (matches={len(hit)}); set SCREEN_POSITIONAL=1 if slots are known"); targets = None; break
-        if targets is None: continue
-        files = {stem: os.path.join(ASSETS, f"{stem}-{size}.png") for _, _, stem in SWAPS}
-        missing = [f for f in files.values() if not os.path.exists(f)]
-        if missing: gap(f"[{L}] {t}: asset files missing {missing}"); continue
-        print(f"     PLAN {t}: " + "; ".join(f"replace {x['attributes'].get('fileName')} -> {os.path.basename(files[stem])}" for x, stem in targets)
-              + " ; order home, fun-addictive, best-30-seconds, profile, stats")
-        if not apply: continue
-        # apply: upload new first, then delete old, then reorder
-        new_ids = {}
-        for x, stem in targets:
-            nid, err = upload_asset("appScreenshots", "appScreenshotSet", "appScreenshotSets", s["id"], files[stem])
-            print(f"     upload {os.path.basename(files[stem])} -> {err or 'COMPLETE'}")
-            if err: gap(f"[{L}] {t}: upload {stem} failed: {err}"); return types
-            new_ids[stem] = nid
-        for x, stem in targets:
+                gap(f"[{L}] {t}: bad manifest entry {e}"); ok = False
+        dels = [x for x in shots if x["id"] not in kept_ids]
+        print(f"     PLAN {t}: final order = " + ", ".join((x['attributes'].get('fileName') if k == 'keep' else 'NEW ' + os.path.basename(x)) for k, x in plan)
+              + f" ; delete {[x['attributes'].get('fileName') for x in dels]}")
+        if not ok or not apply or not m.get("enabled"): continue
+        s = sets[t]; ordered = []
+        for k, x in plan:
+            if k == "keep": ordered.append(x["id"]); continue
+            nid, err = upload_asset("appScreenshots", "appScreenshotSet", "appScreenshotSets", s["id"], x)
+            print(f"     upload {os.path.basename(x)} -> {err or 'COMPLETE'}")
+            if err: gap(f"[{L}] {t}: upload {os.path.basename(x)} failed: {err}"); return types
+            ordered.append(nid)
+        for x in dels:
             _, err = call("DELETE", f"/v1/appScreenshots/{x['id']}")
             print(f"     delete {x['attributes'].get('fileName')} -> {err or 'ok'}")
             if err: gap(f"[{L}] {t}: delete failed {err}"); return types
-        sc = get(f"/v1/appScreenshotSets/{s['id']}/appScreenshots", {"limit": 20})
-        cur = (sc or {}).get("data", [])
-        ordered, used = [], set()
-        for keys in ORDER_KEYS:
-            for x in cur:
-                if x["id"] in used: continue
-                fn = x["attributes"].get("fileName") or ""
-                stem_hit = any(new_ids.get(k2) == x["id"] for k2 in keys)
-                if match(fn, keys) or stem_hit:
-                    ordered.append(x["id"]); used.add(x["id"]); break
-        ordered += [x["id"] for x in cur if x["id"] not in used]
         _, err = call("PATCH", f"/v1/appScreenshotSets/{s['id']}/relationships/appScreenshots",
                       {"data": [{"type": "appScreenshots", "id": i} for i in ordered]})
         print(f"     reorder -> {err or 'ok'}")
+        if err: gap(f"[{L}] {t}: reorder failed {err}")
         sc = get(f"/v1/appScreenshotSets/{s['id']}/appScreenshots", {"limit": 20})
         final = (sc or {}).get("data", [])
-        print(f"     FINAL {t}: {[ (x['attributes'].get('fileName'), state_of(x)) for x in final ]}")
+        print(f"     FINAL {t}: {[(x['attributes'].get('fileName'), state_of(x)) for x in final]}")
+        if [x["id"] for x in final] != ordered: gap(f"[{L}] {t}: final order differs from manifest")
         if any(state_of(x) != "COMPLETE" for x in final): gap(f"[{L}] {t}: post-swap screenshots not all COMPLETE")
     return types
 
