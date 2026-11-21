@@ -205,12 +205,11 @@ private struct OBStatText: View, Animatable {
     }
 }
 
-// MARK: - 02 · Keep what moves you (auto-playing swipe demo)
+// MARK: - 02 · Keep what moves you (interactive swipe demo)
 
 private enum OBKeepDeck {
     static let deck = ["orbit", "tigers", "glass", "lowtide", "dust", "rosewater"].map(OBCatalog.named)
     static let plays = [2418, 731, 412, 3290, 1366, 864]
-    static let script: [Bool] = [true, false, true, true] // keep, skip, keep, keep
 
     static func tag(_ t: OBTrack) -> String {
         "#" + t.genre.lowercased()
@@ -223,8 +222,13 @@ private enum OBKeepDeck {
 struct OBKeepScreen: View {
     @Environment(\.obMetrics) private var m
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Resting half-swipe to the right: a gentle ~4.4° tilt with the Keep
+    /// stamp partly visible (opacity ≈ 0.44) as a hint the card is draggable.
+    private static let restX: CGFloat = 60
+
     @State private var index = 0
-    @State private var x: CGFloat = 0
+    @State private var x: CGFloat = Self.restX
     @State private var finger: Double = 0
     @State private var kept: [String] = []
     @State private var hintKeep = true
@@ -247,12 +251,16 @@ struct OBKeepScreen: View {
                     .scaleEffect(0.94).offset(y: 14)
                 OBKeepCard(x: x, track: top, plays: OBKeepDeck.plays[index % OBKeepDeck.plays.count],
                            size: card, finger: finger)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(drag)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 296)
             .padding(.top, 18)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Demo: swipe right to keep a song, left to skip")
+            .accessibilityLabel("Demo: drag right to keep a song, left to skip")
+            .accessibilityHint("The card returns to its resting pose. It does not advance onboarding.")
+            .accessibilityAddTraits(.allowsDirectInteraction)
 
             ZStack {
                 OBMono(text: hintKeep ? "Swipe right to keep →" : "← Swipe left to skip", size: 12, color: OB.lime, opacity: 0.95)
@@ -268,67 +276,49 @@ struct OBKeepScreen: View {
                 .padding(.top, 8)
                 .obRise(0.3)
         }
-        .task { await runScript() }
+        #if DEBUG
+        .onAppear { applyKeepPinIfNeeded() }
+        #endif
     }
 
-    private func runScript() async {
-        #if DEBUG
-        // Parity capture: hold one frame of the script (no clock).
-        if let pin = OnboardingParityFixtures.keepPin {
-            var tx = Transaction(); tx.disablesAnimations = true
-            withTransaction(tx) {
-                index = pin.index; x = pin.x; finger = pin.finger; hintKeep = pin.hintKeep
-                kept = (0..<pin.kept).map { OBKeepDeck.deck[$0 % OBKeepDeck.deck.count].art }
-            }
-            return
-        }
-        #endif
-        guard !reduceMotion else { return }
-        // Waits are scheduled against the script's start, like the
-        // prototype's timeline, so a slow frame never delays later steps.
-        #if DEBUG
-        // Parity captures pin the timeline to the moment the screen was shown.
-        let start = OnboardingParityFixtures.epoch ?? Date()
-        #else
-        let start = Date()
-        #endif
-        var due = 0.0
-        func wait(_ ms: Int) async -> Bool {
-            due += Double(ms) / 1000
-            let left = start.addingTimeInterval(due).timeIntervalSinceNow
-            if left > 0 { try? await Task.sleep(for: .seconds(left)) }
-            return !Task.isCancelled
-        }
-        var n = 0
-        guard await wait(1000) else { return }
-        while !Task.isCancelled {
-            for keep in OBKeepDeck.script {
-                // AnimatePresence mode="wait": old hint leaves (.18s), then the new one enters (.18s)
-                if hintKeep != keep {
-                    withAnimation(.easeInOut(duration: 0.18)) { hintKeep = keep }
-                }
-                let dir: CGFloat = keep ? 1 : -1
-                guard await wait(650) else { return }
-                withAnimation(.easeOut(duration: 0.18)) { finger = 1 }
-                guard await wait(220) else { return }
-                withAnimation(.timingCurve(0.3, 0.1, 0.3, 1, duration: 0.75)) { x = dir * 120 }
-                guard await wait(750 + 160) else { return }
-                withAnimation(.timingCurve(0.5, 0, 0.9, 0.6, duration: 0.34)) { x = dir * 560 }
-                guard await wait(340) else { return }
-                withAnimation(.easeOut(duration: 0.1)) { finger = 0 }
-                if keep {
-                    kept.append(OBKeepDeck.deck[n % OBKeepDeck.deck.count].art)
-                    bump += 1
-                }
-                n += 1
+    /// Follows the finger from the resting hint pose; on release, springs
+    /// (or snaps, if Reduce Motion is on) back to that pose. Never dismisses
+    /// the card or pages the onboarding pager. highPriorityGesture on the
+    /// card claims the drag inside its bounds so the pager's simultaneous
+    /// swipe still works outside the card.
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { v in
                 var tx = Transaction(); tx.disablesAnimations = true
-                withTransaction(tx) { index = n; x = 0 }
-                guard await wait(900) else { return }
+                withTransaction(tx) {
+                    x = Self.restX + v.translation.width
+                    hintKeep = x >= 0
+                }
             }
-            guard await wait(1500) else { return }
-            kept = []
+            .onEnded { _ in
+                let settle = {
+                    x = Self.restX
+                    hintKeep = true
+                }
+                if reduceMotion {
+                    var tx = Transaction(); tx.disablesAnimations = true
+                    withTransaction(tx) { settle() }
+                } else {
+                    withAnimation(OB.spring(280, 22)) { settle() }
+                }
+            }
+    }
+
+    #if DEBUG
+    private func applyKeepPinIfNeeded() {
+        guard let pin = OnboardingParityFixtures.keepPin else { return }
+        var tx = Transaction(); tx.disablesAnimations = true
+        withTransaction(tx) {
+            index = pin.index; x = pin.x; finger = pin.finger; hintKeep = pin.hintKeep
+            kept = (0..<pin.kept).map { OBKeepDeck.deck[$0 % OBKeepDeck.deck.count].art }
         }
     }
+    #endif
 }
 
 private struct OBHintShift: ViewModifier {
