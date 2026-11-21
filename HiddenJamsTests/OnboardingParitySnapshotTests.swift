@@ -14,12 +14,41 @@
 import XCTest
 import SwiftUI
 import UIKit
+import StoreKitTest
 @testable import HiddenJams
+
+/// Alphabetically first XCTest case so the paywall frame is captured
+/// before other test work (and before later fixtures can trip the
+/// known host malloc crash at 0x262543f40).
+@MainActor
+final class AAAPaywallCaptureTests: XCTestCase {
+    func test000Paywall() async throws {
+        try await OnboardingParitySnapshotTests().runRemaining(0)
+    }
+}
 
 @MainActor
 final class OnboardingParitySnapshotTests: XCTestCase {
 
     private var window: UIWindow?
+    private static var storeSession: SKTestSession?
+
+    private func startStoreKitIfNeeded() {
+        if Self.storeSession != nil { return }
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("HiddenJams.storekit")
+        do {
+            let session = try SKTestSession(contentsOf: url)
+            session.disableDialogs = true
+            Self.storeSession = session
+            step("storekit session ready \(url.path)")
+        } catch {
+            step("storekit session failed \(error)")
+        }
+    }
+
 
     private static var enabled: Bool {
         let marker = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("ParityCapture.enabled")
@@ -136,7 +165,13 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     private func flush() {
         for p in pending {
-            guard let data = p.image.jpegData(compressionQuality: p.settled ? 0.92 : 0.8) else {
+            let data: Data?
+            if p.file.lowercased().hasSuffix(".png") {
+                data = p.image.pngData()
+            } else {
+                data = p.image.jpegData(compressionQuality: p.settled ? 0.92 : 0.8)
+            }
+            guard let data else {
                 print("HJSNAP-FAIL \(p.file)"); continue
             }
             let b64 = data.base64EncodedString()
@@ -213,6 +248,8 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         // system grab handle, .medium detent): fixed and pre-fix.
         list.append(Shot(name: "glass:new", settled: 4.0, file: "b88/glass_new.jpg"))
         list.append(Shot(name: "glass:old", settled: 4.0, file: "b88/glass_old.jpg"))
+        // App Review screenshot of the in-app paywall (unlimited.monthly).
+        list.append(Shot(name: "paywall", settled: 4.0, file: "paywall-review.png"))
         // The live-clock loading fixture crashes the CI test host, so only the
         // frozen frames above are captured (identical render at each offset).
         // Hidden-but-live windows from earlier shots slow later ones on the CI
@@ -226,7 +263,8 @@ final class OnboardingParitySnapshotTests: XCTestCase {
     /// Build 88 fixes were captured with: the sheet:{old,new}:{se,promax}:{medium,large}
     /// states, facts:old:0, facts:new:0, facts:new:1, profile-after (run 44906538787);
     /// the real presented glass sheet with glass:new, glass:old (run 44909679064).
-    private static let only: [String] = []
+    /// Paywall App Review capture: paywall only, first in the run.
+    private static let only: [String] = ["paywall"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.
@@ -253,6 +291,21 @@ final class OnboardingParitySnapshotTests: XCTestCase {
             emit("motion/\(shot.name)_t\(String(format: "%05.2f", t)).jpg", settled: false)
         }
         await spin(until: t0.addingTimeInterval(shot.settled))
+        if shot.name == "paywall" {
+            let deadline = Date().addingTimeInterval(6)
+            while Date() < deadline {
+                let loaded = !SubscriptionManager.shared.products.isEmpty && !SubscriptionManager.shared.isLoading
+                if loaded { break }
+                await spin(until: Date().addingTimeInterval(0.25))
+            }
+            let products = SubscriptionManager.shared.products
+            let monthly = products.first { $0.id == SubscriptionProduct.monthly.rawValue }
+            let price = monthly?.displayPrice ?? "FALLBACK"
+            step("paywall products=\(products.count) ids=\(products.map(\.id)) monthly=\(monthly?.id ?? "nil") displayPrice=\(price) loading=\(SubscriptionManager.shared.isLoading) error=\(SubscriptionManager.shared.lastError ?? "nil")")
+            if let w = window {
+                print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
+            }
+        }
         emit(shot.file ?? "\(shot.name).jpg", settled: true)
         if let pvc = window?.rootViewController?.presentedViewController {
             let sheet = pvc.sheetPresentationController
@@ -282,16 +335,22 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return best
     }
 
-    private func runRemaining(_ pass: Int) async throws {
+    func runRemaining(_ pass: Int) async throws {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("pass \(pass)")
-        if pass == 1 { dumpCrashReports() }
+        if pass <= 1 { dumpCrashReports() }
         let open = Self.shots.filter { let n = tries($0.file ?? $0.name); return n >= 0 && n < 2 }
         guard !open.isEmpty else { step("nothing left"); return }
-        await show("probe-intro")
-        await spin(until: Date().addingTimeInterval(1.0))
-        if let w = window {
-            print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
+        startStoreKitIfNeeded()
+        // Skip the probe-intro window: it is extra work before the capture
+        // and has preceded the host malloc crash. Print the device after
+        // the real paywall is on screen (in run()).
+        if Self.only.isEmpty {
+            await show("probe-intro")
+            await spin(until: Date().addingTimeInterval(1.0))
+            if let w = window {
+                print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
+            }
         }
         for shot in Self.shots { await run(shot) }
         window?.isHidden = true

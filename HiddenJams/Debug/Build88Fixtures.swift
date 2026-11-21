@@ -103,6 +103,11 @@ enum Build88Fixtures {
             FactsCanvas(legacy: false)
         } else if name == "profile-after" {
             ProfileCanvas()
+        } else if name == "paywall" {
+            // Full-screen paywall (same view the app presents), wired to
+            // the real SubscriptionManager so the price comes from StoreKit.
+            PaywallView()
+                .environmentObject(SubscriptionManager.shared)
         } else if p.first == "glass", p.count == 2 {
             PlayerSheetCanvas(legacy: p[1] == "old")
         } else {
