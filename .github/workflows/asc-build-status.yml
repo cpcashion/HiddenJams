@@ -1,0 +1,23 @@
+name: ASC build status (read-only)
+
+on:
+  push:
+    branches: [ "tooling/asc-build-status" ]
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "pyjwt[crypto]" requests
+      - name: Poll build (GET only)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUILD_NUMBER: "91"
+        run: python3 scripts/asc-status/build_status.py
