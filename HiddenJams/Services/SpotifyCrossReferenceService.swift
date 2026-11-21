@@ -172,7 +172,7 @@ class SpotifyCrossReferenceService {
             spotifyURI: track.uri,
             spotifyID: track.id,
             name: track.name,
-            popularity: track.popularity,
+            popularity: track.popularityOrNeutral,
             matchConfidence: calculatedConfidence,
             artistFollowers: track.artists.first?.followers?.total
         )

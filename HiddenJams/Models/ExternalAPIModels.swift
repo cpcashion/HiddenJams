@@ -250,7 +250,7 @@ struct RecommendedTrack: Identifiable, Equatable {
             matchScore: totalScore * 100, // Convert 0-1 to 0-100
             matchReasons: similarityReasons.isEmpty ? [obscurityReason] : similarityReasons,
             streamCount: nil,
-            popularity: track.popularity
+            popularity: track.popularityOrNeutral
         )
     }
 

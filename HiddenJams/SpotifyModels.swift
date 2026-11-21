@@ -33,7 +33,11 @@ struct SpotifyTrack: Codable, Identifiable {
     let name: String
     let artists: [SpotifyArtist]
     let album: SpotifyAlbum
-    let popularity: Int
+    /// Spotify track popularity (0–100). Optional: Spotify Development Mode
+    /// apps no longer receive `popularity` on Track objects, and a required
+    /// field made every Spotify track decode fail (empty deck, empty liked
+    /// tracks). `nil` means *unknown* — never treat it as rare/obscure.
+    let popularity: Int?
     let previewUrl: String?
     let uri: String
     let durationMs: Int
@@ -45,6 +49,14 @@ struct SpotifyTrack: Codable, Identifiable {
     var externalIds: ExternalIds? = nil
 
     var id: String { spotifyId ?? UUID().uuidString }
+
+    /// Mid-scale stand-in used where an `Int` is required and popularity is
+    /// unknown. Neutral on purpose, so a missing field is never scored as
+    /// "ultra-rare".
+    static let neutralPopularity = 50
+
+    /// `popularity`, or `neutralPopularity` when Spotify omitted it.
+    var popularityOrNeutral: Int { popularity ?? Self.neutralPopularity }
 
     var isrc: String? { externalIds?.isrc }
     

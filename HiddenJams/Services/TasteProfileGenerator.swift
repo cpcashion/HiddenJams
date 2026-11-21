@@ -205,8 +205,9 @@ class TasteProfileGenerator {
     static func calculateObscurityScore(from tracks: [SpotifyTrack]) -> Double {
         guard !tracks.isEmpty else { return 0 }
         
-        let obscureTracks = tracks.filter { $0.popularity < 30 }
-        let veryObscureTracks = tracks.filter { $0.popularity < 15 }
+        // Unknown popularity (Spotify Dev Mode) never counts as obscure.
+        let obscureTracks = tracks.filter { ($0.popularity ?? Int.max) < 30 }
+        let veryObscureTracks = tracks.filter { ($0.popularity ?? Int.max) < 15 }
         
         // Weighted score: very obscure tracks count more
         let baseScore = Double(obscureTracks.count) / Double(tracks.count) * 100

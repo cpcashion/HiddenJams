@@ -12,12 +12,7 @@ import Foundation
 final class SpotifyGenreDeckCatalog: GenreDeckCatalog {
     private let token: String
     private let deezer = DeezerPreviewService()
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 5
-        config.timeoutIntervalForResource = 8
-        return URLSession(configuration: config)
-    }()
+    private let session: URLSession
 
     /// 50 results per search page; drops to 10 if Spotify rejects 50
     /// (newer Spotify app tiers cap search pages at 10).
@@ -29,8 +24,24 @@ final class SpotifyGenreDeckCatalog: GenreDeckCatalog {
     private(set) var authFailed = false
     private(set) var failedRequests = 0
 
-    init(token: String) {
+    // Spotify Development Mode signals (see SpotifyAccessGate).
+    /// A search returned 403: this user isn't on the app's allowlist.
+    private(set) var accessDenied = false
+    /// Search pages that returned 200 but whose tracks couldn't be decoded.
+    private(set) var undecodablePages = 0
+    /// Search pages that yielded at least one usable track.
+    private(set) var usablePages = 0
+    /// Requests Spotify actually answered (any HTTP status).
+    private(set) var answeredRequests = 0
+
+    init(token: String, session: URLSession? = nil) {
         self.token = token
+        self.session = session ?? {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 5
+            config.timeoutIntervalForResource = 8
+            return URLSession(configuration: config)
+        }()
     }
 
     private struct HTTPResult {
@@ -41,6 +52,8 @@ final class SpotifyGenreDeckCatalog: GenreDeckCatalog {
     // MARK: - GenreDeckCatalog
 
     func searchTracks(query: String, offset: Int) async -> GenreDeckSearchPage? {
+        // Not on the Dev-Mode allowlist: every further search 403s too.
+        if accessDenied { return nil }
         let limit = pageSize
         let safeOffset = max(0, min(offset, 1000 - limit))
         let url = URL(string: "https://api.spotify.com/v1/search?q=\(Self.encode(query))"
@@ -50,11 +63,22 @@ final class SpotifyGenreDeckCatalog: GenreDeckCatalog {
             pageSize = 10
             return await searchTracks(query: query, offset: offset)
         }
-        guard response.status == 200,
-              let decoded = try? JSONDecoder().decode(DeckSearchResponse.self, from: response.data) else {
+        if SpotifyAccessGate.isUserAccessDenied(status: response.status, url: url, body: response.data) {
+            accessDenied = true
             return nil
         }
-        let tracks = decoded.tracks.items.compactMap { $0.value }.filter { $0.spotifyId != nil }
+        guard response.status == 200 else { return nil }
+        guard let decoded = try? JSONDecoder().decode(DeckSearchResponse.self, from: response.data) else {
+            undecodablePages += 1
+            return nil
+        }
+        let decodedTracks = decoded.tracks.items.compactMap { $0.value }
+        if decodedTracks.isEmpty && !decoded.tracks.items.isEmpty {
+            // Every item failed to decode (e.g. a field Dev Mode removed).
+            undecodablePages += 1
+        }
+        let tracks = decodedTracks.filter { $0.spotifyId != nil }
+        if !tracks.isEmpty { usablePages += 1 }
         return GenreDeckSearchPage(tracks: tracks, total: decoded.tracks.total, limit: limit)
     }
 
@@ -116,6 +140,7 @@ final class SpotifyGenreDeckCatalog: GenreDeckCatalog {
                 }
             }
             if status == 401 { authFailed = true }
+            if status != 0 { answeredRequests += 1 }
             if status != 200 { failedRequests += 1 }
             return HTTPResult(data: data, status: status)
         } catch {
