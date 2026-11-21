@@ -116,7 +116,7 @@ struct MainTabView: View {
         let beforeCount = discoveryEngine.discoveredGems.count
         let token = authManager.accessToken
         // Spotify users fall back to the non-Spotify engine while Spotify
-        // access is limited (early access), so seed it like Apple users.
+        // access is limited (invited testers only), so seed it like Apple users.
         let usesSpotifyDeck = token != nil && !SpotifyAccessMonitor.shared.isLimitedNow
         let appleSeeds = usesSpotifyDeck ? [] : profileAnalyzer.libraryTracks
         var selectedGenres: Set<String>? = nil
@@ -178,7 +178,7 @@ struct MainTabView: View {
                 }
             } else {
                 // Apple Music not connected (e.g. a Spotify user while
-                // Spotify is in early access gets the non-Spotify deck):
+                // Spotify is invited-testers-only gets the non-Spotify deck):
                 // keep the save in the in-app collection.
                 await MainActor.run { SavedGemsStore.shared.save(track) }
             }

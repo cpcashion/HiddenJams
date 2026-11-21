@@ -304,7 +304,7 @@ struct SpotifyDevModeTests {
     }
 
     @Test func testEarlyAccessCopy() {
-        #expect(SpotifyAccessGate.limitedMessage.contains("early access"))
+        #expect(SpotifyAccessGate.limitedMessage.contains("invited testers only"))
         #expect(SpotifyAccessGate.limitedMessage.contains("Apple Music"))
         #expect(SpotifyAccessGate.continueButtonTitle == "Continue with Apple Music")
     }

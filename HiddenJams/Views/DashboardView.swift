@@ -54,7 +54,7 @@ struct DashboardView: View {
                         // Header
                         headerView
                         
-                        // Spotify early access (Development Mode): this
+                        // Spotify invited-testers-only (Development Mode): this
                         // user's Spotify account can't use the Web API, so
                         // offer the one-tap Apple Music path instead of a
                         // library analysis that can't succeed.
@@ -255,7 +255,7 @@ struct DashboardView: View {
         .pastelCard(Theme.Colors.lavender, padding: 24)
     }
     
-    // MARK: - Spotify Early Access
+    // MARK: - Spotify Invited Testers Only
 
     private var showsSpotifyEarlyAccess: Bool {
         spotifyAccess.isLimited && authManager.accessToken != nil
@@ -432,7 +432,7 @@ struct DashboardView: View {
             Task {
                 let token = authManager.accessToken
                 // Apple Music-only users (and Spotify users while Spotify is
-                // in early access) seed discovery from their library tracks
+                // invited testers only) seed discovery from their library tracks
                 let usesSpotifyDeck = token != nil && !SpotifyAccessMonitor.shared.isLimitedNow
                 var appleSeeds = usesSpotifyDeck ? [] : profileAnalyzer.libraryTracks
 

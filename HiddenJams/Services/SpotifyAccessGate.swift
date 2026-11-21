@@ -18,8 +18,8 @@ import Foundation
 import Combine
 
 enum SpotifyAccessGate {
-    static let limitedTitle = "Spotify is in early access"
-    static let limitedMessage = "Spotify access is limited while Hidden Jams is in early access — continue with Apple Music."
+    static let limitedTitle = "Spotify is for invited testers only"
+    static let limitedMessage = "Spotify in Hidden Jams is for invited testers only. Continue with Apple Music to get the full experience."
     static let continueButtonTitle = "Continue with Apple Music"
 
     /// Paths whose 403 means *this user* can't use the Web API (not on the

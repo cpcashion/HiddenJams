@@ -376,7 +376,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                     generation: generation
                 )
                 if handled { return }
-                print("🔒 Spotify deck unavailable (early access) — falling back to the non-Spotify discovery engine")
+                print("🔒 Spotify deck unavailable (invited testers only) — falling back to the non-Spotify discovery engine")
             }
             await updateProgress("Finding hidden gems with Apple Music…")
         }
