@@ -1,14 +1,13 @@
 {
   "enabled": false,
-  "_note": "HOLD: Design/Chris deciding Apple-Music-only listing; set enabled=true only after final set confirmed. Each list = exact final order. keep = substring of existing ASC fileName; file = PNG in scripts/asc/assets/.",
+  "_note": "HOLD: final 4-card set from Design (Nov 21 8:51); awaiting Chris on Spotify badges on cards 2-3. Set enabled=true only after confirmed. Replaces whole b80 set (no keeps).",
   "locales": "all",
   "sets": {
     "APP_IPHONE_67": [
-      {"keep": "home"},
-      {"file": "01-fun-addictive-1290x2796.png"},
-      {"file": "02-best-30-seconds-1290x2796.png"},
-      {"keep": "profile"},
-      {"keep": "stat"}
+      {"file": "01-home-1290x2796.png"},
+      {"file": "02-fun-addictive-1290x2796.png"},
+      {"file": "03-best-30-seconds-1290x2796.png"},
+      {"file": "05-stats-1290x2796.png"}
     ]
   }
 }
