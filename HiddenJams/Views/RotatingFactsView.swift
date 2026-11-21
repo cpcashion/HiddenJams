@@ -14,24 +14,20 @@ struct RotatingFactsView: View {
     var body: some View {
         VStack(spacing: Theme.Spacing.sm) {
             if !shuffledFacts.isEmpty {
-                TypewriterText(text: shuffledFacts[currentIndex], key: key) {
-                    // Wait 4 seconds then advance
-                    Task {
-                        try? await Task.sleep(nanoseconds: 4_000_000_000)
-                        await MainActor.run {
-                            withAnimation {
-                                // Track this fact as shown
-                                trackShownFact(shuffledFacts[currentIndex])
-                                
-                                currentIndex = (currentIndex + 1) % shuffledFacts.count
-                                key = UUID().uuidString
-                            }
-                        }
-                    }
+                // Whole fact at once (no typewriter) with a quick
+                // blur-slide spring; hold time scales with length.
+                ZStack(alignment: .topLeading) {
+                    Text(shuffledFacts[currentIndex])
+                        .font(Theme.Typography.body2)
+                        .foregroundColor(Theme.Colors.textSecondary)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.85)
+                        .id(key)
+                        .transition(.factSwap)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: 60, alignment: .topLeading)
-                .id(key)
+                .clipped()
             }
         }
         .padding(Theme.Spacing.md)
@@ -47,15 +43,45 @@ struct RotatingFactsView: View {
             // Load and shuffle facts on each appearance
             loadAndShuffleFacts()
         }
+        .task(id: key) {
+            guard !shuffledFacts.isEmpty else { return }
+            #if DEBUG
+            if OnboardingParityFixtures.factsPinned { return }
+            #endif
+            let fact = shuffledFacts[currentIndex]
+            try? await Task.sleep(nanoseconds: UInt64(Self.holdSeconds(for: fact) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            trackShownFact(fact)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                currentIndex = (currentIndex + 1) % shuffledFacts.count
+                key = UUID().uuidString
+            }
+        }
     }
-    
+
+    /// Reading time: ~30 characters a second plus a beat, 2.2–4.8s.
+    /// (Earlier builds typed each fact at 30ms/char and then held it 4s,
+    /// about 6–8s per fact.)
+    static func holdSeconds(for fact: String) -> Double {
+        min(4.8, max(2.2, 0.8 + Double(fact.count) / 30))
+    }
+
     /// Load facts from service and shuffle, excluding recently shown ones
     private func loadAndShuffleFacts() {
+        #if DEBUG
+        if let pinned = OnboardingParityFixtures.factsPin {
+            shuffledFacts = pinned
+            currentIndex = 0
+            key = "pinned"
+            return
+        }
+        #endif
         let allFacts = factsService.facts
         
         guard !allFacts.isEmpty else {
             // Fallback to local database if service hasn't loaded yet
             shuffledFacts = MusicFactsDatabase.getShuffledFacts()
+            key = UUID().uuidString
             return
         }
         
@@ -75,6 +101,7 @@ struct RotatingFactsView: View {
         // Shuffle the available facts
         shuffledFacts = availableFacts.shuffled()
         currentIndex = 0
+        key = UUID().uuidString   // (re)starts the rotation task
     }
     
     // MARK: - Persistent Tracking
@@ -103,39 +130,21 @@ struct RotatingFactsView: View {
     }
 }
 
-struct TypewriterText: View {
-    let text: String
-    let key: String
-    let onComplete: () -> Void
-    
-    @State private var displayedText = ""
-    
-    var body: some View {
-        Text(displayedText) // Cursor removed
-            .font(Theme.Typography.body2)
-            .foregroundColor(Theme.Colors.textSecondary)
-            .onAppear {
-                displayedText = ""
-                animateText()
-            }
-            .onChange(of: key) { _ in
-                displayedText = ""
-                animateText()
-            }
-    }
-    
-    private func animateText() {
-        Task {
-            for char in text {
-                try? await Task.sleep(nanoseconds: 30_000_000) // 30ms per char
-                await MainActor.run {
-                    displayedText.append(char)
-                }
-            }
-            // Trigger completion
-            await MainActor.run {
-                onComplete()
-            }
-        }
+private struct FactBlur: ViewModifier {
+    let radius: CGFloat
+    func body(content: Content) -> some View { content.blur(radius: radius) }
+}
+
+extension AnyTransition {
+    /// New fact rises in from below out of a blur; the old one lifts away.
+    static var factSwap: AnyTransition {
+        .asymmetric(
+            insertion: .opacity
+                .combined(with: .offset(y: 14))
+                .combined(with: .modifier(active: FactBlur(radius: 6), identity: FactBlur(radius: 0))),
+            removal: .opacity
+                .combined(with: .offset(y: -12))
+                .combined(with: .modifier(active: FactBlur(radius: 4), identity: FactBlur(radius: 0)))
+        )
     }
 }

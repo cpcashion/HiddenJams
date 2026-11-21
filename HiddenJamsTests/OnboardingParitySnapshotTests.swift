@@ -151,7 +151,11 @@ final class OnboardingParitySnapshotTests: XCTestCase {
 
     /// One capture: a fixture name, motion offsets (s) and the settle time
     /// (same names, offsets and settle times as shoot_proto_device.py).
-    private struct Shot { let name: String; var motion: [Double] = []; let settled: Double; var file: String? = nil }
+    private struct Shot {
+        let name: String; var motion: [Double] = []; let settled: Double; var file: String? = nil
+        /// Also emit FILE_bottom.jpg after scrolling the main list to the end.
+        var scrollBottom = false
+    }
 
     private static var shots: [Shot] {
         var list: [Shot] = []
@@ -186,6 +190,20 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         // 02: the keep script frozen at the prototype's 8.6 s frame (no wall clock).
         list.append(Shot(name: "static-keep", settled: 3.0, file: "02-keep.jpg"))
         list += screens
+        // Build 88 fixes (build88-fixes/): rarity sheet at both detents on a
+        // small and a large iPhone, pre-fix vs fixed; facts card; Profile.
+        for v in ["old", "new"] {
+            for d in ["se", "promax"] {
+                for det in ["medium", "large"] {
+                    list.append(Shot(name: "sheet:\(v):\(d):\(det)", settled: 2.0, file: "b88/sheet_\(v)_\(d)_\(det).jpg"))
+                }
+            }
+        }
+        list.append(Shot(name: "facts:old:0", settled: 2.0, file: "b88/facts_old.jpg"))
+        list.append(Shot(name: "facts:new:0", settled: 2.0, file: "b88/facts_new_0.jpg"))
+        list.append(Shot(name: "facts:new:1", settled: 2.0, file: "b88/facts_new_1.jpg"))
+        list.append(Shot(name: "facts-live", motion: [4.1, 4.2, 4.3, 4.45], settled: 5.5, file: "b88/facts_live.jpg"))
+        list.append(Shot(name: "profile-after", settled: 3.0, file: "b88/profile_after.jpg", scrollBottom: true))
         // The live-clock loading fixture crashes the CI test host, so only the
         // frozen frames above are captured (identical render at each offset).
         // Hidden-but-live windows from earlier shots slow later ones on the CI
@@ -196,7 +214,11 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return list
     }
     /// Shots to capture this run (empty = all).
-    private static let only: [String] = []
+    private static let only: [String] = [
+        "sheet:old:se:medium", "sheet:old:se:large", "sheet:old:promax:medium", "sheet:old:promax:large",
+        "sheet:new:se:medium", "sheet:new:se:large", "sheet:new:promax:medium", "sheet:new:promax:large",
+        "facts:old:0", "facts:new:0", "facts:new:1", "facts-live", "profile-after",
+    ]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.
@@ -224,8 +246,28 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         }
         await spin(until: t0.addingTimeInterval(shot.settled))
         emit(shot.file ?? "\(shot.name).jpg", settled: true)
+        if shot.scrollBottom, let root = window?.rootViewController?.view, let sv = Self.mainScrollView(in: root) {
+            let maxY = max(-sv.adjustedContentInset.top,
+                           sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+            sv.setContentOffset(CGPoint(x: 0, y: maxY), animated: false)
+            await spin(until: Date().addingTimeInterval(0.8))
+            let base = (shot.file ?? "\(shot.name).jpg").replacingOccurrences(of: ".jpg", with: "")
+            emit("\(base)_bottom.jpg", settled: true)
+        }
         flush()
         setTries(key, -1)
+    }
+
+    /// The tallest vertically scrolling view (the screen's main list).
+    private static func mainScrollView(in v: UIView) -> UIScrollView? {
+        var best: UIScrollView?
+        func walk(_ x: UIView) {
+            if let sv = x as? UIScrollView, sv.contentSize.height > sv.bounds.height,
+               sv.bounds.height > (best?.bounds.height ?? 0) { best = sv }
+            x.subviews.forEach(walk)
+        }
+        walk(v)
+        return best
     }
 
     private func runRemaining(_ pass: Int) async throws {

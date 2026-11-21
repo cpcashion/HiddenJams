@@ -43,12 +43,14 @@ struct RaritySheet: View {
     let trackName: String
 
     var body: some View {
-        // Native sheet + system drag indicator: a custom grabber inside the
-        // VStack was clipped (or sat above the visible area) whenever the
-        // sheet sat between detents / was only partially raised. The system
-        // indicator is drawn by UIKit above the clipped content, so it stays
-        // visible at every detent. Extra top padding keeps the title clear
-        // of the indicator.
+        // Root cause of the recurring "handle hidden by the title" bug: the
+        // content was a plain VStack sized to the sheet. At the .medium detent
+        // (and while dragging) the VStack is taller than the sheet, and SwiftUI
+        // centres an overflowing stack, pushing its top (the title) up past the
+        // 16pt padding and under the system drag indicator. HJSheetScaffold
+        // reserves a fixed handle zone and puts the content in a top-aligned
+        // ScrollView, so content can never be centred upward at any height.
+        HJSheetScaffold {
         VStack(spacing: 20) {
             // Tier header
             VStack(spacing: 8) {
@@ -56,6 +58,7 @@ struct RaritySheet: View {
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(Theme.Colors.textPrimary)
+                    .hjSheetTitle()
                 Text(rarity.tier.tagline)
                     .font(.subheadline)
                     .foregroundColor(Theme.Colors.textSecondary)
@@ -124,14 +127,15 @@ struct RaritySheet: View {
                 }
             }
 
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
-        .padding(.top, 16)   // clear of the system drag indicator
         .padding(.bottom, 24)
-        .presentationDetents([.medium, .large])
+        }
+        .presentationDetents(RaritySheet.detents)
         .presentationDragIndicator(.visible)
     }
+
+    static let detents: Set<PresentationDetent> = [.medium, .large]
 
     private var rarityGradient: LinearGradient {
         LinearGradient(
@@ -165,3 +169,54 @@ struct RaritySheet: View {
 }
 
 
+
+
+// MARK: - Sheet scaffold (fixed handle zone)
+
+/// Content for a detented sheet with the system drag indicator. The top
+/// `handleZone` points are reserved for the indicator (UIKit draws it 5pt
+/// tall, ~5pt from the top); content starts below it and lives in a
+/// top-aligned ScrollView, so at any detent or mid-drag height the content
+/// can only be clipped at the bottom (and scrolled), never pushed up under
+/// the handle. Locked in by SheetHandleRegressionTests.
+struct HJSheetScaffold<Content: View>: View {
+    /// Indicator area: 5pt inset + 5pt grabber + 14pt breathing room.
+    static var handleZone: CGFloat { 24 }
+    static var coordinateSpaceName: String { "hjSheetScaffold" }
+
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: Self.handleZone)
+                .accessibilityHidden(true)
+            ScrollView(.vertical, showsIndicators: false) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .coordinateSpace(.named(Self.coordinateSpaceName))
+    }
+}
+
+/// Frame of a sheet's title in the scaffold's coordinate space (used by the
+/// regression test; harmless in Release).
+struct HJSheetTitleFrameKey: PreferenceKey {
+    static var defaultValue: CGRect? { nil }
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = value ?? nextValue()
+    }
+}
+
+extension View {
+    /// Marks the sheet title so its frame can be checked against the handle zone.
+    func hjSheetTitle() -> some View {
+        background(GeometryReader { g in
+            Color.clear.preference(key: HJSheetTitleFrameKey.self,
+                                   value: g.frame(in: .named("hjSheetScaffold")))
+        })
+    }
+}

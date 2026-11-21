@@ -22,6 +22,11 @@ enum OnboardingParityFixtures {
     static var keepPin: KeepPin?
     /// Start the glow at the screen's settled blooms (the prototype frames are settled).
     static var settleGlow = false
+    /// Build 88 fixes: facts shown by RotatingFactsView (nil = normal), and
+    /// whether the rotation is frozen on the first one.
+    static var factsPin: [String]?
+    static var factsFreeze = true
+    static var factsPinned: Bool { factsPin != nil && factsFreeze }
     /// The prototype frame at 8.6 s: card 3 swiping right (x ≈ 108, Keep
     /// stamp at ~0.98, finger down), card 1 saved, card 2 skipped.
     static let keepAt8600 = KeepPin(index: 2, x: 108.3, finger: 1, hintKeep: true, kept: 1)
@@ -195,7 +200,7 @@ enum OnboardingParityFixtures {
         case "probe-flow": reveal(page: 0, picks: ordered)
         case "probe-onb": pager(0, [])
         case "probe-intro": OBMetricsReader { OBIntroScreen() }
-        default: Color.red
+        default: Build88Fixtures.screen(name)
         }
     }
 
