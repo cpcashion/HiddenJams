@@ -17,7 +17,7 @@ struct MusicFactsDatabase {
         "Chuck Berry's \"Johnny B. Goode\" is headed into interstellar space on NASA's Voyager Golden Record.",
         "Freddie Mercury was born Farrokh Bulsara in Zanzibar.",
         "\"Smells Like Teen Spirit\" is named after a deodorant called Teen Spirit.",
-        "Shel Silverstein, the children's author, wrote Johnny Cash's hit \"A Boy Named Sue.\"",
+        "Shel Silverstein, the children's author, wrote Johnny Cash's \"A Boy Named Sue.\"",
         "Dolly Parton wrote \"Jolene\" and \"I Will Always Love You\" on the same day.",
         "Michael Jackson's Thriller was already the best-selling album of all time by early 1984.",
         "Pink Floyd's The Dark Side of the Moon has spent 997 weeks on the Billboard album chart.",

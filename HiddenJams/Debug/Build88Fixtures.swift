@@ -9,6 +9,7 @@
 
 #if DEBUG
 import SwiftUI
+import Combine
 
 enum Build88Fixtures {
     struct Device { let key: String; let size: CGSize; let safeTop: CGFloat; let safeBottom: CGFloat }
