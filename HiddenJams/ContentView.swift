@@ -19,6 +19,11 @@ struct ContentView: View {
     /// every launch with a connected source.
     @AppStorage(DiscoveryQuotaManager.onboardingCompletedKey) private var onboardingCompleted = false
 
+    /// The mini player shows on every tab except Profile.
+    static func showsMiniPlayer(on tab: MainTabView.Tab) -> Bool {
+        tab != .profile
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             // Background gradient
@@ -31,15 +36,19 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .scale))
                     .zIndex(1)
 
-                // Persistent mini-player shelf — visible on every tab
-                // whenever audio is loaded. Tap to expand into the full
-                // Now Playing screen. This is the ONLY playback chrome;
-                // the swipe deck is pure discovery.
-                MiniPlayerView(onTapTrack: { showExpandedPlayer = true })
-                    .environmentObject(audioManager)
-                    .zIndex(2)
-                    .padding(.bottom, 92)
-                    .animation(.easeInOut, value: audioManager.currentTrack?.id)
+                // Persistent mini-player shelf — visible on Home and Play
+                // whenever audio is loaded (hidden on Profile, where it
+                // covered the list and crowded the tab bar; build 88
+                // feedback). Tap to expand into the full Now Playing screen.
+                // This is the ONLY playback chrome; the swipe deck is pure
+                // discovery.
+                if Self.showsMiniPlayer(on: selectedTab) {
+                    MiniPlayerView(onTapTrack: { showExpandedPlayer = true })
+                        .environmentObject(audioManager)
+                        .zIndex(2)
+                        .padding(.bottom, 92)
+                        .animation(.easeInOut, value: audioManager.currentTrack?.id)
+                }
             } else if sourceManager.hasConnectedSource {
                 // Connected, onboarding not finished: analysis + taste
                 // profile reveal, then MainTabView.
