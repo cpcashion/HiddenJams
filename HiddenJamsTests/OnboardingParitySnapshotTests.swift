@@ -91,7 +91,13 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         step("show \(name)")
         // The onboarding screens only read the auth/source managers inside
         // button actions, which the captures never tap.
-        let hc = UIHostingController(rootView: AnyView(OnboardingParityFixtures.screen(name)))
+        // "warmup" is a blank window so the first makeKeyAndVisible is not
+        // the paywall; the known host malloc crash often hits the first
+        // real view shown.
+        let root: AnyView = name == "warmup"
+            ? AnyView(Color.black.ignoresSafeArea())
+            : AnyView(OnboardingParityFixtures.screen(name))
+        let hc = UIHostingController(rootView: root)
         hc.overrideUserInterfaceStyle = .dark
         hc.view.backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 15 / 255, alpha: 1)
         // A fresh window per state: reusing one window by swapping its root
@@ -282,7 +288,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         let key = shot.file ?? shot.name
         let n = tries(key)
         if n < 0 { return }                       // done
-        if n >= 2 { step("GAVE-UP \(key)"); return }
+        if n >= 5 { step("GAVE-UP \(key)"); return }
         setTries(key, n + 1)
         await show(shot.name)
         let t0 = OnboardingParityFixtures.epoch ?? Date()
@@ -339,18 +345,21 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         try XCTSkipUnless(Self.enabled, "parity captures are off")
         step("pass \(pass)")
         if pass <= 1 { dumpCrashReports() }
-        let open = Self.shots.filter { let n = tries($0.file ?? $0.name); return n >= 0 && n < 2 }
+        let open = Self.shots.filter { let n = tries($0.file ?? $0.name); return n >= 0 && n < 5 }
         guard !open.isEmpty else { step("nothing left"); return }
         startStoreKitIfNeeded()
-        // Skip the probe-intro window: it is extra work before the capture
-        // and has preceded the host malloc crash. Print the device after
-        // the real paywall is on screen (in run()).
+        // A blank warmup window first: the known host malloc crash often
+        // hits the first real view shown. probe-intro is skipped so we
+        // don't load onboarding fixtures before the paywall.
         if Self.only.isEmpty {
             await show("probe-intro")
             await spin(until: Date().addingTimeInterval(1.0))
-            if let w = window {
-                print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
-            }
+        } else {
+            await show("warmup")
+            await spin(until: Date().addingTimeInterval(0.5))
+        }
+        if let w = window {
+            print("HJSNAP-DEVICE \(UIDevice.current.name) \(UIDevice.current.systemVersion) \(w.bounds.size) scale=\(w.screen.scale) safe=\(w.safeAreaInsets)")
         }
         for shot in Self.shots { await run(shot) }
         window?.isHidden = true
