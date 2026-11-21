@@ -247,6 +247,11 @@ def encrypt_for_box(text):
     b = lambda x: base64.b64encode(x).decode()
     return _j.dumps({"ek": b(ek), "n": b(n), "ct": b(ct)})
 
+if MODE == "diag":
+    sys.path.insert(0, HERE)
+    import diag
+    diag.run(get, APP_ID, SUB_ID); sys.exit(0)
+
 # ================= build =================
 print(f"== MODE={MODE}  build {BUILD_NUMBER}  expected version {EXPECT_VERSION}")
 d = get("/v1/builds", {"filter[app]": APP_ID, "sort": "-uploadedDate", "limit": 6, "include": "preReleaseVersion"})
