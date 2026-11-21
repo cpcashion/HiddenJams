@@ -342,6 +342,31 @@ else:
                 _, err = call("PATCH", f"/v1/appStoreReviewDetails/{rdd['id']}", {"data": {"type": "appStoreReviewDetails", "id": rdd["id"], "attributes": {"notes": new_notes}}})
                 print("  update notes ->", err or "ok")
                 if err: gap(f"review notes update failed {err}")
+        # --- demo account: not required (Spotify demo login not confirmed on allowlist; reviewers use Apple Music) ---
+        final_notes = new_notes if info.get("changed") else (a.get("notes") or "")
+        if re.search(r"demo\s*(account|login|spotify)|sign-?in information|test account|credentials", final_notes, re.I):
+            gap("review notes (as they would be submitted) still mention a demo login/sign-in information")
+        else:
+            print("  NOTES CHECK: no demo-login / sign-in-information mention in notes as submitted")
+        demo_change = bool(a.get("demoAccountRequired")) or bool(a.get("demoAccountName")) or bool(a.get("demoAccountPassword"))
+        if demo_change:
+            print(f"  DEMO PLAN: set demoAccountRequired=false (currently {a.get('demoAccountRequired')}); clear demoAccountName (currently {present(a.get('demoAccountName'))}) and demoAccountPassword (currently {present(a.get('demoAccountPassword'))})")
+            if WRITE:
+                err = None
+                for blank in ("", None):
+                    _, err = call("PATCH", f"/v1/appStoreReviewDetails/{rdd['id']}", {"data": {"type": "appStoreReviewDetails", "id": rdd["id"],
+                                  "attributes": {"demoAccountRequired": False, "demoAccountName": blank, "demoAccountPassword": blank}}})
+                    print(f"  clear demo account (blank={blank!r}) ->", err or "ok")
+                    if not err: break
+                if err: gap(f"demo account clear failed {err}")
+                else:
+                    chk = get(f"/v1/appStoreReviewDetails/{rdd['id']}")
+                    ca = (chk or {}).get("data", {}).get("attributes", {})
+                    print(f"  demo after: required={ca.get('demoAccountRequired')} name={present(ca.get('demoAccountName'))} password={present(ca.get('demoAccountPassword'))}")
+                    if ca.get("demoAccountRequired") or ca.get("demoAccountName") or ca.get("demoAccountPassword"):
+                        gap("demo account fields not cleared after PATCH")
+        else:
+            print("  DEMO PLAN: already not required and empty, no change")
         # --- review video attachment ---
         at = get(f"/v1/appStoreReviewDetails/{rdd['id']}/appStoreReviewAttachments")
         atts = (at or {}).get("data", [])
