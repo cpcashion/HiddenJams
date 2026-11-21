@@ -190,7 +190,7 @@ struct GenreDeckBuilderTests {
         let deck = await build(stub, genres: ["drum and bass"], ceiling: 90, followers: 500_000)
 
         #expect(deck.tracks.count == 50)
-        let average = Double(deck.tracks.map(\.popularity).reduce(0, +)) / Double(deck.tracks.count)
+        let average = Double(deck.tracks.compactMap(\.popularity).reduce(0, +)) / Double(deck.tracks.count)
         #expect(average > 40, "Hot should lead with popular tracks, got an average of \(average)")
     }
 

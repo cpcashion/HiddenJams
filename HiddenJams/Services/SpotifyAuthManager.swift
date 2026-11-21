@@ -106,6 +106,8 @@ class SpotifyAuthManager: ObservableObject {
             }
             
             DispatchQueue.main.async {
+                // Fresh sign-in: give Spotify another try this session.
+                SpotifyAccessMonitor.shared.reset()
                 self?.accessToken = json.accessToken
                 self?.saveToken(json.accessToken, refreshToken: json.refreshToken, expiresIn: json.expiresIn)
                 self?.isAuthenticated = true

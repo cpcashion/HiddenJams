@@ -359,17 +359,30 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
         // Spotify: the genre deck — 50 tracks, every one verified in the
         // selected genres, most obscure first per the slider.
+        // Spotify Development Mode: when this user's Spotify access is
+        // limited (not allowlisted → 403, or nothing decodable), skip or
+        // abandon the Spotify deck and run the non-Spotify engine below
+        // (Last.fm + iTunes/Apple Music) instead of ending on an empty deck.
         if let spotifyToken = token {
-            await discoverSpotifyDeck(
-                profile: profile,
-                selectedGenres: selectedGenres,
-                token: spotifyToken,
-                count: effectiveCount,
-                appendResults: appendResults,
-                generation: generation
-            )
-            return
+            if SpotifyAccessMonitor.shared.isLimitedNow {
+                print("🔒 Spotify access limited — using the non-Spotify discovery engine")
+            } else {
+                let handled = await discoverSpotifyDeck(
+                    profile: profile,
+                    selectedGenres: selectedGenres,
+                    token: spotifyToken,
+                    count: effectiveCount,
+                    appendResults: appendResults,
+                    generation: generation
+                )
+                if handled { return }
+                print("🔒 Spotify deck unavailable (early access) — falling back to the non-Spotify discovery engine")
+            }
+            await updateProgress("Finding hidden gems with Apple Music…")
         }
+        // From here on discovery never uses a Spotify token (as before:
+        // Spotify users returned above; now limited ones fall through).
+        let fallbackToken: String? = nil
 
         do {
             print("🎯 Deep Discovery Mode")
@@ -430,7 +443,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 tracks: allCandidates,
                 selectedGenres: validationGenres.isEmpty ? nil : validationGenres,
                 activeGenres: activeGenres,
-                token: token,
+                token: fallbackToken,
                 ignoringHistory: false
             )
             // History is a HARD FILTER (ignoringHistory=false above):
@@ -477,7 +490,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             let enrichedTracks = try await enrichTracksWithDetails(
                 tracks: topCandidates.map { $0.track },
-                token: token
+                token: fallbackToken
             )
             
             let withPreviews = enrichedTracks.filter { $0.previewUrl != nil }.count
@@ -544,7 +557,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 // Only the history filter applies — popularity/genre gates are
                 // bypassed. This is the "no excuses" guarantee for Apple users.
                 var guaranteedResults = finalResults
-                if guaranteedResults.isEmpty && token == nil {
+                if guaranteedResults.isEmpty && fallbackToken == nil {
                     print("🆘 APPLE MUSIC FALLBACK: pipeline empty, querying iTunes directly")
                     do {
                         let itunesTracks = try await itunesGenreFallbackCandidates(
@@ -629,6 +642,10 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
     /// picked), most obscure first per the slider, with previews ready.
     /// When the slider's limits leave too few tracks, popularity is raised
     /// in the background and those tracks go last.
+    /// Returns false (having set no error and published nothing) when
+    /// Spotify access turned out to be limited for this user, so the caller
+    /// can fall back to the non-Spotify engine.
+    @discardableResult
     private func discoverSpotifyDeck(
         profile: ListeningProfile,
         selectedGenres: Set<String>?,
@@ -636,7 +653,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         count: Int,
         appendResults: Bool,
         generation: UInt64
-    ) async {
+    ) async -> Bool {
         let picked = (selectedGenres ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let genres = picked.isEmpty ? Self.openModeGenres(profile: profile) : picked.sorted()
         let history = DiscoveryHistoryManager.shared
@@ -732,11 +749,26 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
 
         let recommendations = accumulated.map { makeRecommendation(for: $0, profile: profile) }
 
+        // Spotify Development Mode detection (SpotifyAccessGate).
+        let monitor = SpotifyAccessMonitor.shared
+        if !recommendations.isEmpty {
+            monitor.recordSuccess()
+        } else if catalog.accessDenied {
+            monitor.recordAccessDenied()
+        } else if catalog.usablePages == 0 && catalog.undecodablePages > 0 {
+            monitor.recordDecodeFailure(count: catalog.undecodablePages)
+        } else if catalog.usablePages == 0 && catalog.answeredRequests > 0 && !catalog.authFailed {
+            monitor.recordEmptyResult()
+        }
+        if recommendations.isEmpty && monitor.isLimitedNow {
+            return false
+        }
+
         // Finding 5: drop stale completions so a cancelled genre switch cannot
         // append the old genre into the new deck.
         if await MainActor.run(body: { self.isStaleDiscovery(generation) }) {
             print("⏭️ Dropping stale Spotify deck completion (gen \(generation))")
-            return
+            return true
         }
 
         discoveredGems = appendResults ? discoveredGems + recommendations : recommendations
@@ -768,6 +800,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             isDiscovering = false
             discoveryProgress = "Complete!"
         }
+        return true
     }
 
     private func makeRecommendation(for track: SpotifyTrack, profile: ListeningProfile) -> RecommendedTrack {
@@ -1769,7 +1802,9 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             
             // Filter 2: Popularity < Threshold (user-controlled via slider)
             // Use the slider's popularityThreshold instead of hardcoded values
-            guard track.popularity < self.popularityThreshold else {
+            // Unknown popularity (Spotify Dev Mode) isn't evidence of being
+            // too popular, so it passes this filter; scoring stays neutral.
+            if let popularity = track.popularity, popularity >= self.popularityThreshold {
                 rejectionStats["too_popular"] = (rejectionStats["too_popular"] ?? 0) + 1
                 return false 
             }
@@ -1863,7 +1898,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
                 if lowerTitle.contains("remix") || lowerTitle.contains(" mix") || lowerTitle.contains("edit") || lowerTitle.contains("version") {
                     // If it's a remix, it MUST meet the popularity threshold to show up
                     // (We assume popular remixes are higher quality/official)
-                    if track.popularity < popularityThreshold {
+                    if (track.popularity ?? 0) < popularityThreshold {
                         print("   ❌ Strictly rejected '\(track.name)' (Low-quality Remix/Edit detected)")
                         continue
                     }
@@ -1989,7 +2024,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             guard !knownTrackIds.contains(track.id) else { continue }
             
             // Filter 2: Popularity < 30
-            guard track.popularity < popularityThreshold else { continue }
+            if let popularity = track.popularity, popularity >= popularityThreshold { continue }
             
             // Filter 3: Artist followers < 10k
             guard let artist = track.artists.first else { continue }
@@ -2205,7 +2240,7 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
         }
         
         // Obscurity Score
-        let popularityScore = (100.0 - Double(track.popularity)) / 100.0
+        let popularityScore = (100.0 - Double(track.popularityOrNeutral)) / 100.0
         let followerScore = track.artists.first?.followers.flatMap { followers in
             (Double(followerThreshold) - Double(followers.total)) / Double(followerThreshold)
         } ?? 0.5
@@ -2229,10 +2264,12 @@ class EnhancedHiddenGemsDiscovery: ObservableObject {
             reasons.append("\(formatNumber(followers)) followers")
         }
         
-        if track.popularity < 10 {
-            reasons.append("ultra-rare")
-        } else if track.popularity < 20 {
-            reasons.append("very obscure")
+        if let popularity = track.popularity {
+            if popularity < 10 {
+                reasons.append("ultra-rare")
+            } else if popularity < 20 {
+                reasons.append("very obscure")
+            }
         }
         
         if scores.recency > 0.8 {

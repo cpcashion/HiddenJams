@@ -27,13 +27,13 @@ class StreamCountService {
     func getStreamCount(track: SpotifyTrack) async throws -> Int {
         // If no API key, use popularity as a rough proxy
         if useMockData {
-            return estimateStreamCountFrom(popularity: track.popularity)
+            return estimateStreamCountFrom(popularity: track.popularityOrNeutral)
         }
         
         // TODO: Implement actual RapidAPI call
         // Example endpoint: https://spotify-scraper.p.rapidapi.com/v1/track/metadata?trackId={trackId}
         
-        return estimateStreamCountFrom(popularity: track.popularity)
+        return estimateStreamCountFrom(popularity: track.popularityOrNeutral)
     }
     
     // MARK: - Batch Get Stream Counts
@@ -42,7 +42,7 @@ class StreamCountService {
         if useMockData {
             // ULTRA-STRICT: Only popularity < 5 (targets <1K-5K plays)
             // Combined with 2024-only searches, this gives best chance at <1K
-            let filtered = tracks.filter { $0.popularity < 5 }
+            let filtered = tracks.filter { $0.popularityOrNeutral < 5 }
             print("📊 Filtered \(tracks.count) tracks → \(filtered.count) with popularity < 5")
             return filtered
         }
