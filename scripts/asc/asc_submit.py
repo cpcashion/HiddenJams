@@ -459,12 +459,14 @@ if s and s.get("data"):
     sa = get(f"/v1/subscriptions/{SUB_ID}/subscriptionAvailability")
     if sa and sa.get("data"): print(f"  subscriptionAvailability newTerritories={sa['data']['attributes'].get('availableInNewTerritories')}")
     else: note("subscriptionAvailability not set")
-    g = get(f"/v1/subscriptions/{SUB_ID}/group")
-    if g and g.get("data"):
-        gl = get(f"/v1/subscriptionGroups/{g['data']['id']}/subscriptionGroupLocalizations")
-        for l in (gl or {}).get("data", []):
-            print(f"  group loc [{l['attributes'].get('locale')}] name={present(l['attributes'].get('name'))} state={l['attributes'].get('state')}")
-        if not (gl or {}).get("data"): gap("subscription group has no localization")
+    sg = get(f"/v1/apps/{APP_ID}/subscriptionGroups", {"include": "subscriptions,subscriptionGroupLocalizations", "limit": 20})
+    for grp in (sg or {}).get("data", []):
+        rel = grp.get("relationships", {})
+        sub_ids = [x["id"] for x in (rel.get("subscriptions", {}).get("data") or [])]
+        loc_ids = {x["id"] for x in (rel.get("subscriptionGroupLocalizations", {}).get("data") or [])}
+        locs_g = [i for i in (sg or {}).get("included", []) if i["type"] == "subscriptionGroupLocalizations" and i["id"] in loc_ids]
+        print(f"  group {grp['id']} refName={grp['attributes'].get('referenceName')!r} subs={sub_ids} localizations={[(l['attributes'].get('locale'), present(l['attributes'].get('name')), l['attributes'].get('state')) for l in locs_g]}")
+        if SUB_ID in sub_ids and not locs_g: gap("subscription group has no localization (App Store display name)")
     if WRITE: s = get(f"/v1/subscriptions/{SUB_ID}")
     st = s["data"]["attributes"].get("state")
     if st == "READY_TO_SUBMIT": sub_ready = True
