@@ -214,11 +214,9 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         return list
     }
     /// Shots to capture this run (empty = all).
-    private static let only: [String] = [
-        "sheet:old:se:medium", "sheet:old:se:large", "sheet:old:promax:medium", "sheet:old:promax:large",
-        "sheet:new:se:medium", "sheet:new:se:large", "sheet:new:promax:medium", "sheet:new:promax:large",
-        "facts:old:0", "facts:new:0", "facts:new:1", "facts-live", "profile-after",
-    ]
+    /// Build 88 fixes were captured with: the sheet:{old,new}:{se,promax}:{medium,large}
+    /// states, facts:old:0, facts:new:0, facts:new:1, profile-after (run 44906538787).
+    private static let only: [String] = []
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.

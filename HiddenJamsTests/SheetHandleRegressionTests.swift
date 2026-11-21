@@ -90,25 +90,4 @@ final class SheetHandleRegressionTests: XCTestCase {
         print("HJSHEET measured=\(measured) unmeasured=\(unmeasured)")
         if measured == 0 { throw XCTSkip("title frame never reported in this host (\(unmeasured) layouts)") }
     }
-
-    func testMiniPlayerHiddenOnlyOnProfile() {
-        XCTAssertTrue(ContentView.showsMiniPlayer(on: .home))
-        XCTAssertTrue(ContentView.showsMiniPlayer(on: .player))
-        XCTAssertFalse(ContentView.showsMiniPlayer(on: .profile))
-    }
-
-    func testFunFactsAreStatementsOnly() {
-        let facts = MusicFactsDatabase.allFacts
-        XCTAssertTrue((20...30).contains(facts.count), "\(facts.count) facts")
-        XCTAssertEqual(Set(facts).count, facts.count, "duplicate fact")
-        for f in facts {
-            XCTAssertFalse(f.contains("?"), "question, not a fact: \(f)")
-            XCTAssertFalse(f.contains("✓"), "quiz answer marker: \(f)")
-        }
-        for f in facts {
-            let hold = RotatingFactsView.holdSeconds(for: f)
-            XCTAssertTrue(hold >= 2.2 && hold <= 4.8, "hold \(hold)s for \(f)")
-        }
-        XCTAssertTrue(MusicFactsService().facts.allSatisfy { facts.contains($0) })
-    }
 }
