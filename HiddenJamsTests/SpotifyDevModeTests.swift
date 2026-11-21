@@ -9,7 +9,8 @@
 //  All network calls are stubbed; nothing reaches Spotify.
 //
 
-import XCTest
+import Testing
+import Foundation
 @testable import HiddenJams
 
 // MARK: - Fixtures
@@ -103,163 +104,168 @@ final class SpotifyStubURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+// Swift Testing, not XCTest: XCTest waits for async tests by spinning the
+// main run loop, which ran the host app's .task jobs re-entrantly and hit
+// the known simulator host malloc abort (0x262543f40). Serialized because
+// the URLProtocol stub is shared.
+@Suite(.serialized)
 @MainActor
-final class SpotifyDevModeTests: XCTestCase {
+struct SpotifyDevModeTests {
 
     // MARK: - Optional popularity
 
-    func testDevModeTrackWithoutPopularityDecodes() throws {
+    @Test func testDevModeTrackWithoutPopularityDecodes() throws {
         let track = try JSONDecoder().decode(SpotifyTrack.self, from: Data(DevModeJSON.track.utf8))
-        XCTAssertEqual(track.name, "Deep Cut")
-        XCTAssertNil(track.popularity, "Dev Mode omits popularity: it must decode as unknown")
-        XCTAssertEqual(track.popularityOrNeutral, SpotifyTrack.neutralPopularity)
-        XCTAssertEqual(track.isrc, "USABC2600001")
+        #expect(track.name == "Deep Cut")
+        #expect(track.popularity == nil, "Dev Mode omits popularity: it must decode as unknown")
+        #expect(track.popularityOrNeutral == SpotifyTrack.neutralPopularity)
+        #expect(track.isrc == "USABC2600001")
     }
 
-    func testDevModeLikedTracksPageDecodes() throws {
+    @Test func testDevModeLikedTracksPageDecodes() throws {
         let page = try JSONDecoder().decode(PagingObject<SavedTrack>.self, from: Data(DevModeJSON.likedTracksPage.utf8))
-        XCTAssertEqual(page.items.count, 1)
-        XCTAssertNil(page.items[0].track.popularity)
+        #expect(page.items.count == 1)
+        #expect(page.items[0].track.popularity == nil)
     }
 
-    func testUnknownPopularityIsNeverScoredAsRare() throws {
+    @Test func testUnknownPopularityIsNeverScoredAsRare() throws {
         let track = try JSONDecoder().decode(SpotifyTrack.self, from: Data(DevModeJSON.track.utf8))
         // Neutral, not 0 ("ultra-rare").
-        XCTAssertGreaterThanOrEqual(track.popularityOrNeutral, 50)
+        #expect(track.popularityOrNeutral >= 50)
         // Profile obscurity: unknown tracks don't count as obscure.
-        XCTAssertEqual(TasteProfileGenerator.calculateObscurityScore(from: [track, track]), 0)
+        #expect(TasteProfileGenerator.calculateObscurityScore(from: [track, track]) == 0)
         // Deck slider: unknown popularity adds no relaxation either way.
-        XCTAssertEqual(GenreDeckBuilder.relaxationLevel(popularity: nil, followers: nil,
-                                                        popularityCeiling: 15, followerCeiling: 2_000), 0)
-        XCTAssertEqual(GenreDeckBuilder.relaxationLevel(popularity: 45, followers: nil,
-                                                        popularityCeiling: 15, followerCeiling: 2_000), 3)
+        #expect(GenreDeckBuilder.relaxationLevel(popularity: nil, followers: nil,
+                                                        popularityCeiling: 15, followerCeiling: 2_000) == 0)
+        #expect(GenreDeckBuilder.relaxationLevel(popularity: 45, followers: nil,
+                                                        popularityCeiling: 15, followerCeiling: 2_000) == 3)
     }
 
-    func testTrackWithPopularityStillDecodes() throws {
+    @Test func testTrackWithPopularityStillDecodes() throws {
         let json = DevModeJSON.track.replacingOccurrences(of: "\"name\": \"Deep Cut\",",
                                                           with: "\"name\": \"Deep Cut\", \"popularity\": 12,")
         let track = try JSONDecoder().decode(SpotifyTrack.self, from: Data(json.utf8))
-        XCTAssertEqual(track.popularity, 12)
-        XCTAssertEqual(track.popularityOrNeutral, 12)
+        #expect(track.popularity == 12)
+        #expect(track.popularityOrNeutral == 12)
     }
 
     // MARK: - 403 classification
 
-    func testUserScoped403IsAccessDenied() {
+    @Test func testUserScoped403IsAccessDenied() {
         let me = URL(string: "https://api.spotify.com/v1/me/tracks?limit=50&offset=0")!
         let search = URL(string: "https://api.spotify.com/v1/search?q=x&type=track")!
-        XCTAssertTrue(SpotifyAccessGate.isUserAccessDenied(status: 403, url: me))
-        XCTAssertTrue(SpotifyAccessGate.isUserAccessDenied(status: 403, url: search))
-        XCTAssertTrue(SpotifyAccessGate.isUserAccessDenied(
+        #expect(SpotifyAccessGate.isUserAccessDenied(status: 403, url: me))
+        #expect(SpotifyAccessGate.isUserAccessDenied(status: 403, url: search))
+        #expect(SpotifyAccessGate.isUserAccessDenied(
             status: 403, url: URL(string: "https://api.spotify.com/v1/me")!))
-        XCTAssertFalse(SpotifyAccessGate.isUserAccessDenied(status: 200, url: me))
-        XCTAssertFalse(SpotifyAccessGate.isUserAccessDenied(status: 401, url: me))
+        #expect(!(SpotifyAccessGate.isUserAccessDenied(status: 200, url: me)))
+        #expect(!(SpotifyAccessGate.isUserAccessDenied(status: 401, url: me)))
     }
 
-    func testEndpointGating403IsNotAccessDenied() {
+    @Test func testEndpointGating403IsNotAccessDenied() {
         // Batch lookups and deprecated endpoints 403 for every Dev-Mode user.
         let batch = URL(string: "https://api.spotify.com/v1/artists?ids=a,b")!
         let related = URL(string: "https://api.spotify.com/v1/artists/a/related-artists")!
         let recs = URL(string: "https://api.spotify.com/v1/recommendations?seed_genres=rock")!
-        XCTAssertFalse(SpotifyAccessGate.isUserAccessDenied(status: 403, url: batch, body: Data(DevModeJSON.forbidden.utf8)))
-        XCTAssertFalse(SpotifyAccessGate.isUserAccessDenied(status: 403, url: related))
-        XCTAssertFalse(SpotifyAccessGate.isUserAccessDenied(status: 403, url: recs))
+        #expect(!(SpotifyAccessGate.isUserAccessDenied(status: 403, url: batch, body: Data(DevModeJSON.forbidden.utf8))))
+        #expect(!(SpotifyAccessGate.isUserAccessDenied(status: 403, url: related)))
+        #expect(!(SpotifyAccessGate.isUserAccessDenied(status: 403, url: recs)))
         // ...unless Spotify says outright that the user isn't registered.
-        XCTAssertTrue(SpotifyAccessGate.isUserAccessDenied(status: 403, url: batch, body: Data(DevModeJSON.notRegistered.utf8)))
+        #expect(SpotifyAccessGate.isUserAccessDenied(status: 403, url: batch, body: Data(DevModeJSON.notRegistered.utf8)))
     }
 
     // MARK: - 429 cap
 
-    func testRateLimitWaitIsCapped() {
-        XCTAssertEqual(SpotifyAccessGate.rateLimitWait(retryAfterHeader: nil, attempt: 0), 2)
-        XCTAssertEqual(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "3", attempt: 0), 4)
-        XCTAssertEqual(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "20", attempt: 1), SpotifyAccessGate.maxRateLimitWait)
-        XCTAssertNil(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "3600", attempt: 0), "long Retry-After fails fast")
-        XCTAssertNil(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "1", attempt: 3), "max 3 retries")
-        XCTAssertEqual(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "garbage", attempt: 0), 2)
+    @Test func testRateLimitWaitIsCapped() {
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: nil, attempt: 0) == 2)
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "3", attempt: 0) == 4)
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "20", attempt: 1) == SpotifyAccessGate.maxRateLimitWait)
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "3600", attempt: 0) == nil, "long Retry-After fails fast")
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "1", attempt: 3) == nil, "max 3 retries")
+        #expect(SpotifyAccessGate.rateLimitWait(retryAfterHeader: "garbage", attempt: 0) == 2)
     }
 
-    func testAPIServiceFailsFastOnLongRetryAfter() async {
+    @Test func testAPIServiceFailsFastOnLongRetryAfter() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
         SpotifyStubURLProtocol.stub { _ in .init(status: 429, body: "{}", headers: ["Retry-After": "3600"]) }
         let started = Date()
         do {
             _ = try await api.getCurrentUser(token: "t")
-            XCTFail("expected 429")
+            Issue.record("expected 429")
         } catch APIError.httpError(let status) {
-            XCTAssertEqual(status, 429)
+            #expect(status == 429)
         } catch {
-            XCTFail("unexpected \(error)")
+            Issue.record("unexpected \(error)")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 3, "must not sleep for Retry-After: 3600")
-        XCTAssertEqual(SpotifyStubURLProtocol.requestCount, 1)
-        XCTAssertFalse(monitor.isLimitedNow)
+        #expect(Date().timeIntervalSince(started) < 3, "must not sleep for Retry-After: 3600")
+        #expect(SpotifyStubURLProtocol.requestCount == 1)
+        #expect(!monitor.isLimitedNow)
     }
 
     // MARK: - SpotifyAPIService (stubbed)
 
-    func testNotAllowlistedUser403FlipsMonitor() async {
+    @Test func testNotAllowlistedUser403FlipsMonitor() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
         SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
         do {
             _ = try await api.getAllLikedTracks(token: "t") { _, _ in }
-            XCTFail("expected 403")
+            Issue.record("expected 403")
         } catch APIError.httpError(let status) {
-            XCTAssertEqual(status, 403)
+            #expect(status == 403)
         } catch {
-            XCTFail("unexpected \(error)")
+            Issue.record("unexpected \(error)")
         }
-        XCTAssertTrue(monitor.isLimitedNow)
+        #expect(monitor.isLimitedNow)
     }
 
-    func testBatchArtists403DoesNotFlipMonitor() async {
+    @Test func testBatchArtists403DoesNotFlipMonitor() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
         SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.forbidden) }
         let url = URL(string: "https://api.spotify.com/v1/artists?ids=a,b")!
         do {
             let _: [String: [SpotifyArtist]] = try await api.makeRequest(url: url, token: "t")
-            XCTFail("expected 403")
+            Issue.record("expected 403")
         } catch {}
-        XCTAssertFalse(monitor.isLimitedNow, "endpoint gating is not a user-access problem")
+        #expect(!monitor.isLimitedNow, "endpoint gating is not a user-access problem")
     }
 
-    func testDevModeLikedTracksLoadThroughAPIService() async throws {
+    @Test func testDevModeLikedTracksLoadThroughAPIService() async throws {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
         SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: DevModeJSON.likedTracksPage) }
         let tracks = try await api.getAllLikedTracks(token: "t") { _, _ in }
-        XCTAssertEqual(tracks.count, 1, "liked tracks must not come back empty in Dev Mode")
-        XCTAssertNil(tracks.first?.popularity)
-        XCTAssertFalse(monitor.isLimitedNow)
+        #expect(tracks.count == 1, "liked tracks must not come back empty in Dev Mode")
+        #expect(tracks.first?.popularity == nil)
+        #expect(!monitor.isLimitedNow)
     }
 
     // MARK: - Deck catalog (stubbed)
 
-    func testDeckCatalogDecodesDevModeSearch() async {
+    @Test func testDeckCatalogDecodesDevModeSearch() async {
         SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: DevModeJSON.searchPage) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let page = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
-        XCTAssertEqual(page?.tracks.count, 1, "the Spotify deck must not be empty in Dev Mode")
-        XCTAssertEqual(catalog.usablePages, 1)
-        XCTAssertEqual(catalog.undecodablePages, 0)
-        XCTAssertFalse(catalog.accessDenied)
+        #expect(page?.tracks.count == 1, "the Spotify deck must not be empty in Dev Mode")
+        #expect(catalog.usablePages == 1)
+        #expect(catalog.undecodablePages == 0)
+        #expect(!catalog.accessDenied)
     }
 
-    func testDeckCatalogFlagsNotAllowlisted403AndStopsSearching() async {
+    @Test func testDeckCatalogFlagsNotAllowlisted403AndStopsSearching() async {
         SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let first = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
         let second = await catalog.searchTracks(query: "genre:\"rock\"", offset: 0)
-        XCTAssertNil(first)
-        XCTAssertNil(second)
-        XCTAssertTrue(catalog.accessDenied)
-        XCTAssertEqual(SpotifyStubURLProtocol.requestCount, 1, "no more searches once Spotify said 403")
+        #expect(first == nil)
+        #expect(second == nil)
+        #expect(catalog.accessDenied)
+        #expect(SpotifyStubURLProtocol.requestCount == 1, "no more searches once Spotify said 403")
     }
 
-    func testDeckCatalogCountsUndecodablePages() async {
+    @Test func testDeckCatalogCountsUndecodablePages() async {
         // A page whose items can't decode (simulates the old required-field break).
         let broken = """
         { "tracks": { "items": [ { "id": "x", "name": "No album or uri" } ], "total": 1 } }
@@ -267,39 +273,39 @@ final class SpotifyDevModeTests: XCTestCase {
         SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: broken) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let page = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
-        XCTAssertEqual(page?.tracks.count ?? 0, 0)
-        XCTAssertEqual(catalog.undecodablePages, 1)
-        XCTAssertEqual(catalog.usablePages, 0)
+        #expect((page?.tracks.count ?? 0) == 0)
+        #expect(catalog.undecodablePages == 1)
+        #expect(catalog.usablePages == 0)
     }
 
     // MARK: - Monitor
 
-    func testRepeatedEmptyOrUndecodableResultsFlipMonitor() {
+    @Test func testRepeatedEmptyOrUndecodableResultsFlipMonitor() {
         let empty = SpotifyAccessMonitor()
         empty.recordEmptyResult()
-        XCTAssertFalse(empty.isLimitedNow, "one empty deck isn't enough")
+        #expect(!empty.isLimitedNow, "one empty deck isn't enough")
         empty.recordEmptyResult()
-        XCTAssertTrue(empty.isLimitedNow)
+        #expect(empty.isLimitedNow)
 
         let decode = SpotifyAccessMonitor()
         decode.recordDecodeFailure()
-        XCTAssertFalse(decode.isLimitedNow)
+        #expect(!decode.isLimitedNow)
         decode.recordDecodeFailure()
-        XCTAssertTrue(decode.isLimitedNow)
+        #expect(decode.isLimitedNow)
 
         let recovering = SpotifyAccessMonitor()
         recovering.recordEmptyResult()
         recovering.recordSuccess()
         recovering.recordEmptyResult()
-        XCTAssertFalse(recovering.isLimitedNow, "a good deck resets the streak")
+        #expect(!recovering.isLimitedNow, "a good deck resets the streak")
 
         decode.reset()
-        XCTAssertFalse(decode.isLimitedNow, "a fresh Spotify sign-in tries Spotify again")
+        #expect(!decode.isLimitedNow, "a fresh Spotify sign-in tries Spotify again")
     }
 
-    func testEarlyAccessCopy() {
-        XCTAssertTrue(SpotifyAccessGate.limitedMessage.contains("early access"))
-        XCTAssertTrue(SpotifyAccessGate.limitedMessage.contains("Apple Music"))
-        XCTAssertEqual(SpotifyAccessGate.continueButtonTitle, "Continue with Apple Music")
+    @Test func testEarlyAccessCopy() {
+        #expect(SpotifyAccessGate.limitedMessage.contains("early access"))
+        #expect(SpotifyAccessGate.limitedMessage.contains("Apple Music"))
+        #expect(SpotifyAccessGate.continueButtonTitle == "Continue with Apple Music")
     }
 }
