@@ -185,7 +185,7 @@ def paywall_step(apply=False):
     print(f"  paywall file in branch: {have_file}; current review screenshot: {('present ' + str(state_of(cur))) if cur else 'MISSING'}")
     if not have_file:
         return cur
-    if cur and state_of(cur) == "COMPLETE" and cur["attributes"].get("fileName") == os.path.basename(PAYWALL_FILE):
+    if cur and state_of(cur) == "COMPLETE":
         print("  PLAN: paywall review screenshot already uploaded, no change"); return cur
     print("  PLAN: upload paywall-review.png as subscription review screenshot" + (" (replacing existing)" if cur else ""))
     if not apply: return cur
