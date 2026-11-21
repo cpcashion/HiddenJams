@@ -49,14 +49,38 @@ private enum DevModeJSON {
 }
 
 /// Stubs every request made through a session that registers it.
-final class SpotifyStubURLProtocol: URLProtocol {
-    struct Reply {
+/// URLSession calls it on its own threads, so state is lock-protected and
+/// the handler is @Sendable (nonisolated).
+final class SpotifyStubURLProtocol: URLProtocol, @unchecked Sendable {
+    struct Reply: Sendable {
         var status: Int
         var body: String
         var headers: [String: String] = [:]
     }
-    static var handler: ((URLRequest) -> Reply)?
-    static var requestCount = 0
+    typealias Handler = @Sendable (URLRequest) -> Reply
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var _handler: Handler?
+    nonisolated(unsafe) private static var _requestCount = 0
+
+    static func stub(_ handler: @escaping Handler) {
+        lock.lock(); defer { lock.unlock() }
+        _handler = handler
+        _requestCount = 0
+    }
+
+    static var requestCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _requestCount
+    }
+
+    private static func next(for request: URLRequest) -> Reply {
+        lock.lock()
+        _requestCount += 1
+        let current = _handler
+        lock.unlock()
+        return current?(request) ?? Reply(status: 500, body: "{}")
+    }
 
     static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -68,8 +92,7 @@ final class SpotifyStubURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Self.requestCount += 1
-        let reply = Self.handler?(request) ?? Reply(status: 500, body: "{}")
+        let reply = Self.next(for: request)
         let response = HTTPURLResponse(url: request.url!, statusCode: reply.status,
                                        httpVersion: "HTTP/1.1", headerFields: reply.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -80,18 +103,8 @@ final class SpotifyStubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+@MainActor
 final class SpotifyDevModeTests: XCTestCase {
-
-    override func setUp() {
-        super.setUp()
-        SpotifyStubURLProtocol.handler = nil
-        SpotifyStubURLProtocol.requestCount = 0
-    }
-
-    override func tearDown() {
-        SpotifyStubURLProtocol.handler = nil
-        super.tearDown()
-    }
 
     // MARK: - Optional popularity
 
@@ -169,7 +182,7 @@ final class SpotifyDevModeTests: XCTestCase {
     func testAPIServiceFailsFastOnLongRetryAfter() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 429, body: "{}", headers: ["Retry-After": "3600"]) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 429, body: "{}", headers: ["Retry-After": "3600"]) }
         let started = Date()
         do {
             _ = try await api.getCurrentUser(token: "t")
@@ -189,7 +202,7 @@ final class SpotifyDevModeTests: XCTestCase {
     func testNotAllowlistedUser403FlipsMonitor() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
         do {
             _ = try await api.getAllLikedTracks(token: "t") { _, _ in }
             XCTFail("expected 403")
@@ -204,7 +217,7 @@ final class SpotifyDevModeTests: XCTestCase {
     func testBatchArtists403DoesNotFlipMonitor() async {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 403, body: DevModeJSON.forbidden) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.forbidden) }
         let url = URL(string: "https://api.spotify.com/v1/artists?ids=a,b")!
         do {
             let _: [String: [SpotifyArtist]] = try await api.makeRequest(url: url, token: "t")
@@ -216,7 +229,7 @@ final class SpotifyDevModeTests: XCTestCase {
     func testDevModeLikedTracksLoadThroughAPIService() async throws {
         let monitor = SpotifyAccessMonitor()
         let api = SpotifyAPIService(session: SpotifyStubURLProtocol.session(), accessMonitor: monitor)
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 200, body: DevModeJSON.likedTracksPage) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: DevModeJSON.likedTracksPage) }
         let tracks = try await api.getAllLikedTracks(token: "t") { _, _ in }
         XCTAssertEqual(tracks.count, 1, "liked tracks must not come back empty in Dev Mode")
         XCTAssertNil(tracks.first?.popularity)
@@ -226,7 +239,7 @@ final class SpotifyDevModeTests: XCTestCase {
     // MARK: - Deck catalog (stubbed)
 
     func testDeckCatalogDecodesDevModeSearch() async {
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 200, body: DevModeJSON.searchPage) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: DevModeJSON.searchPage) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let page = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
         XCTAssertEqual(page?.tracks.count, 1, "the Spotify deck must not be empty in Dev Mode")
@@ -236,7 +249,7 @@ final class SpotifyDevModeTests: XCTestCase {
     }
 
     func testDeckCatalogFlagsNotAllowlisted403AndStopsSearching() async {
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 403, body: DevModeJSON.notRegistered) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let first = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
         let second = await catalog.searchTracks(query: "genre:\"rock\"", offset: 0)
@@ -251,7 +264,7 @@ final class SpotifyDevModeTests: XCTestCase {
         let broken = """
         { "tracks": { "items": [ { "id": "x", "name": "No album or uri" } ], "total": 1 } }
         """
-        SpotifyStubURLProtocol.handler = { _ in .init(status: 200, body: broken) }
+        SpotifyStubURLProtocol.stub { _ in .init(status: 200, body: broken) }
         let catalog = SpotifyGenreDeckCatalog(token: "t", session: SpotifyStubURLProtocol.session())
         let page = await catalog.searchTracks(query: "genre:\"indie\"", offset: 0)
         XCTAssertEqual(page?.tracks.count ?? 0, 0)
