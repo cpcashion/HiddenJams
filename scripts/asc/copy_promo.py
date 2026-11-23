@@ -105,3 +105,49 @@ def eula(get, call, APP_ID, write):
     for v in versions(get, APP_ID):
         print(f"  after: {v['attributes']['versionString']} state={v['attributes']['appStoreState']}")
     sys.exit(0 if ok else 9)
+
+def resubmit(get, call, APP_ID, RS_ID="07b5db50-fcf3-42d6-9cad-8c6a49bf9548"):
+    """Resubmit the UNRESOLVED_ISSUES submission: resolve REJECTED items, then submitted=true. Stops on any doubt."""
+    import time
+    r = get(f"/v1/reviewSubmissions/{RS_ID}")
+    st = r and r["data"]["attributes"].get("state")
+    print("  submission state:", st)
+    if st != "UNRESOLVED_ISSUES": print("  STOP: not UNRESOLVED_ISSUES"); sys.exit(10)
+    it = get(f"/v1/reviewSubmissions/{RS_ID}/items", {"include": "appStoreVersion", "limit": 50})
+    items = (it or {}).get("data", [])
+    import base64
+    def kind(i):
+        try:
+            raw = base64.urlsafe_b64decode(i + "=" * (-len(i) % 4)).decode().split("|")
+            return raw[1]
+        except Exception: return "?"
+    summary = [(x["id"][:12], kind(x["id"]), x["attributes"].get("state")) for x in items]
+    print("  items (id-prefix, kind, state):", summary)
+    kinds = {kind(x["id"]) for x in items}
+    if not {"6", "18", "19"} <= kinds or any(x["attributes"].get("state") in ("REMOVED",) for x in items):
+        print("  STOP: expected version(6) + subscription version(18) + group(19) items, none removed"); sys.exit(11)
+    # description must contain EULA link
+    for v in versions(get, APP_ID):
+        if v["attributes"]["versionString"] != "1.6.1": continue
+        locs = get(f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations", {"limit": 50})
+        for loc in (locs or {}).get("data", []):
+            if EULA_URL not in (loc["attributes"].get("description") or ""):
+                print(f"  STOP: [{loc['attributes']['locale']}] description lacks Terms of Use link"); sys.exit(12)
+    for x in items:
+        if x["attributes"].get("state") == "REJECTED":
+            _, err = call("PATCH", f"/v1/reviewSubmissionItems/{x['id']}", {"data": {"type": "reviewSubmissionItems", "id": x["id"], "attributes": {"resolved": True}}})
+            print(f"  resolve item kind={kind(x['id'])} ->", err or "ok")
+            if err: sys.exit(13)
+    time.sleep(5)
+    _, err = call("PATCH", f"/v1/reviewSubmissions/{RS_ID}", {"data": {"type": "reviewSubmissions", "id": RS_ID, "attributes": {"submitted": True}}})
+    print("  submitted=true ->", err or "ok")
+    if err: sys.exit(14)
+    time.sleep(20)
+    r = get(f"/v1/reviewSubmissions/{RS_ID}")
+    print("  submission after:", r and r["data"]["attributes"])
+    it = get(f"/v1/reviewSubmissions/{RS_ID}/items", {"limit": 50})
+    print("  items after:", [(kind(x["id"]), x["attributes"].get("state")) for x in (it or {}).get("data", [])])
+    for v in versions(get, APP_ID):
+        print(f"  version {v['attributes']['versionString']} state={v['attributes']['appStoreState']}")
+    s = get("/v1/subscriptions/6831179739")
+    print("  subscription state:", s and s["data"]["attributes"].get("state"))
