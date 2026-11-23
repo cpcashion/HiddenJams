@@ -20,7 +20,7 @@ BASE = "https://api.appstoreconnect.apple.com"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 PAYWALL_FILE = os.path.join(ASSETS, "paywall-review.png")
-WRITE = MODE in ("submit", "promo")   # promo writes ONLY promotionalText, then exits
+WRITE = MODE in ("submit", "promo", "eula")   # promo writes ONLY promotionalText, then exits
 REVIEW_VIDEO = os.path.join(ASSETS, "app-review.mp4")
 NOTES_PUBKEY = os.path.join(HERE, "notes_pubkey.pem")
 AGE_ANSWERS = {"datingAndRelationships": False, "sharedLocation": False}
@@ -246,6 +246,11 @@ def encrypt_for_box(text):
     ek = pub.encrypt(k, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
     b = lambda x: base64.b64encode(x).decode()
     return _j.dumps({"ek": b(ek), "n": b(n), "ct": b(ct)})
+
+if MODE in ("eula", "eula-plan"):
+    sys.path.insert(0, HERE)
+    import copy_promo
+    copy_promo.eula(get, call, APP_ID, write=(MODE == "eula"))
 
 if MODE in ("copy", "promo"):
     sys.path.insert(0, HERE)

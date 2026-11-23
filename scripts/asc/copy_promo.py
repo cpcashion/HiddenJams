@@ -57,3 +57,51 @@ def promo(get, call, APP_ID, targets):
     for v in versions(get, APP_ID):
         print(f"  after: {v['attributes']['versionString']} state={v['attributes']['appStoreState']}")
     sys.exit(0 if ok else 9)
+
+EULA_URL = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+
+def _privacy_url(get, APP_ID):
+    d = get(f"/v1/apps/{APP_ID}/appInfos")
+    infos = (d or {}).get("data", [])
+    # prefer the non-live appInfo (the one tied to the version being edited)
+    infos.sort(key=lambda ai: (ai["attributes"].get("appStoreState") or ai["attributes"].get("state")) in ("READY_FOR_SALE", "READY_FOR_DISTRIBUTION"))
+    for ai in infos:
+        st = ai["attributes"].get("appStoreState") or ai["attributes"].get("state")
+        ld = get(f"/v1/appInfos/{ai['id']}/appInfoLocalizations")
+        for l in (ld or {}).get("data", []):
+            la = l["attributes"]
+            print(f"  appInfo {ai['id']} ({st}) [{la.get('locale')}] privacyPolicyUrl={la.get('privacyPolicyUrl')}")
+            if la.get("locale") == "en-US" and la.get("privacyPolicyUrl"):
+                return la["privacyPolicyUrl"]
+    return None
+
+def eula(get, call, APP_ID, write):
+    """Append Terms of Use + Privacy Policy lines to the 1.6.1 description only. write=False -> plan only."""
+    pp = _privacy_url(get, APP_ID)
+    if not pp:
+        print("  BLOCKER: en-US privacyPolicyUrl is not set; not inventing one"); sys.exit(8)
+    block = f"Terms of Use: {EULA_URL}\nPrivacy Policy: {pp}"
+    ok = True
+    for v in versions(get, APP_ID):
+        if v["attributes"]["versionString"] != "1.6.1": continue
+        print(f"  version 1.6.1 state={v['attributes']['appStoreState']}")
+        locs = get(f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations", {"limit": 50})
+        for loc in (locs or {}).get("data", []):
+            L = loc["attributes"]["locale"]; desc = loc["attributes"].get("description") or ""
+            if EULA_URL in desc:
+                print(f"  [{L}] Terms of Use link already present, skip"); continue
+            new = desc.rstrip() + "\n\n" + block
+            print(f"  [{L}] PLAN append ({len(desc)} -> {len(new)} ch):\n{block}")
+            if len(new) > 4000: print(f"  [{L}] BLOCKER: would exceed 4000"); ok = False; continue
+            if not write: continue
+            _, err = call("PATCH", f"/v1/appStoreVersionLocalizations/{loc['id']}",
+                          {"data": {"type": "appStoreVersionLocalizations", "id": loc["id"], "attributes": {"description": new}}})
+            print(f"  [{L}] PATCH description ->", err or "ok")
+            if err: ok = False; continue
+            chk = get(f"/v1/appStoreVersionLocalizations/{loc['id']}")
+            rb = (chk or {}).get("data", {}).get("attributes", {}).get("description") or ""
+            print(f"  [{L}] READBACK matches={rb == new} len={len(rb)}\n<<description>>\n{rb}\n<</description>>")
+            if rb != new: ok = False
+    for v in versions(get, APP_ID):
+        print(f"  after: {v['attributes']['versionString']} state={v['attributes']['appStoreState']}")
+    sys.exit(0 if ok else 9)
