@@ -254,6 +254,11 @@ if MODE in ("copy", "promo"):
         copy_promo.copy_audit(get, APP_ID, SUB_ID); sys.exit(0)
     copy_promo.promo(get, call, APP_ID, [x.strip() for x in os.environ.get("PROMO_VERSIONS", "1.6.1").split(",")])
 
+if MODE == "review":
+    sys.path.insert(0, HERE)
+    import diag
+    diag.review(get, APP_ID, SUB_ID); sys.exit(0)
+
 if MODE == "diag":
     sys.path.insert(0, HERE)
     import diag
