@@ -4,7 +4,11 @@ on:
     branches: [diag/crash-91-symbolicate]
 jobs:
   sym:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode 26.3 (same as release run 44946151271)
@@ -43,6 +47,6 @@ jobs:
       - name: Upload dSYM
         uses: actions/upload-artifact@v4
         with:
-          name: diag-b91-rebuild-dsym
+          name: diag-b91-rebuild-dsym-${{ matrix.os }}
           path: ${{ runner.temp }}/HJ.xcarchive/dSYMs
           retention-days: 14
