@@ -1,0 +1,48 @@
+name: Diag - symbolicate build 91 crash
+on:
+  push:
+    branches: [diag/crash-91-symbolicate]
+jobs:
+  sym:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26.3 (same as release run 44946151271)
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer && xcodebuild -version
+      - name: Dummy Secrets.plist (no secrets)
+        run: |
+          python3 -c "import plistlib;plistlib.dump({'LastFmAPIKey':'x','OpenAIAPIKey':''},open('HiddenJams/Secrets.plist','wb'))"
+      - name: Archive unsigned
+        run: |
+          set -o pipefail
+          xcodebuild archive -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/HJ.xcarchive" \
+            DEVELOPMENT_TEAM=3CQEKUP494 CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | tail -20
+      - name: UUIDs + symbolicate
+        run: |
+          A="$RUNNER_TEMP/HJ.xcarchive"
+          APP="$A/Products/Applications/HiddenJams.app/HiddenJams"
+          DSYM="$A/dSYMs/HiddenJams.app.dSYM"
+          echo "== want 206A18D1-4CD2-3A57-9314-2BAEA125D479"
+          dwarfdump --uuid "$APP" "$DSYM" || true
+          for o in 0x66a8 0xed51c 0x1646e1 0x1e33d 0x166e21 0x1e431; do
+            a=$(printf '0x%x' $((0x100000000 + o)))
+            echo "== frame off $o -> $a"
+            xcrun atos -arch arm64 -o "$DSYM/Contents/Resources/DWARF/HiddenJams" -l 0x100000000 $a
+          done
+          cat > /tmp/l.txt <<L
+          target create --arch arm64 "$APP"
+          target symbols add "$DSYM"
+          image lookup -v -a 0x1000ed51c
+          disassemble -s 0x1000ed4c0 -e 0x1000ed524
+          image lookup -v -a 0x1001646e0
+          disassemble -s 0x100164690 -e 0x1001646e4
+          image lookup -v -a 0x1000066a8
+          L
+          lldb -b -s /tmp/l.txt 2>&1 | cut -c1-300
+      - name: Upload dSYM
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-b91-rebuild-dsym
+          path: ${{ runner.temp }}/HJ.xcarchive/dSYMs
+          retention-days: 14
