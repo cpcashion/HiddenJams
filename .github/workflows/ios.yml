@@ -8,13 +8,15 @@ on:
 jobs:
   build:
     name: Build and test
-    runs-on: macos-15
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select latest Xcode
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+      - name: Select Xcode 27.2
+        # Pinned: Xcode 27.2 (iOS 27.2 SDK). Build 91 was built with Xcode 26.3
+        # and crashed on launch for App Review on iOS 27.2.1 (LAU-6).
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version
 
       - name: Show Xcode version
         run: xcodebuild -version
