@@ -374,6 +374,24 @@ else:
                 if err: gap(f"review notes update failed {err}")
         # --- demo account: not required (Spotify demo login not confirmed on allowlist; reviewers use Apple Music) ---
         final_notes = new_notes if info.get("changed") else (a.get("notes") or "")
+        # --- per-build sentence appended to the notes (text is public, notes body is not printed) ---
+        BUILD_NOTE = {"92": "Build 92 fixes the launch crash seen on iOS 27.2.1 in build 91."}.get(str(BUILD_NUMBER))
+        if BUILD_NOTE and BUILD_NOTE not in final_notes:
+            appended = final_notes.rstrip() + "\n\n" + BUILD_NOTE
+            print(f"  BUILD NOTE PLAN: append {BUILD_NOTE!r} ({len(final_notes)} -> {len(appended)}ch)")
+            if len(appended) > 4000: gap("notes with build sentence > 4000 chars")
+            elif WRITE:
+                _, err = call("PATCH", f"/v1/appStoreReviewDetails/{rdd['id']}", {"data": {"type": "appStoreReviewDetails", "id": rdd["id"], "attributes": {"notes": appended}}})
+                print("  append build note ->", err or "ok")
+                if err: gap(f"build note append failed {err}")
+                else:
+                    chk = get(f"/v1/appStoreReviewDetails/{rdd['id']}")
+                    got = ((chk or {}).get("data", {}).get("attributes", {}).get("notes") or "")
+                    print(f"  build note READBACK: present={BUILD_NOTE in got} len={len(got)}")
+                    if BUILD_NOTE not in got: gap("build note not present after PATCH")
+            final_notes = appended
+        elif BUILD_NOTE:
+            print("  BUILD NOTE PLAN: already present, no change")
         if re.search(r"demo\s*(account|login|spotify)|sign-?in information|test account|credentials", final_notes, re.I):
             gap("review notes (as they would be submitted) still mention a demo login/sign-in information")
         else:
@@ -532,6 +550,28 @@ if gaps:
 
 # ================= submit =================
 print("\n== SUBMIT")
+unresolved = [r for r in (rs or {}).get("data", []) if r["attributes"].get("state") == "UNRESOLVED_ISSUES"]
+if unresolved and not open_rs:
+    # Rejected submission: swap the build on the version, then resolve + resubmit the SAME submission
+    # (keeps the Unlimited Monthly + Hidden Jams Pro items; first-subscription POST is not allowed via API).
+    rsid = unresolved[0]["id"]; print("  resubmit path for", rsid)
+    if build["attributes"].get("usesNonExemptEncryption") is None:
+        _, err = call("PATCH", f"/v1/builds/{build['id']}", {"data": {"type": "builds", "id": build["id"], "attributes": {"usesNonExemptEncryption": False}}})
+        print("  set usesNonExemptEncryption=false:", err or "ok")
+        if err: sys.exit(3)
+    _, err = call("PATCH", f"/v1/appStoreVersions/{ver['id']}/relationships/build", {"data": {"type": "builds", "id": build["id"]}})
+    print("  attach build:", err or "ok")
+    if err: sys.exit(3)
+    bd = get(f"/v1/appStoreVersions/{ver['id']}/build")
+    got = (bd or {}).get("data") or {}
+    print(f"  attached build READBACK: {got.get('attributes', {}).get('version')}")
+    if str(got.get("attributes", {}).get("version")) != str(BUILD_NUMBER): print("  STOP: build not attached"); sys.exit(3)
+    sys.path.insert(0, HERE)
+    import copy_promo
+    copy_promo.resubmit(get, call, APP_ID, RS_ID=rsid)
+    bd = get(f"/v1/appStoreVersions/{ver['id']}/build")
+    print(f"  final attached build: {((bd or {}).get('data') or {}).get('attributes', {}).get('version')}")
+    sys.exit(0)
 if build["attributes"].get("usesNonExemptEncryption") is None:
     _, err = call("PATCH", f"/v1/builds/{build['id']}", {"data": {"type": "builds", "id": build["id"], "attributes": {"usesNonExemptEncryption": False}}})
     print("  set usesNonExemptEncryption=false:", err or "ok")
