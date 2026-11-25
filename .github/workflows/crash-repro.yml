@@ -15,7 +15,7 @@ jobs:
           set -o pipefail
           xcodebuild build-for-testing -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath dd \
-            ENABLE_TESTABILITY=YES CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO | tail -5
+            ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO | tail -40
           tar -czf products26.tgz -C dd/Build Products
       - uses: actions/upload-artifact@v4
         with: { name: products26, path: products26.tgz, retention-days: 7 }
@@ -64,15 +64,15 @@ jobs:
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);c=[(r,x['udid']) for r,v in d['devices'].items() if 'iOS-27' in r for x in v if 'iPhone' in x['name']];c.sort();print(c[-1][1])")
           xcodebuild test -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release -destination "id=$UDID" \
-            ENABLE_TESTABILITY=YES CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests/TasteProfileLaunchCrashTests 2>&1 | tail -30
+            ENABLE_TESTABILITY=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests/TasteProfileLaunchCrashTests 2>&1 | tail -30
       - name: full unit tests (Debug) on iOS 27 sim
         continue-on-error: true
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);c=[(r,x['udid']) for r,v in d['devices'].items() if 'iOS-27' in r for x in v if 'iPhone' in x['name']];c.sort();print(c[-1][1])")
           xcodebuild test -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Debug -destination "id=$UDID" \
-            CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests 2>&1 | rg -n "Test run with|passed after|failed after|error:|\*\* TEST" | tail -30
+            CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests 2>&1 | grep -nE "Test run with|passed after|failed after|error:|\*\* TEST" | tail -30
       - name: Release archive with Xcode 27.2 (unsigned, compile check)
         run: |
           set -o pipefail
           xcodebuild archive -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/HJ27.xcarchive" DEVELOPMENT_TEAM=3CQEKUP494 CODE_SIGNING_ALLOWED=NO 2>&1 | rg "error:|warning: .*deprecated|ARCHIVE" | tail -30
+            -archivePath "$RUNNER_TEMP/HJ27.xcarchive" DEVELOPMENT_TEAM=3CQEKUP494 CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|ARCHIVE" | tail -30
