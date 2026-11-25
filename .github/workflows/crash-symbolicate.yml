@@ -1,7 +1,6 @@
 name: Diag - symbolicate build 91 crash
 on:
-  push:
-    branches: [diag/crash-91-symbolicate]
+  workflow_dispatch:
 jobs:
   sym:
     strategy:

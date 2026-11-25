@@ -1,0 +1,78 @@
+name: Diag - reproduce build 91 crash on iOS 27 sim
+on:
+  push:
+    branches: [diag/crash-91-symbolicate]
+jobs:
+  build26:
+    name: Xcode 26.3 build-for-testing (Release) + iOS 26 sim control
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer && xcodebuild -version
+      - run: python3 -c "import plistlib;plistlib.dump({'LastFmAPIKey':'x','OpenAIAPIKey':''},open('HiddenJams/Secrets.plist','wb'))"
+      - name: build-for-testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath dd \
+            ENABLE_TESTABILITY=YES CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO | tail -5
+          tar -czf products26.tgz -C dd/Build Products
+      - uses: actions/upload-artifact@v4
+        with: { name: products26, path: products26.tgz, retention-days: 7 }
+      - name: control - run on iOS 26 sim
+        continue-on-error: true
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);print([x['udid'] for r,v in d['devices'].items() if 'iOS' in r for x in v if 'iPhone' in x['name']][-1])")
+          XR=$(ls dd/Build/Products/*.xctestrun | head -1)
+          xcodebuild test-without-building -xctestrun "$XR" -destination "id=$UDID" -only-testing:HiddenJamsTests/TasteProfileLaunchCrashTests 2>&1 | tail -25
+  run26on27:
+    name: Xcode 26.3 products on iOS 27 sim (repro)
+    needs: build26
+    runs-on: xcode-27
+    steps:
+      - run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version && xcrun simctl list runtimes
+      - uses: actions/download-artifact@v4
+        with: { name: products26 }
+      - name: test-without-building on iOS 27
+        continue-on-error: true
+        run: |
+          mkdir -p b && tar -xzf products26.tgz -C b
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);c=[(r,x['udid']) for r,v in d['devices'].items() if 'iOS-27' in r for x in v if 'iPhone' in x['name']];c.sort();print(c[-1][1])")
+          echo "sim $UDID"
+          XR=$(ls b/Products/*.xctestrun | head -1)
+          xcodebuild test-without-building -xctestrun "$XR" -destination "id=$UDID" -only-testing:HiddenJamsTests/TasteProfileLaunchCrashTests 2>&1 | tail -40
+      - name: crash reports
+        if: always()
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/HiddenJams*.ips 2>/dev/null | head -2); do echo "== $f"; python3 - "$f" <<'PY'
+          import json,sys
+          t=open(sys.argv[1]).read().split('\n',1)[1]; d=json.loads(t)
+          print(d.get('exception'), d.get('termination',{}).get('indicator'))
+          th=d['threads'][d['faultingThread']]; im=d['usedImages']
+          for i,f in enumerate(th['frames'][:16]): print(i, im[f['imageIndex']].get('name'), f.get('symbol'), f.get('sourceFile'), f.get('sourceLine'))
+          PY
+          done
+  build27:
+    name: Xcode 27.2 build + test on iOS 27 sim (fix check)
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version
+      - run: python3 -c "import plistlib;plistlib.dump({'LastFmAPIKey':'x','OpenAIAPIKey':''},open('HiddenJams/Secrets.plist','wb'))"
+      - name: test (Release + testability) on iOS 27 sim
+        continue-on-error: true
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);c=[(r,x['udid']) for r,v in d['devices'].items() if 'iOS-27' in r for x in v if 'iPhone' in x['name']];c.sort();print(c[-1][1])")
+          xcodebuild test -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release -destination "id=$UDID" \
+            ENABLE_TESTABILITY=YES CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests/TasteProfileLaunchCrashTests 2>&1 | tail -30
+      - name: full unit tests (Debug) on iOS 27 sim
+        continue-on-error: true
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin);c=[(r,x['udid']) for r,v in d['devices'].items() if 'iOS-27' in r for x in v if 'iPhone' in x['name']];c.sort();print(c[-1][1])")
+          xcodebuild test -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Debug -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO -only-testing:HiddenJamsTests 2>&1 | rg -n "Test run with|passed after|failed after|error:|\*\* TEST" | tail -30
+      - name: Release archive with Xcode 27.2 (unsigned, compile check)
+        run: |
+          set -o pipefail
+          xcodebuild archive -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/HJ27.xcarchive" DEVELOPMENT_TEAM=3CQEKUP494 CODE_SIGNING_ALLOWED=NO 2>&1 | rg "error:|warning: .*deprecated|ARCHIVE" | tail -30
