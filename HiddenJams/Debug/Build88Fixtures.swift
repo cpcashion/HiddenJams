@@ -103,6 +103,8 @@ enum Build88Fixtures {
             FactsCanvas(legacy: false)
         } else if name == "profile-after" {
             ProfileCanvas()
+        } else if name == "profile-unlimited-paywall" {
+            ProfileCanvas(openUnlimited: true)
         } else if p.first == "glass", p.count == 2 {
             PlayerSheetCanvas(legacy: p[1] == "old")
         } else {
@@ -252,11 +254,13 @@ private struct LegacyFactsCard: View {
 private struct ProfileCanvas: View {
     @StateObject private var env = Build88Env()
     @State private var focus: ProfileStatFocus?
+    var openUnlimited = false
+    @StateObject private var row = UnlimitedRowModel()
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.Colors.backgroundGradient.ignoresSafeArea()
             ZStack(alignment: .bottom) {
-                ProfileView(statFocus: $focus)
+                ProfileView(statFocus: $focus, unlimitedRow: row)
                 LiquidTabBar(selectedTab: .constant(.profile))
                     .padding(.horizontal, Theme.Spacing.lg)
                     .padding(.bottom, 20)
@@ -275,6 +279,12 @@ private struct ProfileCanvas: View {
         .environmentObject(env.api)
         .environmentObject(ThemeManager.shared)
         .environmentObject(SubscriptionManager.shared)
+        .task {
+            // Same path as a tap on the Hidden Jams Unlimited row.
+            guard openUnlimited else { return }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            row.tap(isPremium: false)
+        }
     }
 }
 
