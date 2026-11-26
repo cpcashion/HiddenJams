@@ -62,7 +62,10 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         step("show \(name)")
         // The onboarding screens only read the auth/source managers inside
         // button actions, which the captures never tap.
-        let hc = UIHostingController(rootView: AnyView(OnboardingParityFixtures.screen(name)))
+        let root: AnyView = name == "paywall"
+            ? AnyView(PaywallView().environmentObject(SubscriptionManager.shared))
+            : AnyView(OnboardingParityFixtures.screen(name))
+        let hc = UIHostingController(rootView: root)
         hc.overrideUserInterfaceStyle = .dark
         hc.view.backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 15 / 255, alpha: 1)
         // A fresh window per state: reusing one window by swapping its root
@@ -134,7 +137,25 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         print(String(format: "HJSNAP-PERF draw %@ %.0fms", file, Date().timeIntervalSince(e0) * 1000))
     }
 
+    /// Screens-93 tooling: PNGs per simulator under <repo>/screens-out/<device>/.
+    private static var pngDir: URL {
+        let dev = (ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] ?? UIDevice.current.name)
+            .replacingOccurrences(of: " ", with: "_").replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
+        return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("screens-out").appendingPathComponent(dev)
+    }
+
     private func flush() {
+        for p in pending where p.settled {
+            try? FileManager.default.createDirectory(at: Self.pngDir, withIntermediateDirectories: true)
+            let name = (p.file as NSString).deletingPathExtension.replacingOccurrences(of: "/", with: "_") + ".png"
+            if let png = p.image.pngData() {
+                try? png.write(to: Self.pngDir.appendingPathComponent(name))
+                print("HJSNAP-PNG \(Self.pngDir.lastPathComponent)/\(name) \(png.count)")
+            }
+        }
+        pending.removeAll()
+        return
         for p in pending {
             guard let data = p.image.jpegData(compressionQuality: p.settled ? 0.92 : 0.8) else {
                 print("HJSNAP-FAIL \(p.file)"); continue
@@ -195,6 +216,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         // 02: the keep script frozen at the prototype's 8.6 s frame (no wall clock).
         list.append(Shot(name: "static-keep", settled: 3.0, file: "02-keep.jpg"))
         list += screens
+        list.append(Shot(name: "paywall", settled: 3.0, file: "06-paywall.jpg"))
         // Build 88 fixes (build88-fixes/): rarity sheet at both detents on a
         // small and a large iPhone, pre-fix vs fixed; facts card; Profile.
         for v in ["old", "new"] {
@@ -226,7 +248,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
     /// Build 88 fixes were captured with: the sheet:{old,new}:{se,promax}:{medium,large}
     /// states, facts:old:0, facts:new:0, facts:new:1, profile-after (run 44906538787);
     /// the real presented glass sheet with glass:new, glass:old (run 44909679064).
-    private static let only: [String] = []
+    private static let only: [String] = ["01-intro", "static-keep", "03-rarity", "04-mood", "05-connect", "paywall"]
 
     /// Host crashes are intermittent; a crashed shot is retried (up to
     /// twice) by the next test method after xcodebuild relaunches the host.
@@ -248,7 +270,7 @@ final class OnboardingParitySnapshotTests: XCTestCase {
         setTries(key, n + 1)
         await show(shot.name)
         let t0 = OnboardingParityFixtures.epoch ?? Date()
-        for t in shot.motion {
+        for t in shot.motion where false {
             await spin(until: t0.addingTimeInterval(t))
             emit("motion/\(shot.name)_t\(String(format: "%05.2f", t)).jpg", settled: false)
         }
