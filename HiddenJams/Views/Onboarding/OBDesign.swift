@@ -163,9 +163,10 @@ enum OBCopy {
     /// `[...]` marks the lime highlight chip.
     static let connectHeadline = "30-second clips\nof your next\n[obsession.]"
 
-    /// Screen 4 title, Chris's exact words (one line, last word in lime).
+    /// Screen 4 title (Chris, Nov 25 10:39 PM CT: "genres", no apostrophe).
+    /// One line, last word in lime.
     static let moodTitleLead = "Pick your "
-    static let moodTitleAccent = "genre\u{2019}s"
+    static let moodTitleAccent = "genres"
 }
 
 /// A display title that never wraps: Cabinet Black at the title size,

@@ -557,7 +557,7 @@ private struct OBRarityRowView: View {
     }
 }
 
-// MARK: - 04 · Pick your genre's
+// MARK: - 04 · Pick your genres
 
 struct OBMoodScreen: View {
     @Binding var picks: Set<String>

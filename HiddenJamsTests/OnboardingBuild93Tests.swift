@@ -3,7 +3,7 @@
 //  HiddenJamsTests
 //
 //  Build 93 onboarding fixes: card swipes never page the pager, left = skip
-//  / right = keep, and "Pick your genre's" stays on one line (SE to Pro Max).
+//  / right = keep, and "Pick your genres" stays on one line (SE to Pro Max).
 //
 
 import Foundation
@@ -46,7 +46,7 @@ struct OnboardingBuild93Tests {
 
     @Test func pickYourGenresFitsOneLine() {
         let text = OBCopy.moodTitleLead + OBCopy.moodTitleAccent
-        #expect(text == "Pick your genre\u{2019}s")
+        #expect(text == "Pick your genres")
         for screenWidth in [375.0, 393.0, 402.0, 430.0, 440.0] as [CGFloat] {
             let m = OBMetrics(width: screenWidth, height: 800)
             let size = OBOneLineTitle.fittedSize(text, maxSize: m.displayM, width: m.contentWidth)
