@@ -73,6 +73,9 @@ struct MainTabView: View {
                             refreshProgress: discoveryEngine.discoveryProgress,
                             onPrefetchMore: {
                                 await fetchMoreDiscoveries(append: true)
+                            },
+                            onQuotaLimitReached: {
+                                discoveryEngine.showPaywall = true
                             }
                         )
                     }

@@ -18,7 +18,7 @@ enum OnboardingParityFixtures {
     /// When the parity test put the current screen on screen (scripted screens time from here).
     static var epoch: Date?
     /// A frozen frame of the 02 keep script (nil = the script runs).
-    struct KeepPin { var index: Int; var x: CGFloat; var finger: Double; var hintKeep: Bool; var kept: Int }
+    struct KeepPin { var index: Int; var x: CGFloat; var finger: Double; var hintKeep: Bool; var kept: Int; var skipped: Int = 0 }
     static var keepPin: KeepPin?
     /// Start the glow at the screen's settled blooms (the prototype frames are settled).
     static var settleGlow = false
@@ -29,7 +29,7 @@ enum OnboardingParityFixtures {
     static var factsPinned: Bool { factsPin != nil && factsFreeze }
     /// The prototype frame at 8.6 s: card 3 swiping right (x ≈ 108, Keep
     /// stamp at ~0.98, finger down), card 1 saved, card 2 skipped.
-    static let keepAt8600 = KeepPin(index: 2, x: 108.3, finger: 1, hintKeep: true, kept: 1)
+    static let keepAt8600 = KeepPin(index: 2, x: 108.3, finger: 1, hintKeep: true, kept: 1, skipped: 1)
     private static func pin(_ p: KeepPin?) -> Bool { keepPin = p; return true }
     static func log(_ s: String) { print(s); fflush(stdout) }
 

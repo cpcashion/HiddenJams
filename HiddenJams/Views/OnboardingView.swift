@@ -73,6 +73,8 @@ struct OnboardingPager: View {
     /// Picks, lowercased (the `selectedGenres` set, kept sorted).
     @State private var picks: [String]
     @State private var pulse = 0
+    /// Card drags (screen 2) own their gesture; the page swipe yields to them.
+    @State private var cardLock = OBCardDragLock()
 
     private let pageCount = 5
     private var isConnectPage: Bool { page == pageCount - 1 }
@@ -103,6 +105,7 @@ struct OnboardingPager: View {
                         .id(page)
                         .transition(.obPage(direction))
                 }
+                .environment(\.obCardDragLock, cardLock)
                 .contentShape(Rectangle())
                 .simultaneousGesture(swipe)
 
@@ -144,13 +147,18 @@ struct OnboardingPager: View {
     }
 
     /// Like the prototype: a horizontal swipe of ≥70pt (and ≤50pt vertical)
-    /// moves one screen; never required, Next always works.
+    /// moves one screen; never required, Next always works. A drag that
+    /// started on a swipeable card (screen 2) belongs to the card only, so
+    /// it never pages (build 93: swiping a card right used to jump back to
+    /// screen 1).
     private var swipe: some Gesture {
         DragGesture(minimumDistance: 20)
             .onEnded { v in
-                let dx = v.translation.width, dy = v.translation.height
-                guard abs(dx) >= 70, abs(dy) <= 50 else { return }
-                if dx < 0 && page <= 3 { go(page + 1) } else if dx > 0 && page >= 1 { go(page - 1) }
+                guard !cardLock.isHeld() else { return }
+                if let target = OBPagerSwipe.target(page: page, pageCount: pageCount,
+                                                    dx: v.translation.width, dy: v.translation.height) {
+                    go(target)
+                }
             }
     }
 
@@ -176,6 +184,16 @@ struct OnboardingPager: View {
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, 200)
         }
+    }
+}
+
+/// Pure page-swipe rule (unit-tested).
+enum OBPagerSwipe {
+    static func target(page: Int, pageCount: Int, dx: CGFloat, dy: CGFloat) -> Int? {
+        guard abs(dx) >= 70, abs(dy) <= 50 else { return nil }
+        if dx < 0 && page < pageCount - 1 { return page + 1 }
+        if dx > 0 && page >= 1 { return page - 1 }
+        return nil
     }
 }
 

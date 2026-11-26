@@ -12,6 +12,7 @@ import StoreKit
 struct PaywallView: View {
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var quota = DiscoveryQuotaManager.shared
 
     @State private var isPurchasing = false
     @State private var isRestoring = false
@@ -173,9 +174,12 @@ struct PaywallView: View {
 
             Spacer(minLength: 8)
 
-            Button("Maybe later") {
-                // Just dismiss. Discovery stays blocked at the free limit;
-                // the paywall shows again on the next discovery attempt.
+            Button(quota.canSnoozeLimit ? "Remind me later" : "Maybe later") {
+                // Production: just dismiss. Discovery stays blocked at the
+                // free limit; the paywall shows again on the next track or
+                // Discover. TestFlight / sandbox only: snooze the limit so
+                // the count carries on 50, 51, 52 … (build 93).
+                if quota.canSnoozeLimit { quota.snoozeLimit() }
                 dismiss()
             }
             .font(.system(size: 16))

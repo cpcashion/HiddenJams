@@ -32,6 +32,10 @@ class AudioPreviewManager: ObservableObject {
     /// for auto-save when they play through un-swiped.
     @Published private(set) var isDiscoveryDeck: Bool = false
 
+    /// New on every `loadQueue`: identifies the deck for the free counter's
+    /// per-card dedupe (`DiscoveryQuotaState.appearanceKey`).
+    @Published private(set) var deckID: String = UUID().uuidString
+
     /// Fires (on main) when a deck track plays all the way to its natural
     /// end — the 30s preview finishing, or the in-app full song ending —
     /// with no swipe. Swipes, Next, skips and failures advance via
@@ -387,6 +391,7 @@ class AudioPreviewManager: ObservableObject {
     func loadQueue(_ tracks: [RecommendedTrack], autoPlay: Bool = true, isDiscoveryDeck: Bool = false) {
         previewLookupTask?.cancel()
         self.isDiscoveryDeck = isDiscoveryDeck
+        deckID = UUID().uuidString
         queue = tracks
         currentIndex = 0
         consecutiveFailures = 0

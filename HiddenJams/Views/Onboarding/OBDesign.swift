@@ -152,6 +152,75 @@ enum OBFont {
     static func ch(_ size: CGFloat) -> CGFloat { width("0", .medium, size, kern: 0) }
 }
 
+// MARK: - Build 93 copy and one-line title
+
+/// Onboarding copy that Chris is choosing between (build 93).
+enum OBCopy {
+    /// Screen 5 headline. Options for Chris (Design's pick is the first):
+    ///  a. "30-second clips of your next obsession"   ← in the build
+    ///  b. "30 seconds. That's all it takes."
+    ///  c. "Hear 30 seconds. Then swipe."
+    /// `[...]` marks the lime highlight chip.
+    static let connectHeadline = "30-second clips\nof your next\n[obsession.]"
+
+    /// Screen 4 title, Chris's exact words (one line, last word in lime).
+    static let moodTitleLead = "Pick your "
+    static let moodTitleAccent = "genre\u{2019}s"
+}
+
+/// A display title that never wraps: Cabinet Black at the title size,
+/// stepped down to fit the content width on one line (SE included), with
+/// the last word in lime (#C8E86B, same weight, no glow).
+struct OBOneLineTitle: View {
+    let lead: String
+    let accent: String
+    let size: CGFloat
+    @Environment(\.obMetrics) private var m
+
+    static func fittedSize(_ text: String, maxSize: CGFloat, width: CGFloat) -> CGFloat {
+        let at100 = OBFont.width(text, .black, 100, kern: -0.045 * 100)
+        guard at100 > 0 else { return maxSize }
+        return min(maxSize, (width / at100 * 100 * 0.98).rounded(.down))
+    }
+
+    var body: some View {
+        let s = Self.fittedSize(lead + accent, maxSize: size, width: m.contentWidth)
+        let font = OBFont.cabinet(.black, s)
+        (Text(lead).foregroundColor(OB.paper) + Text(accent).foregroundColor(OB.lime))
+            .font(font)
+            .tracking(-0.045 * s)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+// MARK: - Card drag lock (onboarding pager vs. swipeable cards)
+
+/// A drag that starts on a swipeable card claims this lock on every change;
+/// the pager's page swipe ignores any gesture that ended while (or right
+/// after) a card owned it. Plain reference type: no view updates.
+nonisolated final class OBCardDragLock: @unchecked Sendable {
+    private(set) var lastClaim: Date = .distantPast
+    func claim(at now: Date = Date()) { lastClaim = now }
+    /// True if a card drag was active within `window` seconds of `now`.
+    func isHeld(at now: Date = Date(), window: TimeInterval = 0.35) -> Bool {
+        now.timeIntervalSince(lastClaim) < window
+    }
+}
+
+private struct OBCardDragLockKey: EnvironmentKey {
+    static let defaultValue: OBCardDragLock? = nil
+}
+
+extension EnvironmentValues {
+    var obCardDragLock: OBCardDragLock? {
+        get { self[OBCardDragLockKey.self] }
+        set { self[OBCardDragLockKey.self] = newValue }
+    }
+}
+
 // MARK: - Display headline (Cabinet Black, tracking -0.045em, line-height .88,
 // lime highlight chip rotated -2.5°)
 
@@ -715,31 +784,28 @@ struct OBBrandTile: View {
     }
 }
 
-/// Official native-brand connect buttons (Chris: overrides the prototype's
-/// lime pill + logo tile for these two buttons only).
+/// Connect buttons (build 93, Chris: "remove the fill, lime outline, white
+/// text, real Spotify and Apple Music icons").
+///
+/// Full size: same 56pt capsule and layout as before, clear fill over a
+/// low-opacity glass, 1.5pt lime (#C8E86B) strokeBorder, white SF semibold
+/// 17 label, 24pt icon with a 10pt gap; pressed = lime fill at ~12%.
 ///
 /// Spotify — Spotify Design & Branding Guidelines
-/// (developer.spotify.com/documentation/design): "Using our colors" →
-/// Spotify Green #1ED760 fill; "Using our logo" → on a non-black/white
-/// background use the monochrome logo, black on light colours →
-/// unmodified Spotify_Primary_Logo_RGB_Black.png (2024 icon kit) at 24pt
-/// (≥21px "Minimum size"), never rotated/stretched ("Logo misuse");
-/// "Legibility" exclusion zone ½ icon height = 12pt (gap to text 12pt,
-/// 16pt above/below). Platform default sans-serif ("Fonts"). The guide has
-/// no login-button spec, so the wording is plain text, not the logo in a
-/// sentence.
+/// (https://developer.spotify.com/documentation/design), "Which color logo
+/// to use": the green logo only on black or white; on other backgrounds use
+/// a monochrome logo, "the white logo should be used on dark colored
+/// backgrounds" → unmodified Spotify_Primary_Logo_RGB_White.png (icon only,
+/// the label carries the name), never recolored, rotated or stretched.
 ///
 /// Apple Music — Apple Music Identity Guidelines
-/// (marketing.services.apple/apple-music-identity-guidelines): badges and
-/// lockups carry a fixed "Listen on / Watch on / Pre-add on" message for
-/// linking to content (1.2, 2.2), may not be edited (1.7, 2.7), and a
-/// lockup may not sit next to other services' badges (2.3), so neither fits
-/// an account-connect button. "Apple Music Icon" → the unmodified colour
-/// icon (Apple_Music_Icon_RGB_sm_073120.svg, preferred version) on a
-/// high-contrast background, "Apple Music" in English, never altered.
-/// Guideline silent on buttons → conservative native choice: Apple's own
-/// white system-button style for dark backgrounds (as Sign in with Apple's
-/// white style), black SF semibold label.
+/// (https://marketing.services.apple/apple-music-identity-guidelines),
+/// "Apple Music Icon": color icon preferred; "White icon, optional — Use on
+/// dark backgrounds"; "Do not create your own icon. Only the versions shown
+/// here are approved." → Apple's own white icon from Apple's icon kit
+/// (apple.co/am-icon-2020, Apple_Music_Icon_wht_sm_073120.svg), unmodified.
+///
+/// The compact (32pt) settings-row variant keeps its filled native style.
 struct OBBrandButton: View {
     let brand: OBBrandTile.Brand
     var busy = false
@@ -756,40 +822,72 @@ struct OBBrandButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: compact ? 11 : 12) {
-                Group {
-                    if brand == .spotify {
-                        Image("brand-spotify-icon-black").resizable().interpolation(.high)
-                    } else {
-                        Image("brand-applemusic-icon").resizable().interpolation(.high)
-                    }
-                }
-                .scaledToFit()
-                .frame(width: compact ? 21 : 24, height: compact ? 21 : 24)
-                .accessibilityHidden(true)
-                Text(title)
-                    .font(.system(size: compact ? 13 : 17, weight: .semibold))
-                    .lineLimit(1)
-                if busy { ProgressView().tint(.black) }
-            }
-            .foregroundStyle(Color.black)
-            .padding(.horizontal, compact ? 11 : 20)
-            .frame(maxWidth: compact ? nil : .infinity)
-            .frame(height: compact ? 32 : 56)
-            .background(Capsule().fill(brand == .spotify ? Self.spotifyGreen : Color.white))
-            .contentShape(Capsule())
+            if compact { compactLabel } else { outlineLabel }
         }
-        .buttonStyle(OBBrandPressStyle())
+        .buttonStyle(OBBrandPressStyle(outline: !compact))
         .disabled(busy)
         .accessibilityLabel(brand == .spotify ? "Continue with Spotify" : "Continue with Apple Music")
+    }
+
+    /// Onboarding / sign-in connect button: clear capsule, lime outline.
+    private var outlineLabel: some View {
+        HStack(spacing: 10) {
+            Image(brand == .spotify ? "brand-spotify-icon-white" : "brand-applemusic-icon-white")
+                .resizable().interpolation(.high)
+                .scaledToFit()
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .lineLimit(1)
+            if busy { ProgressView().tint(.white) }
+        }
+        .foregroundStyle(Color.white)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
+        .frame(height: 56)
+        .background(Capsule().fill(Color.white.opacity(0.04)))
+        .overlay(Capsule().strokeBorder(OB.lime, lineWidth: 1.5))
+        .contentShape(Capsule())
+    }
+
+    private var compactLabel: some View {
+        HStack(spacing: 11) {
+            Group {
+                if brand == .spotify {
+                    Image("brand-spotify-icon-black").resizable().interpolation(.high)
+                } else {
+                    Image("brand-applemusic-icon").resizable().interpolation(.high)
+                }
+            }
+            .scaledToFit()
+            .frame(width: 21, height: 21)
+            .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            if busy { ProgressView().tint(.black) }
+        }
+        .foregroundStyle(Color.black)
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .background(Capsule().fill(brand == .spotify ? Self.spotifyGreen : Color.white))
+        .contentShape(Capsule())
     }
 }
 
 private struct OBBrandPressStyle: ButtonStyle {
+    var outline = false
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.8 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        if outline {
+            configuration.label
+                .background(Capsule().fill(OB.lime.opacity(configuration.isPressed ? 0.12 : 0)))
+                .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        } else {
+            configuration.label
+                .opacity(configuration.isPressed ? 0.8 : 1)
+                .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        }
     }
 }
 

@@ -31,6 +31,8 @@ struct PlaylistPlayerView: View {
     /// another batch (continuous discovery). Returns an outcome so the
     /// latch can clear on empty/error (not only when gem ids change).
     var onPrefetchMore: (() async -> PrefetchOutcome)? = nil
+    /// Free limit reached (and not snoozed on TestFlight): show the paywall.
+    var onQuotaLimitReached: (() -> Void)? = nil
     
     @State private var savedTracks: Set<String> = []
     @State private var prefetchLatch = PrefetchLatch()
@@ -118,9 +120,14 @@ struct PlaylistPlayerView: View {
                 previewReady: true,
                 entitlementResolved: SubscriptionManager.shared.hasResolvedEntitlement
             ) else { return }
-            _ = discoveryQuota.consume(trackId: track.id)
+            // Count the card, not the track id: a repeat served in a later
+            // deck/position is a new card (build 93 "stuck at 49" loop).
+            let key = DiscoveryQuotaState.appearanceKey(trackId: track.id, deckID: audioPlayer.deckID,
+                                                        index: audioPlayer.currentIndex)
+            _ = discoveryQuota.consume(trackId: key)
         }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in
+            enforceQuotaLimit()
             pushCurrentGemToWatch()
             maybePrefetchMore()
             // Profile stats (build 78): log each deck track that comes up.
@@ -131,7 +138,19 @@ struct PlaylistPlayerView: View {
         .onChange(of: audioPlayer.currentIndex) { _ in
             maybePrefetchMore()
         }
-        .onChange(of: audioPlayer.isPlaying) { _ in pushCurrentGemToWatch() }
+        .onChange(of: audioPlayer.isPlaying) { playing in
+            if playing { enforceQuotaLimit() }
+            pushCurrentGemToWatch()
+        }
+        .onChange(of: discoveryQuota.limitSnoozed) { snoozed in
+            // TestFlight "Remind me later": the card the paywall stopped on
+            // counts now (50 → 51 …), then playback carries on.
+            guard snoozed, audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack else { return }
+            let key = DiscoveryQuotaState.appearanceKey(trackId: track.id, deckID: audioPlayer.deckID,
+                                                        index: audioPlayer.currentIndex)
+            _ = discoveryQuota.consume(trackId: key)
+            if !audioPlayer.isPlaying { audioPlayer.togglePlayPause() }
+        }
         .onAppear { loadRarity() }
         .onChange(of: audioPlayer.currentTrack?.id) { _ in loadRarity() }
         .sheet(isPresented: $showRaritySheet) {
@@ -401,6 +420,19 @@ struct PlaylistPlayerView: View {
         }
         print("🔄 Recommendations replaced — reloading queue")
         audioPlayer.loadQueue(tracks, isDiscoveryDeck: true)
+    }
+
+    /// At the free limit (production, or TestFlight before "Remind me later")
+    /// the player never moves on to an uncounted card: it pauses and the
+    /// paywall comes up, every time.
+    private func enforceQuotaLimit() {
+        guard audioPlayer.isDiscoveryDeck, let track = audioPlayer.currentTrack else { return }
+        guard discoveryQuota.isPaywallRequired else { return }
+        let key = DiscoveryQuotaState.appearanceKey(trackId: track.id, deckID: audioPlayer.deckID,
+                                                    index: audioPlayer.currentIndex)
+        guard !discoveryQuota.countedTrackIds.contains(key) else { return }
+        audioPlayer.pause()
+        onQuotaLimitReached?()
     }
 
     private func maybePrefetchMore() {

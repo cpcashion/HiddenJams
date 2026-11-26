@@ -11,6 +11,20 @@
 //  Count + month + counted track ids live in the Keychain (this device only,
 //  not synced) so deleting and reinstalling the app doesn't reset the quota.
 //
+//  Build 93 (the "stuck at 49" loop): the counter used to be idempotent per
+//  *track id*. At 49 the next batch is capped to one track, and the Apple
+//  Music / Last.fm / iTunes paths explicitly allow repeats, so that one
+//  card was often a track already counted earlier in the month. It showed
+//  but didn't count, the count stayed at 49, `canDiscover` stayed true, the
+//  paywall never opened, and every Next / Discover fetched another one-track
+//  batch: Discover → track at 49 → Next → Discover → 49 … The player now
+//  counts each card *appearance* (`appearanceKey`: deck + position + id), so
+//  any new card moves the count, and the paywall is required at the limit.
+//
+//  TestFlight / sandbox only: "Remind me later" snoozes the limit for the
+//  month, the paywall closes, and counting carries on 50, 51, 52 … (never
+//  back to 49). Production never snoozes.
+//
 
 import Foundation
 import Combine
@@ -26,11 +40,22 @@ nonisolated struct DiscoveryQuotaState: Equatable, Sendable {
     var month: String
     var usedThisMonth: Int
     var countedTrackIds: Set<String>
+    /// TestFlight / sandbox only: the tester tapped "Remind me later" at the
+    /// limit, so discovery and counting continue past it this month.
+    var limitSnoozed: Bool
 
-    init(month: String, usedThisMonth: Int = 0, countedTrackIds: Set<String> = []) {
+    init(month: String, usedThisMonth: Int = 0, countedTrackIds: Set<String> = [], limitSnoozed: Bool = false) {
         self.month = month
         self.usedThisMonth = usedThisMonth
         self.countedTrackIds = countedTrackIds
+        self.limitSnoozed = limitSnoozed
+    }
+
+    /// Dedupe key for one card shown in the player: the same card re-firing
+    /// (replay, back/forward) counts once, but a track served again in a
+    /// later deck or position is a new card and counts.
+    static func appearanceKey(trackId: String, deckID: String, index: Int) -> String {
+        "\(trackId)#\(deckID).\(index)"
     }
 
     static func monthString(for date: Date, timeZone: TimeZone = .current) -> String {
@@ -48,12 +73,28 @@ nonisolated struct DiscoveryQuotaState: Equatable, Sendable {
             month = current
             usedThisMonth = 0
             countedTrackIds = []
+            limitSnoozed = false
         }
     }
 
+    var isAtLimit: Bool { usedThisMonth >= Self.freeMonthlyLimit }
+
     func canDiscover(isUnlimited: Bool) -> Bool {
-        if isUnlimited { return true }
+        if isUnlimited || limitSnoozed { return true }
         return usedThisMonth < Self.freeMonthlyLimit
+    }
+
+    /// The paywall must be up (and stay up): free user, at the limit, not snoozed.
+    func paywallRequired(isUnlimited: Bool) -> Bool {
+        !isUnlimited && !limitSnoozed && isAtLimit
+    }
+
+    /// TestFlight "Remind me later": only at the limit. Returns true if it snoozed.
+    @discardableResult
+    mutating func snoozeLimit() -> Bool {
+        guard isAtLimit, !limitSnoozed else { return false }
+        limitSnoozed = true
+        return true
     }
 
     func remaining(isUnlimited: Bool) -> Int? {
@@ -62,7 +103,7 @@ nonisolated struct DiscoveryQuotaState: Equatable, Sendable {
     }
 
     func batchRequestCount(defaultTarget: Int, isUnlimited: Bool) -> Int {
-        if isUnlimited { return defaultTarget }
+        if isUnlimited || limitSnoozed { return defaultTarget }
         return max(0, min(defaultTarget, Self.freeMonthlyLimit - usedThisMonth))
     }
 
@@ -73,7 +114,7 @@ nonisolated struct DiscoveryQuotaState: Equatable, Sendable {
         guard !trackId.isEmpty else { return false }
         resetIfNewMonth(now: now, timeZone: timeZone)
         guard !countedTrackIds.contains(trackId) else { return false }
-        guard usedThisMonth < Self.freeMonthlyLimit else { return false }
+        guard usedThisMonth < Self.freeMonthlyLimit || limitSnoozed else { return false }
         countedTrackIds.insert(trackId)
         usedThisMonth += 1
         return true
@@ -159,10 +200,13 @@ final class DiscoveryQuotaManager: ObservableObject {
         var month: String
         var count: Int
         var trackIds: [String]
+        /// Build 93; absent in older stored values (decodes as nil = false).
+        var snoozed: Bool? = nil
     }
 
     @Published private(set) var usedThisMonth: Int = 0
     @Published private(set) var countedTrackIds: Set<String> = []
+    @Published private(set) var limitSnoozed = false
 
     private var state: DiscoveryQuotaState
     private let store: DiscoveryQuotaStore
@@ -171,6 +215,8 @@ final class DiscoveryQuotaManager: ObservableObject {
     /// False until StoreKit has answered once — consume is a no-op until then
     /// so a subscriber is not billed for cold-start tracks.
     private let entitlementResolved: () -> Bool
+    /// True only on TestFlight / sandbox (and DEBUG) builds.
+    private let allowsLimitSnooze: () -> Bool
     private let defaults: UserDefaults
 
     convenience init() {
@@ -179,7 +225,8 @@ final class DiscoveryQuotaManager: ObservableObject {
             defaults: .standard,
             now: Date.init,
             premiumCheck: { UserProfileManager.shared.isPremium },
-            entitlementResolved: { SubscriptionManager.shared.hasResolvedEntitlement }
+            entitlementResolved: { SubscriptionManager.shared.hasResolvedEntitlement },
+            allowsLimitSnooze: { TestFlightTools.showsDebugTools }
         )
     }
 
@@ -188,13 +235,15 @@ final class DiscoveryQuotaManager: ObservableObject {
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init,
         premiumCheck: @escaping () -> Bool = { false },
-        entitlementResolved: @escaping () -> Bool = { true }
+        entitlementResolved: @escaping () -> Bool = { true },
+        allowsLimitSnooze: @escaping () -> Bool = { false }
     ) {
         self.store = store
         self.defaults = defaults
         self.now = now
         self.premiumCheck = premiumCheck
         self.entitlementResolved = entitlementResolved
+        self.allowsLimitSnooze = allowsLimitSnooze
         self.state = DiscoveryQuotaState(month: DiscoveryQuotaState.monthString(for: now()))
         load()
         syncPublished()
@@ -221,6 +270,25 @@ final class DiscoveryQuotaManager: ObservableObject {
     var remainingThisMonth: Int? {
         mutateState { $0.resetIfNewMonth(now: now()) }
         return state.remaining(isUnlimited: isUnlimited)
+    }
+
+    /// Free user at the limit (not snoozed): the paywall must be showing.
+    var isPaywallRequired: Bool {
+        mutateState { $0.resetIfNewMonth(now: now()) }
+        return state.paywallRequired(isUnlimited: isUnlimited)
+    }
+
+    /// The paywall offers "Remind me later" (TestFlight / sandbox builds only).
+    var canSnoozeLimit: Bool { allowsLimitSnooze() }
+
+    /// TestFlight / sandbox "Remind me later": counting continues past the
+    /// limit (50, 51, 52 …) for the rest of the month. No-op in production.
+    @discardableResult
+    func snoozeLimit() -> Bool {
+        guard allowsLimitSnooze() else { return false }
+        let snoozed = mutateState { $0.snoozeLimit() }
+        if snoozed { print("📊 Quota: limit snoozed (TestFlight) at \(usedThisMonth)") }
+        return snoozed
     }
 
     func batchRequestCount(defaultTarget: Int = 50) -> Int {
@@ -279,6 +347,7 @@ final class DiscoveryQuotaManager: ObservableObject {
     private func syncPublished() {
         usedThisMonth = state.usedThisMonth
         countedTrackIds = state.countedTrackIds
+        limitSnoozed = state.limitSnoozed
     }
 
     private func load() {
@@ -286,7 +355,8 @@ final class DiscoveryQuotaManager: ObservableObject {
             state = DiscoveryQuotaState(
                 month: stored.month,
                 usedThisMonth: stored.count,
-                countedTrackIds: Set(stored.trackIds)
+                countedTrackIds: Set(stored.trackIds),
+                limitSnoozed: stored.snoozed ?? false
             )
             mutateState { $0.resetIfNewMonth(now: now()) }
             return
@@ -308,7 +378,8 @@ final class DiscoveryQuotaManager: ObservableObject {
         store.save(StoredQuota(
             month: state.month,
             count: state.usedThisMonth,
-            trackIds: Array(state.countedTrackIds)
+            trackIds: Array(state.countedTrackIds),
+            snoozed: state.limitSnoozed ? true : nil
         ))
     }
 }
