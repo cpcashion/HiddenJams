@@ -62,9 +62,6 @@ struct OBIntroScreen: View {
                     }
                     .obRise(0.2)
                 OBStatLine().padding(.top, 14).obRise(0.34)
-                OBMono(text: "Source: Luminate 2025 Year-End Music Report", size: 9.5, opacity: 1) // .src .42 is overridden by rise()
-                    .padding(.top, 10)
-                    .obRise(0.44)
             }
         }
         .task {
@@ -222,27 +219,37 @@ private enum OBKeepDeck {
 struct OBKeepScreen: View {
     @Environment(\.obMetrics) private var m
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.obCardDragLock) private var dragLock
 
     /// Resting half-swipe to the right: a gentle ~4.4° tilt with the Keep
     /// stamp partly visible (opacity ≈ 0.44) as a hint the card is draggable.
     private static let restX: CGFloat = 60
+    /// Drag distance (from the resting pose) that commits a swipe.
+    static let commitDistance: CGFloat = 90
 
     @State private var index = 0
     @State private var x: CGFloat = Self.restX
     @State private var finger: Double = 0
-    @State private var kept: [String] = []
+    @State private var saved = 0
+    @State private var skipped = 0
     @State private var hintKeep = true
-    @State private var bump = 0
+    @State private var flying = false
 
     var body: some View {
         let deck = OBKeepDeck.deck
         let top = deck[index % deck.count]
         let n1 = deck[(index + 1) % deck.count], n2 = deck[(index + 2) % deck.count]
-        let card = m.cqw(62)
+        // Card 62% of the width (296pt deck on a 402pt phone); on short
+        // screens (SE) it shrinks so the tally never crowds the dots/Next.
+        let card = min(m.cqw(62), max(150, m.contentHeight() - 284 - 47))
         OBScreen {
             OBDisplayTitle(markup: "Keep what\n[moves] you.", size: m.displayL).obRise(0.1)
             OBSub(text: "Swipe right to save a song to your **Hidden Jams** playlist. Swipe left to skip.")
                 .padding(.top, 12).obRise(0.2)
+
+            // Build 93: the playlist chip is gone, so the deck re-centers
+            // between the header and the pinned Next button.
+            Spacer(minLength: 12)
 
             ZStack {
                 OBFilteredCover(art: n2.art, filter: .under2, size: card, radius: 24)
@@ -251,16 +258,19 @@ struct OBKeepScreen: View {
                     .scaleEffect(0.94).offset(y: 14)
                 OBKeepCard(x: x, track: top, plays: OBKeepDeck.plays[index % OBKeepDeck.plays.count],
                            size: card, finger: finger)
+                    .id(index)
                     .contentShape(Rectangle())
                     .highPriorityGesture(drag)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 296)
-            .padding(.top, 18)
+            .frame(height: card + 47)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Demo: drag right to keep a song, left to skip")
-            .accessibilityHint("The card returns to its resting pose. It does not advance onboarding.")
+            .accessibilityValue("\(saved) saved, \(skipped) skipped")
+            .accessibilityHint("Swiping a card does not change the onboarding page.")
             .accessibilityAddTraits(.allowsDirectInteraction)
+            .accessibilityAction(named: "Keep") { commit(1) }
+            .accessibilityAction(named: "Skip") { commit(-1) }
 
             ZStack {
                 OBMono(text: hintKeep ? "Swipe right to keep →" : "← Swipe left to skip", size: 12, color: OB.lime, opacity: 0.95)
@@ -270,10 +280,13 @@ struct OBKeepScreen: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 30)
-            .padding(.top, 12)
+            .padding(.top, 18)
 
-            OBPlaylistChip(kept: kept, bump: bump)
-                .padding(.top, 8)
+            Spacer(minLength: 12)
+
+            OBKeepTally(saved: saved, skipped: skipped)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 4)
                 .obRise(0.3)
         }
         #if DEBUG
@@ -281,32 +294,63 @@ struct OBKeepScreen: View {
         #endif
     }
 
-    /// Follows the finger from the resting hint pose; on release, springs
-    /// (or snaps, if Reduce Motion is on) back to that pose. Never dismisses
-    /// the card or pages the onboarding pager. highPriorityGesture on the
-    /// card claims the drag inside its bounds so the pager's simultaneous
-    /// swipe still works outside the card.
+    /// A drag that starts on the card belongs to the card only: it claims
+    /// the pager's drag lock on every change, so the pager's simultaneous
+    /// page swipe ignores it. Past `commitDistance` (or a fast fling) the
+    /// card flies off: right = saved, left = skipped; otherwise it springs
+    /// back to the resting pose.
     private var drag: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { v in
+                dragLock?.claim()
+                guard !flying else { return }
                 var tx = Transaction(); tx.disablesAnimations = true
                 withTransaction(tx) {
                     x = Self.restX + v.translation.width
                     hintKeep = x >= 0
                 }
             }
-            .onEnded { _ in
-                let settle = {
-                    x = Self.restX
-                    hintKeep = true
-                }
-                if reduceMotion {
-                    var tx = Transaction(); tx.disablesAnimations = true
-                    withTransaction(tx) { settle() }
-                } else {
-                    withAnimation(OB.spring(280, 22)) { settle() }
-                }
+            .onEnded { v in
+                dragLock?.claim()
+                guard !flying else { return }
+                let dir = OBKeepSwipe.direction(translation: v.translation.width,
+                                                predicted: v.predictedEndTranslation.width,
+                                                commit: Self.commitDistance)
+                if dir != 0 { commit(dir) } else { settle() }
             }
+    }
+
+    private func settle() {
+        let back = {
+            x = Self.restX
+            hintKeep = true
+        }
+        if reduceMotion {
+            var tx = Transaction(); tx.disablesAnimations = true
+            withTransaction(tx) { back() }
+        } else {
+            withAnimation(OB.spring(280, 22)) { back() }
+        }
+    }
+
+    /// dir 1 = keep (saved), -1 = skip. Dismisses the top card and counts it.
+    private func commit(_ dir: Int) {
+        guard !flying else { return }
+        flying = true
+        if dir > 0 { saved += 1 } else { skipped += 1 }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let next = {
+            var tx = Transaction(); tx.disablesAnimations = true
+            withTransaction(tx) {
+                index += 1
+                x = Self.restX
+                hintKeep = true
+                flying = false
+            }
+        }
+        if reduceMotion { next(); return }
+        withAnimation(.easeIn(duration: 0.22)) { x = CGFloat(dir) * 560 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { next() }
     }
 
     #if DEBUG
@@ -315,10 +359,57 @@ struct OBKeepScreen: View {
         var tx = Transaction(); tx.disablesAnimations = true
         withTransaction(tx) {
             index = pin.index; x = pin.x; finger = pin.finger; hintKeep = pin.hintKeep
-            kept = (0..<pin.kept).map { OBKeepDeck.deck[$0 % OBKeepDeck.deck.count].art }
+            saved = pin.kept
+            skipped = pin.skipped
         }
     }
     #endif
+}
+
+/// Pure swipe decision for the onboarding keep card (unit-tested).
+enum OBKeepSwipe {
+    /// 1 = keep, -1 = skip, 0 = spring back.
+    static func direction(translation: CGFloat, predicted: CGFloat, commit: CGFloat) -> Int {
+        if translation >= commit || predicted >= commit * 2.5 { return 1 }
+        if translation <= -commit || predicted <= -commit * 2.5 { return -1 }
+        return 0
+    }
+}
+
+/// "3 saved · 1 skipped" tally under the onboarding deck.
+private struct OBKeepTally: View {
+    let saved: Int
+    let skipped: Int
+    @State private var bumpSaved: CGFloat = 1
+    @State private var bumpSkipped: CGFloat = 1
+
+    var body: some View {
+        HStack(spacing: 10) {
+            (Text("\(saved)").fontWeight(.bold) + Text(" saved"))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(OB.ink)
+                .padding(.vertical, 6).padding(.horizontal, 12)
+                .background(Capsule().fill(OB.lime))
+                .scaleEffect(bumpSaved)
+            (Text("\(skipped)").fontWeight(.bold) + Text(" skipped"))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(OB.paper)
+                .padding(.vertical, 6).padding(.horizontal, 12)
+                .background(Capsule().fill(OB.surface.opacity(0.86)))
+                .overlay(Capsule().strokeBorder(OB.paper.opacity(0.14), lineWidth: 1))
+                .scaleEffect(bumpSkipped)
+        }
+        .fixedSize()
+        .onChange(of: saved) { _, _ in
+            bumpSaved = 1.2
+            withAnimation(OB.spring(400, 12)) { bumpSaved = 1 }
+        }
+        .onChange(of: skipped) { _, _ in
+            bumpSkipped = 1.2
+            withAnimation(OB.spring(400, 12)) { bumpSkipped = 1 }
+        }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 private struct OBHintShift: ViewModifier {
@@ -389,105 +480,18 @@ private struct OBStamp: View {
     }
 }
 
-private struct OBPlaylistChip: View {
-    let kept: [String]
-    let bump: Int
-    @State private var scale: CGFloat = 1
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // 2×2 mosaic, newest first
-            let cells = (0..<4).map { k -> String? in kept.count - 1 - k >= 0 ? kept[kept.count - 1 - k] : nil }
-            // CSS grid quirk (auto rows in a 46pt box, 2pt gap): a row holding
-            // a cover takes 22pt of content and the free space is split evenly,
-            // so with 1–2 saved the top row is 33pt and the bottom row 11pt.
-            let c1: CGFloat = kept.count >= 1 ? 22 : 0
-            let c2: CGFloat = kept.count >= 3 ? 22 : 0
-            let free: CGFloat = 44 - c1 - c2
-            let rowH: [CGFloat] = [c1 + free / 2, c2 + free / 2]
-            VStack(spacing: 2) {
-                ForEach(0..<2, id: \.self) { r in
-                    HStack(spacing: 2) {
-                        ForEach(0..<2, id: \.self) { c in
-                            ZStack {
-                                OB.cell
-                                if let art = cells[r * 2 + c] {
-                                    OBMosaicCell(art: art, height: rowH[r]).id("\(art)\(kept.count)")
-                                }
-                            }
-                            .frame(width: 22, height: rowH[r])
-                            .clipped()
-                        }
-                    }
-                }
-            }
-            .frame(width: 46, height: 46)
-            .background(OB.graphite)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .circular))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Hidden Jams").font(.system(size: 15, weight: .semibold)).foregroundStyle(OB.paper)
-                Text("Playlist in your music app").font(.system(size: 12.5)).foregroundStyle(OB.paper).opacity(0.55)
-            }
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            (Text("\(kept.count)").fontWeight(.bold) + Text(" saved"))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(OB.ink)
-                .padding(.vertical, 6).padding(.horizontal, 12)
-                .background(Capsule().fill(OB.lime))
-                .scaleEffect(scale)
-                .fixedSize()
-        }
-        // CSS padding 10/14/10/10 plus the 1pt border (68pt tall, mosaic at x+11)
-        .padding(.leading, 11).padding(.trailing, 15).padding(.vertical, 11)
-        .background(RoundedRectangle(cornerRadius: 22, style: .circular).fill(OB.surface.opacity(0.86)))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .circular).strokeBorder(OB.paper.opacity(0.07), lineWidth: 1))
-        .onChange(of: bump) { _, _ in
-            scale = 1.35
-            withAnimation(OB.spring(400, 12)) { scale = 1 }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct OBMosaicCell: View {
-    let art: String
-    var height: CGFloat = 22
-    @State private var on = false
-    var body: some View {
-        Image(art).resizable().aspectRatio(contentMode: .fill)
-            .frame(width: 22, height: height).clipped()
-            .scaleEffect(on ? 1 : 0.4)
-            .opacity(on ? 1 : 0)
-            .onAppear { withAnimation(OB.spring(300, 18)) { on = true } }
-    }
-}
-
 // MARK: - 03 · Fewer plays. Rarer finds. (auto-playing descent)
 
 private struct OBRarityRow {
     let key: String
-    let plays: Int
-    let score: Int
-    let tier: ArtistRarity.Tier
 }
 
 struct OBRarityDemoScreen: View {
     @Environment(\.obMetrics) private var m
     @State private var rail: CGFloat = 0
-    @State private var foot = false
 
-    /// Sample numbers moved onto the app's tier cut-offs (known < 50,
-    /// emerging 50-69, rare 70-84, ultra rare 85-94, mythic 95+).
-    private static let rows: [OBRarityRow] = [
-        .init(key: "slowly", plays: 41_800_000, score: 9, tier: .known),
-        .init(key: "mesa", plays: 6_200_000, score: 56, tier: .emerging),
-        .init(key: "rosewater", plays: 480_000, score: 74, tier: .rare),
-        .init(key: "velvet", plays: 38_000, score: 88, tier: .ultraRare),
-        .init(key: "glass", plays: 412, score: 97, tier: .mythic),
-    ]
+    /// Sample tracks, most-heard to least-heard (build 93: titles only).
+    private static let rows: [OBRarityRow] = ["slowly", "mesa", "rosewater", "velvet", "glass"].map(OBRarityRow.init)
 
     var body: some View {
         OBScreen {
@@ -509,7 +513,7 @@ struct OBRarityDemoScreen: View {
                 .clipShape(RoundedRectangle(cornerRadius: 2))
                 .padding(.vertical, 6)
 
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
                     ForEach(Array(Self.rows.enumerated()), id: \.offset) { k, r in
                         OBRarityRowView(row: r, k: k, last: k == Self.rows.count - 1)
                     }
@@ -518,18 +522,15 @@ struct OBRarityDemoScreen: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 22)
 
-            OBMono(text: "Sample songs and numbers", size: 9.5)
-                .opacity(foot ? 0.55 : 0)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
         }
         .onAppear {
             withAnimation(OB.easeInOut(3.4).delay(0.5)) { rail = 1 }
-            withAnimation(.easeInOut(duration: 0.3).delay(3.9)) { foot = true }
         }
     }
 }
 
+/// Build 93 (Chris): a plain track list — artwork, title, artist. No play
+/// counts, scores, numbers, badges or dividers.
 private struct OBRarityRowView: View {
     let row: OBRarityRow
     let k: Int
@@ -539,41 +540,15 @@ private struct OBRarityRowView: View {
     var body: some View {
         let t = OBCatalog.named(row.key)
         let d = 0.55 + Double(k) * 0.7
-        HStack(spacing: 10) {
-            OBCover(art: t.art, size: 46, radius: 11)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(t.track).font(.system(size: 14, weight: .semibold)).foregroundStyle(OB.paper)
-                Text(t.artist).font(.system(size: 12)).foregroundStyle(OB.paper).opacity(0.55)
+        HStack(spacing: 12) {
+            OBCover(art: t.art, size: 44, radius: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.track).font(.system(size: 16, weight: .semibold)).foregroundStyle(Color.white)
+                Text(t.artist).font(.system(size: 14)).foregroundStyle(Color.white.opacity(0.6))
             }
             .lineLimit(1).truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(row.plays >= 1_000_000 ? String(format: "%.1fM", Double(row.plays) / 1e6)
-                                            : row.plays.formatted(.number.locale(Locale(identifier: "en_US"))))
-                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                Text("plays").font(.system(size: 10.5)).opacity(0.5)
-            }
-            .foregroundStyle(OB.paper)
-            .fixedSize()
-            VStack(spacing: 3) {
-                OBCountUp(to: Double(row.score), delay: d + 0.15, duration: 0.7)
-                    .font(OBFont.cabinet(.black, 18).monospacedDigit())
-                    .frame(height: 18)
-                Text(row.tier.label)
-                    .font(.system(size: 7.5, weight: .heavy))
-                    .tracking(0.06 * 7.5)
-                    .frame(height: 7.5)
-            }
-            .foregroundStyle(OB.ink)
-            .frame(width: 70, height: 42)
-            .background(RoundedRectangle(cornerRadius: 13, style: .circular).fill(OB.tierColor(row.tier)))
         }
-        .padding(.leading, 6).padding(.trailing, 8)
-        .frame(height: 58)
-        .background(RoundedRectangle(cornerRadius: 18, style: .circular).fill(OB.surface.opacity(0.82)))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .circular)
-            .strokeBorder(last ? OB.lime.opacity(0.75) : OB.paper.opacity(0.07), lineWidth: 1))
-        .obShadow(RoundedRectangle(cornerRadius: 18), color: last ? OB.lime.opacity(0.4) : .clear, blur: 28, spread: -4)
         .scaleEffect(on ? 1 : 0.97)
         .offset(x: on ? 0 : -24)
         .opacity(on ? 1 : 0)
@@ -582,7 +557,7 @@ private struct OBRarityRowView: View {
     }
 }
 
-// MARK: - 04 · In the mood for…
+// MARK: - 04 · Pick your genres
 
 struct OBMoodScreen: View {
     @Binding var picks: Set<String>
@@ -592,7 +567,7 @@ struct OBMoodScreen: View {
     var body: some View {
         let colors = Theme.Colors.genreColors(for: Array(picks))
         OBScreen {
-            OBDisplayTitle(markup: "In the [mood]\nfor…", size: m.displayM).obRise(0.1)
+            OBOneLineTitle(lead: OBCopy.moodTitleLead, accent: OBCopy.moodTitleAccent, size: m.displayM).obRise(0.1)
             OBSub(text: "Pick a few and we’ll dig there first. Change them any time.", maxCh: 34)
                 .padding(.top, 12).obRise(0.2)
 
@@ -651,7 +626,7 @@ private struct OBMoodPill: View {
     }
 }
 
-// MARK: - 05 · Find what the big apps won't play
+// MARK: - 05 · Connect (30-second clips headline)
 
 struct OBConnectScreen: View {
     @Environment(\.obMetrics) private var m
@@ -673,7 +648,7 @@ struct OBConnectScreen: View {
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 0) {
-                OBDisplayTitle(markup: "Find what the\nbig apps\n[won’t] play.", size: m.displayConnect).obRise(0.1)
+                OBDisplayTitle(markup: OBCopy.connectHeadline, size: m.displayConnect, autoFit: true).obRise(0.1)
                 OBSub(text: "Streaming pushes what’s trending and promoted. Connect your music and we’ll dig up what you’d never hear otherwise.",
                       maxCh: 33)
                     .padding(.top, 12).obRise(0.22)
