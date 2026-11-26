@@ -20,7 +20,7 @@ BASE = "https://api.appstoreconnect.apple.com"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 PAYWALL_FILE = os.path.join(ASSETS, "paywall-review.png")
-WRITE = MODE in ("submit", "promo", "eula", "resubmit")   # promo writes ONLY promotionalText, then exits
+WRITE = MODE in ("submit", "promo", "eula", "resubmit", "attach")   # promo writes ONLY promotionalText, then exits
 REVIEW_VIDEO = os.path.join(ASSETS, "app-review.mp4")
 NOTES_PUBKEY = os.path.join(HERE, "notes_pubkey.pem")
 AGE_ANSWERS = {"datingAndRelationships": False, "sharedLocation": False}
@@ -246,6 +246,12 @@ def encrypt_for_box(text):
     ek = pub.encrypt(k, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
     b = lambda x: base64.b64encode(x).decode()
     return _j.dumps({"ek": b(ek), "n": b(n), "ct": b(ct)})
+
+if MODE in ("attach", "attach-plan"):
+    # Attach BUILD_NUMBER to the rejected 1.6.1 version + swap the per-build notes line. No resubmit.
+    sys.path.insert(0, HERE)
+    import attach
+    attach.run(get, call, APP_ID, BUILD_NUMBER, write=(MODE == "attach")); sys.exit(0)
 
 if MODE == "resubmit":
     sys.path.insert(0, HERE)
