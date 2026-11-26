@@ -239,7 +239,9 @@ struct OBKeepScreen: View {
         let deck = OBKeepDeck.deck
         let top = deck[index % deck.count]
         let n1 = deck[(index + 1) % deck.count], n2 = deck[(index + 2) % deck.count]
-        let card = m.cqw(62)
+        // Card 62% of the width (296pt deck on a 402pt phone); on short
+        // screens (SE) it shrinks so the tally never crowds the dots/Next.
+        let card = min(m.cqw(62), max(150, m.contentHeight() - 284 - 47))
         OBScreen {
             OBDisplayTitle(markup: "Keep what\n[moves] you.", size: m.displayL).obRise(0.1)
             OBSub(text: "Swipe right to save a song to your **Hidden Jams** playlist. Swipe left to skip.")
@@ -261,7 +263,7 @@ struct OBKeepScreen: View {
                     .highPriorityGesture(drag)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 296)
+            .frame(height: card + 47)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Demo: drag right to keep a song, left to skip")
             .accessibilityValue("\(saved) saved, \(skipped) skipped")
