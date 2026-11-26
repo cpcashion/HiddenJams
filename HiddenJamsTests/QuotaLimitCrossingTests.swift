@@ -31,7 +31,8 @@ nonisolated struct QuotaLimitCrossingTests {
         var s = DiscoveryQuotaState(month: "2026-11")
         for i in 0..<49 {
             let key = DiscoveryQuotaState.appearanceKey(trackId: "t\(i)", deckID: "A", index: i)
-            #expect(s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz))
+            let r1 = s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz)
+            #expect(r1)
         }
         #expect(s.usedThisMonth == 49)
         return s
@@ -44,15 +45,18 @@ nonisolated struct QuotaLimitCrossingTests {
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 1)
         var legacy = DiscoveryQuotaState(month: "2026-11")
         for i in 0..<49 { legacy.consume(trackId: "t\(i)", isUnlimited: false, now: Self.now, timeZone: Self.tz) }
-        #expect(!legacy.consume(trackId: "t3", isUnlimited: false, now: Self.now, timeZone: Self.tz))
+        let r2 = legacy.consume(trackId: "t3", isUnlimited: false, now: Self.now, timeZone: Self.tz)
+        #expect(!r2)
         #expect(legacy.usedThisMonth == 49 && legacy.canDiscover(isUnlimited: false)) // ← the loop
 
         // New keying: the re-served card in deck B is a new card → 50.
         let key = DiscoveryQuotaState.appearanceKey(trackId: "t3", deckID: "B", index: 0)
-        #expect(s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz))
+        let r3 = s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz)
+        #expect(r3)
         #expect(s.usedThisMonth == 50)
         // Same card firing again (replay / back) still counts once.
-        #expect(!s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz))
+        let r4 = s.consume(trackId: key, isUnlimited: false, now: Self.now, timeZone: Self.tz)
+        #expect(!r4)
         #expect(s.usedThisMonth == 50)
     }
 
@@ -66,7 +70,8 @@ nonisolated struct QuotaLimitCrossingTests {
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 0)
         // Production: more cards never count, and the count never rolls back.
         for i in 0..<5 {
-            #expect(!s.consume(trackId: "x\(i)#C.\(i)", isUnlimited: false, now: Self.now, timeZone: Self.tz))
+            let r5 = s.consume(trackId: "x\(i)#C.\(i)", isUnlimited: false, now: Self.now, timeZone: Self.tz)
+            #expect(!r5)
             #expect(s.usedThisMonth == 50)
             #expect(s.paywallRequired(isUnlimited: false))
         }
@@ -76,7 +81,8 @@ nonisolated struct QuotaLimitCrossingTests {
 
     @Test func snoozeOnlyAtTheLimit() {
         var s = at49()
-        #expect(!s.snoozeLimit())
+        let r6 = s.snoozeLimit()
+        #expect(!r6)
         #expect(!s.limitSnoozed)
     }
 
@@ -86,12 +92,14 @@ nonisolated struct QuotaLimitCrossingTests {
         s.consume(trackId: "t49#A.49", isUnlimited: false, now: Self.now, timeZone: Self.tz)
         seen.append(s.usedThisMonth)
         #expect(s.paywallRequired(isUnlimited: false))
-        #expect(s.snoozeLimit())                      // "Remind me later"
+        let snoozed = s.snoozeLimit()                 // "Remind me later"
+        #expect(snoozed)
         #expect(!s.paywallRequired(isUnlimited: false))
         #expect(s.canDiscover(isUnlimited: false))
         #expect(s.batchRequestCount(defaultTarget: 50, isUnlimited: false) == 50)
         for i in 50..<53 {
-            #expect(s.consume(trackId: "t\(i)#B.\(i)", isUnlimited: false, now: Self.now, timeZone: Self.tz))
+            let r7 = s.consume(trackId: "t\(i)#B.\(i)", isUnlimited: false, now: Self.now, timeZone: Self.tz)
+            #expect(r7)
             seen.append(s.usedThisMonth)
         }
         #expect(seen == [49, 50, 51, 52, 53])
@@ -109,7 +117,7 @@ nonisolated struct QuotaLimitCrossingTests {
         #expect(!s.limitSnoozed && s.usedThisMonth == 0)
     }
 
-    @Test func legacyStoredQuotaDecodesWithoutSnooze() throws {
+    @Test @MainActor func legacyStoredQuotaDecodesWithoutSnooze() throws {
         let json = #"{"month":"2026-11","count":49,"trackIds":["a"]}"#.data(using: .utf8)!
         let q = try JSONDecoder().decode(DiscoveryQuotaManager.StoredQuota.self, from: json)
         #expect(q.count == 49 && q.snoozed == nil)
