@@ -19,6 +19,9 @@ jobs:
           j = json.loads(subprocess.check_output(['xcrun','simctl','list','-j']))
           rts = [r for r in j['runtimes'] if r.get('isAvailable') and r['identifier'].find('iOS') >= 0]
           rts.sort(key=lambda r: [int(x) for x in r['version'].split('.')])
+          # Prefer the newest general iOS runtime that has iPhones (skip device-specific runtimes).
+          def phones(r): return [d for d in j['devices'].get(r['identifier'], []) if d.get('isAvailable') and 'iPhone' in d['name']]
+          rts = [r for r in rts if len(phones(r)) >= 2] or rts
           rt = rts[-1]['identifier']
           devs = [d for d in j['devices'].get(rt, []) if d.get('isAvailable')]
           print('runtime', rt, [d['name'] for d in devs])
