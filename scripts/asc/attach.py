@@ -87,3 +87,14 @@ def run(get, call, APP_ID, BUILD_NUMBER, write):
     print("  READBACK items states:", [x["attributes"].get("state") for x in (it or {}).get("data", [])])
     v2 = get(f"/v1/appStoreVersions/{ver['id']}")
     print("  READBACK version state:", v2 and v2["data"]["attributes"].get("appStoreState"))
+    # --- Terms of Use link in every 1.6.1 description (read-only) ---
+    EULA_URL = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+    locs = get(f"/v1/appStoreVersions/{ver['id']}/appStoreVersionLocalizations", {"limit": 50})
+    for loc in (locs or {}).get("data", []):
+        print(f"  READBACK [{loc['attributes']['locale']}] Terms of Use link in description: {EULA_URL in (loc['attributes'].get('description') or '')}")
+    import base64
+    def kind(i):
+        try: return base64.urlsafe_b64decode(i + "=" * (-len(i) % 4)).decode().split("|")[1]
+        except Exception: return "?"
+    print("  READBACK items (kind 6=version, 18=subscription, 19=group):",
+          [(kind(x["id"]), x["attributes"].get("state")) for x in (it or {}).get("data", [])])
