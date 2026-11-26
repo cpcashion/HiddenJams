@@ -1,0 +1,69 @@
+name: Screens 94 (tooling, do not merge)
+
+on:
+  push:
+    branches: ['tooling/screens-94-*']
+
+jobs:
+  shoot:
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version
+      - name: Pick simulators (SE + Pro Max)
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          j = json.loads(subprocess.check_output(['xcrun','simctl','list','-j']))
+          rts = [r for r in j['runtimes'] if r.get('isAvailable') and r['identifier'].find('iOS') >= 0]
+          rts.sort(key=lambda r: [int(x) for x in r['version'].split('.')])
+          # Prefer the newest general iOS runtime that has iPhones (skip device-specific runtimes).
+          def phones(r): return [d for d in j['devices'].get(r['identifier'], []) if d.get('isAvailable') and 'iPhone' in d['name']]
+          rts = [r for r in rts if len(phones(r)) >= 2] or rts
+          rt = rts[-1]['identifier']
+          devs = [d for d in j['devices'].get(rt, []) if d.get('isAvailable')]
+          print('runtime', rt, [d['name'] for d in devs])
+          def find(pred):
+              c = [d for d in devs if pred(d['name'])]
+              return c[-1]['udid'] if c else None
+          se = find(lambda n: 'SE' in n)
+          if not se:
+              types = [t for t in j['devicetypes'] if 'iPhone-SE' in t['identifier']]
+              types.sort(key=lambda t: t['identifier'])
+              if types:
+                  try:
+                      se = subprocess.check_output(['xcrun','simctl','create','HJ iPhone SE', types[-1]['identifier'], rt]).decode().strip()
+                  except Exception as e:
+                      print('SE create failed', e)
+          if not se:
+              se = find(lambda n: n.endswith('e') and 'iPhone' in n)  # smallest current model (e.g. 16e)
+          pm = find(lambda n: 'Pro Max' in n)
+          ids = [x for x in [se, pm] if x]
+          print('using', ids)
+          open('udids.txt','w').write('\n'.join(ids) + '\n')
+          PY
+          cat udids.txt
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath dd CODE_SIGNING_ALLOWED=NO | tail -20
+      - name: Shoot
+        run: |
+          for udid in $(cat udids.txt); do
+            rm -rf HiddenJamsTests/.hjsnap-progress
+            xcrun simctl boot "$udid" || true
+            xcodebuild test-without-building -project HiddenJams.xcodeproj -scheme HiddenJams -configuration Debug \
+              -destination "id=$udid" -derivedDataPath dd \
+              -only-testing:HiddenJamsTests/OnboardingParitySnapshotTests CODE_SIGNING_ALLOWED=NO \
+              | grep -E "HJSNAP-(PNG|DEVICE|DONE|STEP CRASH|STEP GAVE)|error|Executed" || true
+            xcrun simctl shutdown "$udid" || true
+          done
+          find screens-out -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-${{ github.ref_name == 'tooling/screens-94-before' && 'before' || 'after' }}
+          path: screens-out
+          if-no-files-found: warn
