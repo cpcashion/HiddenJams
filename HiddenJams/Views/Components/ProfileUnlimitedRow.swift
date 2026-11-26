@@ -12,6 +12,7 @@
 
 import SwiftUI
 import StoreKit
+import Combine
 
 /// What the Profile row says. The name matches the App Store Connect
 /// product display name ("Hidden Jams Unlimited").
