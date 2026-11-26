@@ -365,6 +365,7 @@ struct LiquidTabBar: View {
                 LiquidTabButton(
                     activeIcon: "house.fill",
                     inactiveIcon: "house",
+                    label: "Home",
                     isSelected: selectedTab == .home
                 ) {
                     selectedTab = .home
@@ -373,6 +374,7 @@ struct LiquidTabBar: View {
                 LiquidTabButton(
                     activeIcon: "play.circle.fill",
                     inactiveIcon: "play.circle",
+                    label: "Player",
                     isSelected: selectedTab == .player
                 ) {
                     selectedTab = .player
@@ -381,6 +383,7 @@ struct LiquidTabBar: View {
                 LiquidTabButton(
                     activeIcon: "person.fill",
                     inactiveIcon: "person",
+                    label: "Profile",
                     isSelected: selectedTab == .profile
                 ) {
                     selectedTab = .profile
@@ -403,6 +406,8 @@ struct LiquidTabBar: View {
 struct LiquidTabButton: View {
     let activeIcon: String
     let inactiveIcon: String
+    /// VoiceOver name (build 94: "Profile" is in the App Review steps).
+    var label: String = ""
     let isSelected: Bool
     let action: () -> Void
     
@@ -434,6 +439,8 @@ struct LiquidTabButton: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

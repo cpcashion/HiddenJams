@@ -2,7 +2,8 @@
 //  PaywallView.swift
 //  HiddenJams
 //
-//  Presented when a free user hits the 50 discoveries/month limit.
+//  Presented when a free user hits the 50 discoveries/month limit, and
+//  (build 94) from Profile's "Hidden Jams Unlimited" row at any time.
 //  Hidden Jams Pro: $1.99/month, unlimited discoveries.
 //
 
@@ -17,6 +18,7 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var isRestoring = false
     @State private var restoreMessage: String?
+    @State private var hasAttemptedLoad = false
 
     private static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private static let privacyURL = URL(string: "https://cpcashion.github.io/HiddenJams/privacy.html")!
@@ -28,7 +30,27 @@ struct PaywallView: View {
     }
 
     var body: some View {
-        // No scrolling: the whole paywall fits the screen height.
+        // Fits the screen without scrolling where it can (Pro / Pro Max);
+        // build 94: on short screens (SE) it scrolls instead of clipping the
+        // top and pushing "Remind me later" off screen.
+        ViewThatFits(in: .vertical) {
+            paywallContent
+            ScrollView(showsIndicators: false) {
+                paywallContent
+                    .padding(.top, 12)
+            }
+        }
+        .background(Theme.Colors.spotifyBlack.ignoresSafeArea())
+        .task {
+            await subscriptionManager.loadProducts()
+            hasAttemptedLoad = true
+        }
+        .onChange(of: subscriptionManager.isPremium) { isPro in
+            if isPro { dismiss() }
+        }
+    }
+
+    private var paywallContent: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 8)
 
@@ -71,6 +93,12 @@ struct PaywallView: View {
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(Theme.Colors.textPrimary)
                 }
+                // Build 94: the subscription's App Store name, so the paywall
+                // matches "Hidden Jams Unlimited" in App Store Connect.
+                Text("\(SubscriptionProduct.monthly.displayName) · monthly subscription")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Theme.Colors.gemGold)
+                    .padding(.top, -8)
 
                 // Benefits
                 VStack(alignment: .leading, spacing: 18) {
@@ -129,6 +157,14 @@ struct PaywallView: View {
                     }
                 } else if monthlyProduct == nil && subscriptionManager.isLoading {
                     ProgressView().tint(Theme.Colors.gemGold)
+                } else if monthlyProduct == nil && hasAttemptedLoad {
+                    // Load finished without the product and without an error:
+                    // still offer a retry rather than a dead end.
+                    Button("Couldn't reach the App Store. Retry") {
+                        Task { await subscriptionManager.loadProducts() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(Theme.Colors.gemGold)
                 }
 
                 if let restoreMessage {
@@ -145,7 +181,7 @@ struct PaywallView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     Button {
                         Task { await restorePurchases() }
                     } label: {
@@ -156,9 +192,12 @@ struct PaywallView: View {
                         }
                     }
                     .disabled(isRestoring || isPurchasing)
-                    Link("Terms", destination: Self.termsURL)
-                    Link("Privacy", destination: Self.privacyURL)
+                    // Apple standard EULA + privacy policy (guideline 3.1.2).
+                    Link("Terms of Use", destination: Self.termsURL)
+                    Link("Privacy Policy", destination: Self.privacyURL)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(Theme.Colors.textSecondary)
             }
@@ -185,13 +224,6 @@ struct PaywallView: View {
             .font(.system(size: 16))
             .foregroundColor(Theme.Colors.textSecondary)
             .padding(.bottom, 20)
-        }
-        .background(Theme.Colors.spotifyBlack.ignoresSafeArea())
-        .task {
-            await subscriptionManager.loadProducts()
-        }
-        .onChange(of: subscriptionManager.isPremium) { isPro in
-            if isPro { dismiss() }
         }
     }
 

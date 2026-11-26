@@ -8,12 +8,15 @@
 //      (Home's stat pills deep-link straight to the matching one)
 //    • "Your music": saved gems + listening detail behind a tap
 //    • Playlists / Music services / Appearance / Disconnect settings
+//  Build 94: "Hidden Jams Unlimited" row right under the header, for all
+//  users (App Review 2.1(b): the subscription must be findable in-app).
 //  The old duplicate blocks (Spotify stat tiles, Top Genres chips, inline
 //  saved-gems list) were folded into the stat detail screens.
 //
 
 import SwiftUI
 import AuthenticationServices
+import StoreKit
 
 /// Screens pushed from Profile.
 enum ProfileRoute: Hashable {
@@ -54,14 +57,65 @@ struct ProfileView: View {
     @State private var confirmDiscoveryReset = false
     @ObservedObject private var discoveryQuota = DiscoveryQuotaManager.shared
 
+    /// Build 94: the always-visible "Hidden Jams Unlimited" row.
+    @ObservedObject private var subscriptions = SubscriptionManager.shared
+    @StateObject private var unlimitedRow: UnlimitedRowModel
+
     init(
         statFocus: Binding<ProfileStatFocus?> = .constant(nil),
         deckGemCount: Int = 0,
-        discoveryEngine: EnhancedHiddenGemsDiscovery? = nil
+        discoveryEngine: EnhancedHiddenGemsDiscovery? = nil,
+        unlimitedRow: UnlimitedRowModel? = nil
     ) {
         self._statFocus = statFocus
         self.deckGemCount = deckGemCount
         self.discoveryEngine = discoveryEngine
+        self._unlimitedRow = StateObject(wrappedValue: unlimitedRow ?? UnlimitedRowModel())
+    }
+
+    // MARK: - Sections
+
+    /// Profile's sections, top to bottom. Build 94: `.unlimited` comes right
+    /// after the header for EVERY user (App Review 2.1(b)): it never depends
+    /// on music service, onboarding, quota, storefront, device or build type.
+    enum ProfileSection: Hashable {
+        case header, unlimited, stats, music, playlists, services, appearance, testFlightTools, disconnect
+    }
+
+    static func sections(hasConnectedSource: Bool, showsDebugTools: Bool) -> [ProfileSection] {
+        var list: [ProfileSection] = [.header, .unlimited, .stats, .music, .playlists, .services, .appearance]
+        if showsDebugTools { list.append(.testFlightTools) }
+        if hasConnectedSource { list.append(.disconnect) }
+        return list
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: ProfileSection) -> some View {
+        switch section {
+        case .header: headerSection
+        case .unlimited: unlimitedSection
+        case .stats: statsGroup
+        case .music: musicGroup
+        case .playlists: playlistsGroup
+        case .services: servicesGroup
+        case .appearance: appearanceGroup
+        case .testFlightTools: testFlightToolsGroup
+        case .disconnect: disconnectGroup
+        }
+    }
+
+    // MARK: - Hidden Jams Unlimited
+
+    private var monthlyDisplayPrice: String? {
+        subscriptions.products.first(where: { $0.id == SubscriptionProduct.monthly.rawValue })?.displayPrice
+    }
+
+    private var unlimitedSection: some View {
+        ProfileUnlimitedRow(
+            content: UnlimitedRowContent(isPremium: subscriptions.isPremium, displayPrice: monthlyDisplayPrice)
+        ) {
+            unlimitedRow.tap(isPremium: subscriptions.isPremium)
+        }
     }
 
     var body: some View {
@@ -71,17 +125,10 @@ struct ProfileView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 28) {
-                        headerSection
-                        statsGroup
-                        musicGroup
-                        playlistsGroup
-                        servicesGroup
-                        appearanceGroup
-                        if TestFlightTools.showsDebugTools {
-                            testFlightToolsGroup
-                        }
-                        if !sourceManager.connectedSources.isEmpty {
-                            disconnectGroup
+                        ForEach(Self.sections(hasConnectedSource: !sourceManager.connectedSources.isEmpty,
+                                              showsDebugTools: TestFlightTools.showsDebugTools),
+                                id: \.self) { section in
+                            sectionView(section)
                         }
                         Spacer(minLength: 100)
                     }
@@ -98,6 +145,19 @@ struct ProfileView: View {
         .edgesIgnoringSafeArea(.bottom) // Only ignore bottom safe area for tab bar
         .onAppear { applyStatFocus() }
         .onChange(of: statFocus) { _, _ in applyStatFocus() }
+        // Build 94: same PaywallView (Subscribe + Restore Purchases) as the
+        // free-limit paywall; subscribers get Apple's manage sheet instead.
+        .sheet(isPresented: $unlimitedRow.showsPaywall) {
+            PaywallView()
+                .environmentObject(SubscriptionManager.shared)
+        }
+        .manageSubscriptionsSheet(isPresented: $unlimitedRow.showsManageSubscriptions)
+        .task {
+            // Real StoreKit price for the Unlimited row (falls back to $1.99).
+            if subscriptions.products.isEmpty && !subscriptions.isLoading {
+                await subscriptions.loadProducts()
+            }
+        }
         .task {
             if !hasLoadedData, let token = authManager.accessToken {
                 await profileDataService.fetchAllProfileData(token: token)
